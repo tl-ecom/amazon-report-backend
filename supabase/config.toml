@@ -20,6 +20,10 @@ verify_jwt = true
 [functions.sync-ads-report]
 verify_jwt = true
 
+# Amazon-Gebühren aus der Finances API. pg_cron/manuell mit service_role -> verify_jwt = true.
+[functions.sync-finances]
+verify_jwt = true
+
 [functions.get-sales-overview]
 verify_jwt = true
 
