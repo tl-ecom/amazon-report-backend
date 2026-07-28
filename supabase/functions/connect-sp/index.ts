@@ -14,6 +14,7 @@
 // werden nie geloggt und nie zurückgegeben.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { istPlattformAdmin } from "../_shared/admin.ts";
 
 const LWA_TOKEN_URL = "https://api.amazon.com/auth/o2/token";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -43,14 +44,8 @@ Deno.serve(async (req) => {
     const { data: userData, error: userErr } = await userClient.auth.getUser();
     if (userErr || !userData?.user) return json({ error: "Ungültige Session" }, 401);
 
-    const { data: tenantId, error: tErr } = await userClient.rpc("my_tenant_id");
+    const { data: myTenant, error: tErr } = await userClient.rpc("my_tenant_id");
     if (tErr) return json({ error: "Tenant-Auflösung fehlgeschlagen", detail: tErr.message }, 500);
-    if (!tenantId) {
-      return json({
-        error: "Kein Tenant zugeordnet",
-        hinweis: "Dieser Nutzer ist keinem Tenant zugewiesen (tenant_members).",
-      }, 403);
-    }
 
     // --- Eingaben ---
     const body = await req.json().catch(() => ({}));
@@ -59,6 +54,28 @@ Deno.serve(async (req) => {
     const refreshToken = str(body.refresh_token);
     const marketplaceId = str(body.marketplace_id);
     const region = str(body.region) || "eu";
+    const companyId = str(body.company_id);
+
+    const service = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    // Zieltenant: die eigene Firma — ODER, NUR als Plattform-Admin, ein gewählter
+    // Kunde (company_id). So kann der Betreiber in der Coach-Ansicht die Verbindung
+    // für den Coachee herstellen, ohne sich als dieser einloggen zu müssen.
+    let tenantId: string | null = (myTenant as string) ?? null;
+    if (companyId) {
+      if (!(await istPlattformAdmin(service, userData.user.id))) {
+        return json({ error: "Nur Admins dürfen die Verbindung für eine andere Firma herstellen." }, 403);
+      }
+      const { data: firma } = await service.from("tenants").select("id").eq("id", companyId).maybeSingle();
+      if (!firma) return json({ error: "Firma nicht gefunden." }, 404);
+      tenantId = companyId;
+    }
+    if (!tenantId) {
+      return json({
+        error: "Kein Tenant zugeordnet",
+        hinweis: "Dieser Nutzer ist keinem Tenant zugewiesen (tenant_members).",
+      }, 403);
+    }
 
     const fehlend = [
       !clientId && "client_id",
@@ -84,7 +101,6 @@ Deno.serve(async (req) => {
     }
 
     // --- 2) Secrets in den Vault (nur bei Erfolg), deterministische Namen ---
-    const service = createClient(SUPABASE_URL, SERVICE_KEY);
     const cidId = await upsertSecret(service, `sp_client_id_${tenantId}`, clientId!);
     const csecId = await upsertSecret(service, `sp_client_secret_${tenantId}`, clientSecret!);
     const rtId = await upsertSecret(service, `sp_refresh_token_${tenantId}`, refreshToken!);
