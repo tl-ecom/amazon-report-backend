@@ -24,6 +24,10 @@ verify_jwt = true
 [functions.sync-finances]
 verify_jwt = true
 
+# Brand-Analytics Search Query Report je ASIN. service_role -> verify_jwt = true.
+[functions.sync-sqp]
+verify_jwt = true
+
 [functions.get-sales-overview]
 verify_jwt = true
 
