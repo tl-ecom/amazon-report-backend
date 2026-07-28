@@ -14,6 +14,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { McpContext, rufeToolAuf, toolNamen } from "../_shared/mcp.ts";
 import { ladeVerlaufFactory } from "../_shared/verlauf.ts";
 import { asinTimeline, changeEvents, erfasseManuelleAenderung, frProdukte, setzeKontext } from "../_shared/flightrecorder.ts";
+import { bestaetigeStrategie, listeStrategien, setzeReview, strategieHistorie, verwerfeVorschlag } from "../_shared/strategie_flow.ts";
 import { experimentDetail, listeExperimente } from "../_shared/experiments.ts";
 import { pulseOverview } from "../_shared/overview.ts";
 import { diagnosenLauf, listeDiagnosen, setzeDiagnoseStatus } from "../_shared/diagnostics.ts";
@@ -212,6 +213,19 @@ Deno.serve(async (req) => {
         const r = await erfasseManuelleAenderung(service, tenantId, userData.user.id, args as any);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
+      // Strategie-Layer: Bestätigungs-Flow (nur eingeloggter Nutzer, tenant-gescoped).
+      if (action === "strategie_bestaetigen") {
+        const r = await bestaetigeStrategie(service, tenantId, userData.user.id, args as any);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "strategie_review") {
+        const r = await setzeReview(service, tenantId, userData.user.id, args as any);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "strategie_vorschlag_verwerfen") {
+        const r = await verwerfeVorschlag(service, tenantId, userData.user.id, args as any);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
       if (action === "sqp_laden") {
         const r = await anstossenSqp(service, tenantId, String((args as any)?.asin ?? ""));
         return json({ ok: true, action, tenant_id: tenantId, data: r });
@@ -307,6 +321,12 @@ Deno.serve(async (req) => {
     }
     if (resource === "fr_produkte") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await frProdukte(service, tenantId) });
+    }
+    if (resource === "strategien") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await listeStrategien(service, tenantId) });
+    }
+    if (resource === "strategie_historie") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await strategieHistorie(service, tenantId, args as any) });
     }
     if (resource === "fr_experiments") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await listeExperimente(service, tenantId, args as any) });
