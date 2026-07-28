@@ -15,6 +15,7 @@ import { McpContext, rufeToolAuf, toolNamen } from "../_shared/mcp.ts";
 import { ladeVerlaufFactory } from "../_shared/verlauf.ts";
 import { asinTimeline, changeEvents, erfasseManuelleAenderung, frProdukte, setzeKontext } from "../_shared/flightrecorder.ts";
 import { bestaetigeStrategie, listeStrategien, setzeReview, strategieHistorie, verwerfeVorschlag } from "../_shared/strategie_flow.ts";
+import { laufeStrategie, strategieUebersicht } from "../_shared/strategie_lauf.ts";
 import { experimentDetail, listeExperimente } from "../_shared/experiments.ts";
 import { pulseOverview } from "../_shared/overview.ts";
 import { diagnosenLauf, listeDiagnosen, setzeDiagnoseStatus } from "../_shared/diagnostics.ts";
@@ -226,6 +227,10 @@ Deno.serve(async (req) => {
         const r = await verwerfeVorschlag(service, tenantId, userData.user.id, args as any);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
+      if (action === "strategie_lauf") {
+        const r = await laufeStrategie(service, tenantId, userData.user.id);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
       if (action === "sqp_laden") {
         const r = await anstossenSqp(service, tenantId, String((args as any)?.asin ?? ""));
         return json({ ok: true, action, tenant_id: tenantId, data: r });
@@ -327,6 +332,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "strategie_historie") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await strategieHistorie(service, tenantId, args as any) });
+    }
+    if (resource === "strategie_uebersicht") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await strategieUebersicht(service, tenantId) });
     }
     if (resource === "fr_experiments") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await listeExperimente(service, tenantId, args as any) });
