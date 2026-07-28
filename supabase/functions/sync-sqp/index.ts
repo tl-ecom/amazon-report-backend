@@ -64,10 +64,17 @@ Deno.serve(async (req) => {
     }
     if (!documentId) return json({ ok: true, asin, zeilen: 0, hinweis: "Report DONE ohne Dokument (keine Daten)" });
 
-    // 3) Dokument laden + entpacken (GZIP-JSON)
-    const docResp = await fetch(`${SP_ENDPOINT}/reports/2021-06-30/documents/${documentId}`, { headers: { "x-amz-access-token": accessToken } });
-    const docData = await docResp.json().catch(() => ({}));
-    if (!docResp.ok) return json({ error: "getReportDocument Fehler", detail: docData }, 502);
+    // 3) Dokument laden + entpacken (GZIP-JSON). getReportDocument hat ein sehr
+    // striktes Limit (~1/min) -> bei 429 kurz warten und erneut.
+    let docData: any = null;
+    for (let versuch = 0; versuch < 3; versuch++) {
+      const dr = await fetch(`${SP_ENDPOINT}/reports/2021-06-30/documents/${documentId}`, { headers: { "x-amz-access-token": accessToken } });
+      if (dr.status === 429) { await schlaf(20000); continue; }
+      docData = await dr.json().catch(() => ({}));
+      if (!dr.ok) return json({ error: "getReportDocument Fehler", detail: docData }, 502);
+      break;
+    }
+    if (!docData) return json({ ok: false, hinweis: "getReportDocument 429 — später erneut", report_id: reportId }, 202);
     const fileResp = await fetch(docData.url);
     if (!fileResp.ok) return json({ error: `Datei-Download HTTP ${fileResp.status}` }, 502);
     let bytes: Uint8Array;
