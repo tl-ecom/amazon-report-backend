@@ -16,6 +16,7 @@ import { ladeVerlaufFactory } from "../_shared/verlauf.ts";
 import { asinTimeline, changeEvents, setzeKontext } from "../_shared/flightrecorder.ts";
 import { experimentDetail, listeExperimente } from "../_shared/experiments.ts";
 import { pulseOverview } from "../_shared/overview.ts";
+import { listeTenants, loeseFirmaAuf } from "../_shared/admin.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
 const CORS = {
@@ -48,14 +49,8 @@ Deno.serve(async (req) => {
     return json({ error: "Ungültige Session" }, 401);
   }
 
-  const { data: tenantId, error: tErr } = await userClient.rpc("my_tenant_id");
+  const { data: myTenant, error: tErr } = await userClient.rpc("my_tenant_id");
   if (tErr) return json({ error: "Tenant-Auflösung fehlgeschlagen", detail: tErr.message }, 500);
-  if (!tenantId) {
-    return json({
-      error: "Kein Tenant zugeordnet",
-      hinweis: "Dieser Nutzer ist keinem Tenant zugewiesen (tenant_members). Der Betreiber muss ihn zuordnen.",
-    }, 403);
-  }
 
   let body: any;
   try {
@@ -67,9 +62,27 @@ Deno.serve(async (req) => {
   const args: Record<string, unknown> = body?.arguments ?? {};
 
   // Datenzugriff mit service_role, aber IMMER explizit auf den aufgelösten Tenant
-  // gefiltert (service_role umgeht RLS). tenantId kommt aus my_tenant_id, nicht
-  // aus dem Body — nicht fälschbar.
+  // gefiltert (service_role umgeht RLS).
   const service = createClient(SUPABASE_URL, SERVICE_KEY);
+  const userId = userData.user.id;
+
+  // Admin-Ressource: alle Firmen für die "Kunde ansehen"-Auswahl. Die RPC gated
+  // sich selbst — Nicht-Admins bekommen eine leere Liste.
+  if (body?.resource === "admin_tenants") {
+    try {
+      return json({ ok: true, resource: "admin_tenants", data: await listeTenants(service, userId) });
+    } catch (e) {
+      return json({ error: "admin_tenants fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
+    }
+  }
+
+  // Effektive Firma auflösen: eigene, oder — NUR als Admin — die per company_id
+  // gewählte. company_id aus dem Body ist für Nicht-Admins wirkungslos.
+  const firma = await loeseFirmaAuf(service, userId, myTenant ?? null, body?.company_id);
+  if (!firma.tenant) {
+    return json({ error: firma.fehler, is_admin: firma.is_admin }, firma.code ?? 403);
+  }
+  const tenantId = firma.tenant;
 
   // --- Schreib-Aktionen (Flight Recorder: Kontext bestätigen) ---
   // Bewusst getrennt von den Read-Ressourcen und NICHT über die KI-Tools —
