@@ -56,24 +56,42 @@ export async function loescheEk(supabase: any, tenant_id: string, id: string): P
 
 interface ErtragRow { monat: string; umsatz_cents: number; einheiten: number; wareneinsatz_cents: number; einheiten_mit_ek: number }
 
-/** Monatlicher Rohertrag/Rohmarge (aus Bestelldaten + EK). */
+function r2(n: number): number { return Math.round(n * 100) / 100; }
+
+/** Monatlicher Rohertrag/Rohmarge + Gebühren + Nettogewinn.
+ * Rohertrag = Umsatz − Wareneinsatz (nur mit EK). Nettogewinn = Rohertrag + Gebühren
+ * (Gebühren sind negativ). Ads fehlen noch — also noch KEIN vollständiger Gewinn. */
 export async function ertragVerlauf(supabase: any, tenant_id: string): Promise<unknown> {
-  const { data, error } = await supabase.rpc("ertrag_monatlich", { p_tenant: tenant_id });
-  if (error) throw new Error(`ertrag_monatlich: ${error.message}`);
-  const monate = ((data ?? []) as ErtragRow[]).map((r) => {
+  const [ertragRes, finRes] = await Promise.all([
+    supabase.rpc("ertrag_monatlich", { p_tenant: tenant_id }),
+    supabase.from("finance_monatlich").select("monat, gebuehren_cents").eq("tenant_id", tenant_id),
+  ]);
+  if (ertragRes.error) throw new Error(`ertrag_monatlich: ${ertragRes.error.message}`);
+  const gebuehrMap = new Map<string, number>();
+  for (const f of finRes.data ?? []) gebuehrMap.set(f.monat, (Number(f.gebuehren_cents) || 0) / 100);
+
+  const monate = ((ertragRes.data ?? []) as ErtragRow[]).map((r) => {
     const umsatz = (Number(r.umsatz_cents) || 0) / 100;
     const wareneinsatz = (Number(r.wareneinsatz_cents) || 0) / 100;
     const einheiten = Number(r.einheiten) || 0;
     const mitEk = Number(r.einheiten_mit_ek) || 0;
+    const hatEk = mitEk > 0;
     const abdeckung = einheiten > 0 ? Math.round((mitEk / einheiten) * 1000) / 10 : null;
-    const rohertrag = Math.round((umsatz - wareneinsatz) * 100) / 100;
+    const rohertrag = hatEk ? r2(umsatz - wareneinsatz) : null;
+    const gebuehren = gebuehrMap.has(r.monat) ? r2(gebuehrMap.get(r.monat)!) : null; // signiert (negativ)
+    const nettogewinn = rohertrag != null && gebuehren != null ? r2(rohertrag + gebuehren) : null;
     return {
       monat: r.monat,
-      umsatz_bestellungen: Math.round(umsatz * 100) / 100,
-      wareneinsatz: Math.round(wareneinsatz * 100) / 100,
+      umsatz_bestellungen: r2(umsatz),
+      wareneinsatz: r2(wareneinsatz),
       rohertrag,
-      rohmarge: umsatz > 0 ? Math.round((rohertrag / umsatz) * 1000) / 10 : null,
-      ek_abdeckung: abdeckung, // % der Einheiten mit hinterlegtem EK
+      rohmarge: hatEk && umsatz > 0 && rohertrag != null ? Math.round((rohertrag / umsatz) * 1000) / 10 : null,
+      gebuehren,
+      // Umsatz − Gebühren: ehrliche Zwischenstufe (ohne EK/COGS), sobald Gebühren da.
+      umsatz_nach_gebuehren: gebuehren != null ? r2(umsatz + gebuehren) : null,
+      nettogewinn,
+      nettomarge: nettogewinn != null && umsatz > 0 ? Math.round((nettogewinn / umsatz) * 1000) / 10 : null,
+      ek_abdeckung: abdeckung,
     };
   });
   return { monate };

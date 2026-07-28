@@ -1,8 +1,13 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { ertragVerlauf, setzeEk } from "./ertrag.ts";
 
-function rpcClient(rows: unknown) {
-  return { rpc: () => Promise.resolve({ data: rows, error: null }) } as any;
+function rpcClient(rows: unknown, finance: unknown[] = []) {
+  const fin: any = {
+    select: () => fin,
+    eq: () => fin,
+    then: (res: any) => Promise.resolve({ data: finance, error: null }).then(res),
+  };
+  return { rpc: () => Promise.resolve({ data: rows, error: null }), from: () => fin } as any;
 }
 
 function upsertClient() {
@@ -25,6 +30,31 @@ Deno.test("ertragVerlauf: Rohertrag, Rohmarge und EK-Abdeckung", async () => {
   assertEquals(m.rohertrag, 600);
   assertEquals(m.rohmarge, 60);
   assertEquals(m.ek_abdeckung, 80); // 8 von 10 Einheiten mit EK
+});
+
+Deno.test("ertragVerlauf: Gebühren + Nettogewinn (Rohertrag + Gebühren)", async () => {
+  const c = rpcClient(
+    [{ monat: "2026-06", umsatz_cents: 100000, einheiten: 10, wareneinsatz_cents: 40000, einheiten_mit_ek: 10 }],
+    [{ monat: "2026-06", gebuehren_cents: -15000 }],
+  );
+  const m = (await ertragVerlauf(c, "t") as any).monate[0];
+  assertEquals(m.rohertrag, 600);
+  assertEquals(m.gebuehren, -150); // signiert
+  assertEquals(m.nettogewinn, 450); // 600 + (-150)
+  assertEquals(m.nettomarge, 45); // 450/1000
+  assertEquals(m.umsatz_nach_gebuehren, 850); // 1000 + (-150)
+});
+
+Deno.test("ertragVerlauf: ohne EK -> Rohertrag/Nettogewinn null, aber Gebühren + Umsatz−Gebühren da", async () => {
+  const c = rpcClient(
+    [{ monat: "2026-06", umsatz_cents: 100000, einheiten: 10, wareneinsatz_cents: 0, einheiten_mit_ek: 0 }],
+    [{ monat: "2026-06", gebuehren_cents: -15000 }],
+  );
+  const m = (await ertragVerlauf(c, "t") as any).monate[0];
+  assertEquals(m.rohertrag, null);
+  assertEquals(m.nettogewinn, null);
+  assertEquals(m.gebuehren, -150);
+  assertEquals(m.umsatz_nach_gebuehren, 850);
 });
 
 Deno.test("ertragVerlauf: Umsatz 0 -> Rohmarge null (keine Div/0)", async () => {
