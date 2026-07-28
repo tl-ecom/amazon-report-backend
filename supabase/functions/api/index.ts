@@ -13,6 +13,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { McpContext, rufeToolAuf, toolNamen } from "../_shared/mcp.ts";
 import { ladeVerlaufFactory } from "../_shared/verlauf.ts";
+import { asinTimeline, changeEvents, setzeKontext } from "../_shared/flightrecorder.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
 const CORS = {
@@ -61,16 +62,34 @@ Deno.serve(async (req) => {
     return json({ error: "Body ist kein JSON" }, 400);
   }
 
-  const resource: string | undefined = body?.resource;
   const args: Record<string, unknown> = body?.arguments ?? {};
-  if (!resource) {
-    return json({ error: "resource fehlt", verfuegbar: toolNamen() }, 400);
-  }
 
   // Datenzugriff mit service_role, aber IMMER explizit auf den aufgelösten Tenant
   // gefiltert (service_role umgeht RLS). tenantId kommt aus my_tenant_id, nicht
   // aus dem Body — nicht fälschbar.
   const service = createClient(SUPABASE_URL, SERVICE_KEY);
+
+  // --- Schreib-Aktionen (Flight Recorder: Kontext bestätigen) ---
+  // Bewusst getrennt von den Read-Ressourcen und NICHT über die KI-Tools —
+  // Schreiben erfolgt nur durch den eingeloggten Nutzer.
+  const action: string | undefined = body?.action;
+  if (action) {
+    try {
+      if (action === "fr_set_context") {
+        const r = await setzeKontext(service, tenantId, userData.user.id, args as any);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      return json({ error: "Unbekannte Aktion", action }, 400);
+    } catch (e) {
+      return json({ error: "Aktion fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
+    }
+  }
+
+  const resource: string | undefined = body?.resource;
+  if (!resource) {
+    return json({ error: "resource oder action fehlt", verfuegbar: toolNamen() }, 400);
+  }
+
   const ctx: McpContext = {
     ladeReport: async (reportType: string, source = "sp") => {
       const { data, error } = await service
@@ -88,6 +107,13 @@ Deno.serve(async (req) => {
   };
 
   try {
+    // Flight-Recorder-Reads (api-eigene Ressourcen, nicht über die KI-Tools).
+    if (resource === "fr_change_events") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await changeEvents(service, tenantId, args as any) });
+    }
+    if (resource === "fr_asin_timeline") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await asinTimeline(service, tenantId, args as any) });
+    }
     const ergebnis = await rufeToolAuf(resource, args, ctx);
     return json({ ok: true, resource, tenant_id: tenantId, data: ergebnis });
   } catch (e) {
