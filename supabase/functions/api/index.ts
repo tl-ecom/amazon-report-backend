@@ -16,6 +16,7 @@ import { ladeVerlaufFactory } from "../_shared/verlauf.ts";
 import { asinTimeline, changeEvents, setzeKontext } from "../_shared/flightrecorder.ts";
 import { experimentDetail, listeExperimente } from "../_shared/experiments.ts";
 import { pulseOverview } from "../_shared/overview.ts";
+import { diagnosenLauf, listeDiagnosen, setzeDiagnoseStatus } from "../_shared/diagnostics.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, listeKunden, listeTenants, loeseFirmaAuf, meinKonto } from "../_shared/admin.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
@@ -139,6 +140,14 @@ Deno.serve(async (req) => {
         const r = await setzeKontext(service, tenantId, userData.user.id, args as any);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
+      if (action === "diagnosen_aktualisieren") {
+        const r = await diagnosenLauf(service, tenantId);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "diagnose_status") {
+        const r = await setzeDiagnoseStatus(service, tenantId, String((args as any)?.id ?? ""), String((args as any)?.status ?? ""));
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
       return json({ error: "Unbekannte Aktion", action }, 400);
     } catch (e) {
       return json({ error: "Aktion fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
@@ -182,6 +191,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "pulse_overview") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await pulseOverview(service, tenantId) });
+    }
+    if (resource === "diagnosen") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await listeDiagnosen(service, tenantId) });
     }
     const ergebnis = await rufeToolAuf(resource, args, ctx);
     return json({ ok: true, resource, tenant_id: tenantId, data: ergebnis });
