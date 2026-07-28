@@ -23,6 +23,7 @@ import { ladeFeatures, zugriffErlaubt } from "../_shared/entitlements.ts";
 import { erstelleNote, listeNotes, loescheNote, setzeNoteSichtbarkeit } from "../_shared/notes.ts";
 import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
 import { produktUebersicht } from "../_shared/produkte.ts";
+import { anstossenSqp, listeSqp, sqpAsins } from "../_shared/sqp.ts";
 import { ertragVerlauf, listeEk, loescheEk, setzeEk } from "../_shared/ertrag.ts";
 import { ladeEinstellungen, setzeEinstellungen } from "../_shared/einstellungen.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, legeFirmaAn, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
@@ -207,6 +208,10 @@ Deno.serve(async (req) => {
         const r = await setzeKontext(service, tenantId, userData.user.id, args as any);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
+      if (action === "sqp_laden") {
+        const r = await anstossenSqp(service, tenantId, String((args as any)?.asin ?? ""));
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
       if (action === "diagnosen_aktualisieren") {
         const r = await diagnosenLauf(service, tenantId);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
@@ -322,6 +327,12 @@ Deno.serve(async (req) => {
     }
     if (resource === "produkt_uebersicht") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await produktUebersicht(service, tenantId, (args as any)?.tage) });
+    }
+    if (resource === "sqp_asins") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await sqpAsins(service, tenantId) });
+    }
+    if (resource === "sqp") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await listeSqp(service, tenantId, String((args as any)?.asin ?? "")) });
     }
     if (resource === "ertrag_verlauf") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await ertragVerlauf(service, tenantId) });

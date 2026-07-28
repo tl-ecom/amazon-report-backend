@@ -35,7 +35,7 @@ Deno.test("berechnet CVR + Kaufanteil", () => {
   const r = parseSqpReport(beispiel)[0];
   assertEquals(r.eigene_cvr, 18.6); // 11/59
   assertEquals(r.markt_cvr, 24.2); // 300/1240
-  assertEquals(r.kaufanteil, 3.6); // asinPurchaseShare 0.0364
+  assertEquals(r.kaufanteil, 3.7); // 11/300 aus Zählwerten
 });
 
 Deno.test("markiert dünne Datenbasis (wenig eigene Impressions/Klicks)", () => {

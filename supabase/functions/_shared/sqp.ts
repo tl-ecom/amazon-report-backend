@@ -56,9 +56,8 @@ export function parseSqpReport(report: any): SqpZeile[] {
     const marktCtrQ = quote(totalClicks, totalImpr);
     const eigeneCvrQ = quote(asinPurch, asinClicks);
     const marktCvrQ = quote(totalPurch, totalClicks);
-    const kaufanteil = typeof pur.asinPurchaseShare === "number"
-      ? Math.round(pur.asinPurchaseShare * 1000) / 10
-      : alsProzent(quote(asinPurch, totalPurch));
+    // Kaufanteil aus Zählwerten (asinPurchaseShare ist uneinheitlich skaliert).
+    const kaufanteil = alsProzent(quote(asinPurch, totalPurch));
 
     return {
       search_query: String(q.searchQuery ?? ""),
@@ -69,4 +68,42 @@ export function parseSqpReport(report: any): SqpZeile[] {
       duenn: asinImpr < DUENN_IMPRESSIONS || asinClicks < DUENN_CLICKS,
     };
   }).filter((z) => z.search_query !== "");
+}
+
+/** Gespeicherte SQP-Zeilen einer ASIN (Volumen absteigend). */
+export async function listeSqp(supabase: any, tenant_id: string, asin: string): Promise<unknown> {
+  if (!asin) return { rows: [], zeitraum: null };
+  const { data, error } = await supabase.from("sqp_rows")
+    .select("search_query, volume, eigene_ctr, markt_ctr, ctr_index, eigene_cvr, markt_cvr, cvr_index, kaufanteil, duenn, zeitraum_von, zeitraum_bis")
+    .eq("tenant_id", tenant_id).eq("asin", asin).order("volume", { ascending: false });
+  if (error) throw new Error(`sqp read: ${error.message}`);
+  const rows = data ?? [];
+  const zeitraum = rows[0] ? { von: rows[0].zeitraum_von, bis: rows[0].zeitraum_bis } : null;
+  return { rows, zeitraum };
+}
+
+/** Verkaufte ASINs (für die Auswahl) + Flag, ob schon SQP-Daten vorliegen. */
+export async function sqpAsins(supabase: any, tenant_id: string): Promise<unknown> {
+  const [ordersRes, sqpRes, asinsRes] = await Promise.all([
+    supabase.from("orders_history").select("asin, quantity").eq("tenant_id", tenant_id),
+    supabase.from("sqp_rows").select("asin").eq("tenant_id", tenant_id),
+    supabase.from("asins").select("asin, produktname").eq("tenant_id", tenant_id),
+  ]);
+  const units = new Map<string, number>();
+  for (const o of ordersRes.data ?? []) if (o.asin) units.set(o.asin, (units.get(o.asin) ?? 0) + (Number(o.quantity) || 0));
+  const mitDaten = new Set<string>((sqpRes.data ?? []).map((r: any) => String(r.asin)));
+  const titel = new Map<string, string>((asinsRes.data ?? []).map((a: any) => [String(a.asin), String(a.produktname ?? a.asin)]));
+
+  const asins = [...units.entries()].map(([asin, u]) => ({ asin, titel: titel.get(asin) ?? asin, units: u, hat_daten: mitDaten.has(asin) }));
+  for (const a of mitDaten) if (!units.has(a)) asins.push({ asin: a, titel: titel.get(a) ?? a, units: 0, hat_daten: true });
+  asins.sort((x, y) => (Number(y.hat_daten) - Number(x.hat_daten)) || (y.units - x.units));
+  return { asins };
+}
+
+/** SQP-Report für eine ASIN asynchron anstoßen (läuft ~1–2 Min im Hintergrund). */
+export async function anstossenSqp(supabase: any, tenant_id: string, asin: string): Promise<{ ok: true }> {
+  if (!asin) throw new Error("asin fehlt");
+  const { error } = await supabase.rpc("sqp_anstossen", { p_tenant: tenant_id, p_asin: asin });
+  if (error) throw new Error(`sqp_anstossen: ${error.message}`);
+  return { ok: true };
 }

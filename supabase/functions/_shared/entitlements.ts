@@ -31,6 +31,9 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   get_returns_overview: "returns",
   get_product_performance: "products",
   produkt_uebersicht: "products",
+  sqp: "sqp",
+  sqp_asins: "sqp",
+  sqp_laden: "sqp",
   coaching_notes: "notes",
   // Aktionen
   note_erstellen: "notes",
