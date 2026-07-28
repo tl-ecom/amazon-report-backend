@@ -115,6 +115,15 @@ const REPORT_KONFIG: Record<string, ReportKonfig> = {
     stableLagDays: 0,
     maxDays: 30,
   },
+  GET_FBA_FULFILLMENT_CUSTOMER_RETURNS_DATA: {
+    format: "tsv",
+    // FBA-Kundenretouren nach Retourendatum. Braucht die Rolle "Lagerbestands- und
+    // Bestellungsverfolgung" (bei e-One APPROVED). customer-comments ist Freitext
+    // vom Käufer -> als PII vor dem Speichern verworfen.
+    stableLagDays: 0,
+    maxDays: 30,
+    piiSpalten: ["customer-comments"],
+  },
   GET_FBA_MYI_UNSUPPRESSED_INVENTORY_DATA: {
     format: "tsv",
     // Momentaufnahme des FBA-Bestands, KEIN Zeitraum.
