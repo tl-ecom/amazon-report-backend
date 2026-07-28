@@ -22,6 +22,7 @@ import { generiereBrief, listeBriefs, setzeCoachNotiz } from "../_shared/brief.t
 import { ladeFeatures, zugriffErlaubt } from "../_shared/entitlements.ts";
 import { erstelleNote, listeNotes, loescheNote, setzeNoteSichtbarkeit } from "../_shared/notes.ts";
 import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
+import { ertragVerlauf, listeEk, loescheEk, setzeEk } from "../_shared/ertrag.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
@@ -197,6 +198,14 @@ Deno.serve(async (req) => {
         const r = await diagnosenLauf(service, tenantId);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
+      if (action === "ek_setzen") {
+        const r = await setzeEk(service, tenantId, String((args as any)?.asin ?? ""), (args as any)?.ek, String((args as any)?.gueltig_ab ?? ""));
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "ek_loeschen") {
+        const r = await loescheEk(service, tenantId, String((args as any)?.id ?? ""));
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
       if (action === "diagnose_status") {
         const r = await setzeDiagnoseStatus(service, tenantId, String((args as any)?.id ?? ""), String((args as any)?.status ?? ""));
         return json({ ok: true, action, tenant_id: tenantId, data: r });
@@ -293,6 +302,12 @@ Deno.serve(async (req) => {
     }
     if (resource === "kpi_verlauf") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await kpiVerlauf(service, tenantId) });
+    }
+    if (resource === "ertrag_verlauf") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await ertragVerlauf(service, tenantId) });
+    }
+    if (resource === "asin_ek") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await listeEk(service, tenantId) });
     }
     const ergebnis = await rufeToolAuf(resource, args, ctx);
     return json({ ok: true, resource, tenant_id: tenantId, data: ergebnis });
