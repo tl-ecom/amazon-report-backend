@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { ablehnenKonto, freigebenKonto, loeseFirmaAuf, meinKonto } from "./admin.ts";
+import { ablehnenKonto, freigebenKonto, ladeEin, loeseFirmaAuf, meinKonto } from "./admin.ts";
 
 // RPC-Stub: erfasst den letzten Aufruf und liefert wählbares Ergebnis/Fehler.
 function rpcStub(result: unknown, fehler: string | null = null) {
@@ -93,4 +93,53 @@ Deno.test("meinKonto entpackt die erste Zeile", async () => {
   const r = await meinKonto(client, "u");
   assertEquals(r.status, "freigegeben");
   assertEquals(r.is_admin, true);
+});
+
+// Stub für ladeEin: Admin-Prüfung (from) + Invite-API + Freigabe-RPC.
+function inviteStub(opts: { admin: boolean; inviteError?: string; newUserId?: string | null }) {
+  const calls = { invite: [] as any[], rpc: [] as any[] };
+  const client = {
+    from(table: string) {
+      return {
+        select() { return this; },
+        eq() { return this; },
+        maybeSingle: async () => ({ data: table === "platform_admins" && opts.admin ? { user_id: "u" } : null, error: null }),
+      };
+    },
+    auth: {
+      admin: {
+        inviteUserByEmail: async (email: string, options?: unknown) => {
+          calls.invite.push({ email, options });
+          return {
+            data: { user: opts.newUserId === null ? null : { id: opts.newUserId ?? "neu" } },
+            error: opts.inviteError ? { message: opts.inviteError } : null,
+          };
+        },
+      },
+    },
+    rpc: async (name: string, args: unknown) => {
+      calls.rpc.push({ name, args });
+      return { data: null, error: null };
+    },
+  } as any;
+  return { client, calls };
+}
+
+Deno.test("ladeEin weist Nicht-Admin ab", async () => {
+  const { client } = inviteStub({ admin: false });
+  await assertRejects(() => ladeEin(client, "u", "x@y.de"), Error, "nicht autorisiert");
+});
+
+Deno.test("ladeEin lädt ein und gibt das Konto direkt frei", async () => {
+  const { client, calls } = inviteStub({ admin: true, newUserId: "neu-id" });
+  await ladeEin(client, "admin", "neu@kunde.de", "Kundenfirma");
+  assertEquals(calls.invite[0].email, "neu@kunde.de");
+  assertEquals(calls.rpc[0].name, "admin_konto_freigeben");
+  assertEquals((calls.rpc[0].args as any).p_user_id, "neu-id");
+  assertEquals((calls.rpc[0].args as any).p_firmenname, "Kundenfirma");
+});
+
+Deno.test("ladeEin wirft bei Invite-Fehler", async () => {
+  const { client } = inviteStub({ admin: true, inviteError: "already registered" });
+  await assertRejects(() => ladeEin(client, "u", "dup@x.de"), Error, "invite");
 });

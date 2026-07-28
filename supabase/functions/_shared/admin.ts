@@ -55,6 +55,33 @@ export async function ablehnenKonto(
 }
 
 /**
+ * Direkte Einladung: verschickt eine Supabase-Invite-Mail (Nutzer setzt sein
+ * Passwort über den bestehenden `type=invite`-Flow) und gibt das Konto SOFORT frei
+ * — eine Einladung ist ja bereits eine bewusste Freigabe (kein "wartend"-Umweg).
+ * Braucht die Admin-Auth-API, deshalb explizite Admin-Prüfung statt RPC-Self-Gate.
+ */
+export async function ladeEin(
+  supabase: any, callerId: string, email: string, firmenname?: string | null,
+): Promise<{ ok: true; email: string }> {
+  if (!(await istPlattformAdmin(supabase, callerId))) {
+    throw new Error("nicht autorisiert");
+  }
+  const { data, error } = await supabase.auth.admin.inviteUserByEmail(email, {
+    data: firmenname ? { firmenname } : undefined,
+  });
+  if (error) throw new Error(`invite: ${error.message}`);
+
+  const neu = data?.user;
+  if (neu?.id) {
+    // Direkt freigeben -> legt Firma + Mitgliedschaft an, Status = freigegeben.
+    await supabase.rpc("admin_konto_freigeben", {
+      p_caller: callerId, p_user_id: neu.id, p_firmenname: firmenname ?? null,
+    });
+  }
+  return { ok: true, email };
+}
+
+/**
  * Löst die effektiv anzuzeigende Firma auf.
  *  - Ohne company_id: eigene Firma (myTenant).
  *  - Mit company_id: NUR erlaubt, wenn der Nutzer Plattform-Admin ist UND der

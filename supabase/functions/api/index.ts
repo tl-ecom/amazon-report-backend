@@ -16,7 +16,7 @@ import { ladeVerlaufFactory } from "../_shared/verlauf.ts";
 import { asinTimeline, changeEvents, setzeKontext } from "../_shared/flightrecorder.ts";
 import { experimentDetail, listeExperimente } from "../_shared/experiments.ts";
 import { pulseOverview } from "../_shared/overview.ts";
-import { ablehnenKonto, freigebenKonto, listeKunden, listeTenants, loeseFirmaAuf, meinKonto } from "../_shared/admin.ts";
+import { ablehnenKonto, freigebenKonto, ladeEin, listeKunden, listeTenants, loeseFirmaAuf, meinKonto } from "../_shared/admin.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
 const CORS = {
@@ -106,6 +106,18 @@ Deno.serve(async (req) => {
       return json({ ok: true, action: body.action, data: r });
     } catch (e) {
       return json({ error: "Aktion fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
+    }
+  }
+
+  // Direkte Einladung: Admin lädt jemanden per E-Mail ein (Invite-Mail + Sofort-Freigabe).
+  if (body?.action === "admin_einladen") {
+    const email = String((args as any)?.email ?? "").trim();
+    if (!email) return json({ error: "email fehlt" }, 400);
+    try {
+      const r = await ladeEin(service, userId, email, (args as any)?.firmenname);
+      return json({ ok: true, action: body.action, data: r });
+    } catch (e) {
+      return json({ error: "Einladung fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
     }
   }
 
