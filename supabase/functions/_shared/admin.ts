@@ -54,6 +54,24 @@ export async function ablehnenKonto(
   return { ok: true };
 }
 
+/** Tarif-Matrix lesen (Admin): welche Funktion in welchem Tarif aktiv ist. */
+export async function listeTarifFeatures(supabase: any, callerId: string): Promise<unknown> {
+  const { data, error } = await supabase.rpc("admin_tarif_features", { p_caller: callerId });
+  if (error) throw new Error(`admin_tarif_features: ${error.message}`);
+  return { tarife: data ?? [] };
+}
+
+/** Ein Feature eines Tarifs an-/ausschalten (Admin). RPC self-gated + Key-Guard. */
+export async function setzeTarifFeature(
+  supabase: any, callerId: string, tarif: string, feature: string, enabled: boolean,
+): Promise<{ ok: true }> {
+  const { error } = await supabase.rpc("admin_setze_tarif_feature", {
+    p_caller: callerId, p_tarif: tarif, p_feature: feature, p_enabled: enabled,
+  });
+  if (error) throw new Error(`admin_setze_tarif_feature: ${error.message}`);
+  return { ok: true };
+}
+
 /** Tarif/Mitgliedstyp einer Firma setzen (Admin). RPC self-gated auf platform_admins. */
 export async function setzeTarif(
   supabase: any, callerId: string, tenantId: string, tarif: string,

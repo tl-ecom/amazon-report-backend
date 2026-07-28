@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { ablehnenKonto, freigebenKonto, ladeEin, loeseFirmaAuf, meinKonto, setzeTarif } from "./admin.ts";
+import { ablehnenKonto, freigebenKonto, ladeEin, listeTarifFeatures, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "./admin.ts";
 
 // RPC-Stub: erfasst den letzten Aufruf und liefert wählbares Ergebnis/Fehler.
 function rpcStub(result: unknown, fehler: string | null = null) {
@@ -158,4 +158,18 @@ Deno.test("setzeTarif reicht caller/tenant/tarif an die RPC durch", async () => 
 Deno.test("setzeTarif wirft bei RPC-Fehler (z. B. ungültiger Tarif)", async () => {
   const { client } = rpcStub(null, "ungültiger Tarif");
   await assertRejects(() => setzeTarif(client, "a", "t", "bogus"), Error, "admin_setze_tarif");
+});
+
+Deno.test("listeTarifFeatures gibt die Tarife zurück", async () => {
+  const { client } = rpcStub([{ tarif: "premium", features: { diagnosen: true } }]);
+  const r = await listeTarifFeatures(client, "u") as any;
+  assertEquals(r.tarife.length, 1);
+  assertEquals(r.tarife[0].tarif, "premium");
+});
+
+Deno.test("setzeTarifFeature reicht tarif/feature/enabled an die RPC durch", async () => {
+  const { client, calls } = rpcStub(null);
+  await setzeTarifFeature(client, "admin-id", "vip", "tasks", true);
+  assertEquals(calls[0].name, "admin_setze_tarif_feature");
+  assertEquals(calls[0].args, { p_caller: "admin-id", p_tarif: "vip", p_feature: "tasks", p_enabled: true });
 });

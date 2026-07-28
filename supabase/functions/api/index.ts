@@ -19,7 +19,7 @@ import { pulseOverview } from "../_shared/overview.ts";
 import { diagnosenLauf, listeDiagnosen, setzeDiagnoseStatus } from "../_shared/diagnostics.ts";
 import { erstelleTask, listeTasks, setzeTaskStatus, taskAusDiagnose } from "../_shared/tasks.ts";
 import { generiereBrief, listeBriefs, setzeCoachNotiz } from "../_shared/brief.ts";
-import { ablehnenKonto, freigebenKonto, ladeEin, listeKunden, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif } from "../_shared/admin.ts";
+import { ablehnenKonto, freigebenKonto, ladeEin, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
 const CORS = {
@@ -109,6 +109,28 @@ Deno.serve(async (req) => {
       return json({ ok: true, action: body.action, data: r });
     } catch (e) {
       return json({ error: "Aktion fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
+    }
+  }
+
+  // Tarif-Matrix lesen (Admin).
+  if (body?.resource === "tarif_features") {
+    try {
+      return json({ ok: true, resource: "tarif_features", data: await listeTarifFeatures(service, userId) });
+    } catch (e) {
+      return json({ error: "tarif_features fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
+    }
+  }
+
+  // Ein Feature eines Tarifs schalten (Admin).
+  if (body?.action === "admin_tarif_feature") {
+    const tarif = String((args as any)?.tarif ?? "");
+    const feature = String((args as any)?.feature ?? "");
+    if (!tarif || !feature) return json({ error: "tarif/feature fehlt" }, 400);
+    try {
+      const r = await setzeTarifFeature(service, userId, tarif, feature, Boolean((args as any)?.enabled));
+      return json({ ok: true, action: body.action, data: r });
+    } catch (e) {
+      return json({ error: "Feature setzen fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
     }
   }
 
