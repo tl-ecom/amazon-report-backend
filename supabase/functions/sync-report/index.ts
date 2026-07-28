@@ -36,6 +36,7 @@ import {
 import { entferneSpalten, parseTsvBytes, pruefeFlatFile } from "../_shared/tsv.ts";
 import { schreibeVerlauf } from "../_shared/history.ts";
 import { schreibeSnapshots } from "../_shared/snapshots.ts";
+import { laufeChangeEngine } from "../_shared/changeengine.ts";
 
 const SP_ENDPOINT = "https://sellingpartnerapi-eu.amazon.com";
 const DEFAULT_REPORT_TYPE = "GET_SALES_AND_TRAFFIC_REPORT";
@@ -481,6 +482,14 @@ Deno.serve(async (req) => {
       return json({ error: "Snapshot-Schreiben fehlgeschlagen", detail: snapshot.fehler }, 500);
     }
 
+    // Change-Engine: aus den frischen Snapshots automatisch Change Events ableiten.
+    // NICHT-fatal: der Snapshot ist bereits sicher gespeichert; ein Engine-Fehler
+    // ist idempotent nachholbar (Dedup) und darf den Sync nicht kippen.
+    let changeEngine: { paare: number; kandidaten: number; eingefuegt: number; fehler?: string } | null = null;
+    if (snapshot.tabelle === "asin_snapshots") {
+      changeEngine = await laufeChangeEngine(supabase, tenant_id, dataTimestamp.slice(0, 10));
+    }
+
     await supabase
       .from("report_jobs")
       .update({
@@ -514,6 +523,7 @@ Deno.serve(async (req) => {
       history_only: historyOnly,
       verlauf: { tabelle: verlauf.tabelle, zeilen: verlauf.zeilen },
       snapshot: { asins: snapshot.asins, snapshots: snapshot.snapshots },
+      change_engine: changeEngine,
       zeitraum: { von: spec.dataStartTime ?? null, bis: spec.dataEndTime ?? null },
       // Nur bei Flat-File-Reports gefüllt:
       ...(p?.format === "tsv"
