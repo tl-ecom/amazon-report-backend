@@ -23,6 +23,7 @@ import { ladeFeatures, zugriffErlaubt } from "../_shared/entitlements.ts";
 import { erstelleNote, listeNotes, loescheNote, setzeNoteSichtbarkeit } from "../_shared/notes.ts";
 import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
 import { ertragVerlauf, listeEk, loescheEk, setzeEk } from "../_shared/ertrag.ts";
+import { ladeEinstellungen, setzeEinstellungen } from "../_shared/einstellungen.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
@@ -206,6 +207,10 @@ Deno.serve(async (req) => {
         const r = await loescheEk(service, tenantId, String((args as any)?.id ?? ""));
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
+      if (action === "einstellungen_setzen") {
+        const r = await setzeEinstellungen(service, tenantId, args as any);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
       if (action === "diagnose_status") {
         const r = await setzeDiagnoseStatus(service, tenantId, String((args as any)?.id ?? ""), String((args as any)?.status ?? ""));
         return json({ ok: true, action, tenant_id: tenantId, data: r });
@@ -308,6 +313,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "asin_ek") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await listeEk(service, tenantId) });
+    }
+    if (resource === "einstellungen") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await ladeEinstellungen(service, tenantId) });
     }
     const ergebnis = await rufeToolAuf(resource, args, ctx);
     return json({ ok: true, resource, tenant_id: tenantId, data: ergebnis });

@@ -22,6 +22,8 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   asin_ek: "verlauf",
   ek_setzen: "verlauf",
   ek_loeschen: "verlauf",
+  einstellungen: "verlauf",
+  einstellungen_setzen: "verlauf",
   get_sales_overview: "sales",
   get_orders_overview: "orders",
   get_listings_overview: "listings",
