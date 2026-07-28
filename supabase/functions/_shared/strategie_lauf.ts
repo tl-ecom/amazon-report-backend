@@ -94,8 +94,12 @@ function iso(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-/** Liest asins + produkt_uebersicht (aktuelles & vorheriges 30-Tage-Fenster) und
- *  baut je ASIN einen Snapshot. */
+/**
+ * Liest produkt_uebersicht (aktuelles & vorheriges 30-Tage-Fenster) und baut
+ * Snapshots — aber NUR für RELEVANTE ASINs: solche mit Umsatz im Fenster ODER
+ * mit bereits fester Rolle. Der Katalog kann Tausende Karteileichen enthalten
+ * (e-One: 1562 ASINs, ~4 mit Umsatz); die Strategie betrifft nur, was läuft.
+ */
 async function ladeSnapshots(
   supabase: any,
   tenant_id: string,
@@ -106,14 +110,16 @@ async function ladeSnapshots(
   const prevVon = iso(jetzt - 59 * TAG);
   const prevBis = iso(jetzt - 30 * TAG);
 
-  const [asinsRes, curRes, prevRes] = await Promise.all([
+  const [asinsRes, curRes, prevRes, aktivRes] = await Promise.all([
     supabase.from("asins").select("asin, produktname, erstmals_gesehen").eq("tenant_id", tenant_id),
     supabase.rpc("produkt_uebersicht", { p_tenant: tenant_id, p_von: curVon, p_bis: curBis }),
     supabase.rpc("produkt_uebersicht", { p_tenant: tenant_id, p_von: prevVon, p_bis: prevBis }),
+    supabase.from("asin_strategien").select("asin").eq("tenant_id", tenant_id).is("gueltig_bis", null),
   ]);
   if (asinsRes.error) throw new Error(`asins: ${asinsRes.error.message}`);
   if (curRes.error) throw new Error(`produkt_uebersicht: ${curRes.error.message}`);
   if (prevRes.error) throw new Error(`produkt_uebersicht(prev): ${prevRes.error.message}`);
+  if (aktivRes.error) throw new Error(`asin_strategien: ${aktivRes.error.message}`);
 
   const cur = new Map<string, any>();
   for (const r of curRes.data ?? []) cur.set(r.asin, r);
@@ -121,23 +127,34 @@ async function ladeSnapshots(
   for (const r of prevRes.data ?? []) prev.set(r.asin, (Number(r.umsatz_cents) || 0) / 100);
   const portfolio = [...cur.values()].reduce((s, r) => s + (Number(r.umsatz_cents) || 0) / 100, 0);
 
+  // Stammdaten (Name, Produktalter) als Nachschlage-Map — nicht als Snapshot-Basis.
+  const stamm = new Map<string, { name: string | null; erstmals: string | null }>();
+  for (const a of asinsRes.data ?? []) {
+    stamm.set(a.asin, { name: a.produktname ?? null, erstmals: a.erstmals_gesehen ? String(a.erstmals_gesehen).slice(0, 10) : null });
+  }
+
+  // Relevante ASINs = Umsatz im Fenster ∪ bereits zugeordnet.
+  const relevant = new Set<string>(cur.keys());
+  for (const z of aktivRes.data ?? []) relevant.add(z.asin);
+
   const namen = new Map<string, string | null>();
   const snapshots: AsinSnapshot[] = [];
-  for (const a of asinsRes.data ?? []) {
-    namen.set(a.asin, a.produktname ?? null);
-    const c = cur.get(a.asin);
+  for (const asin of relevant) {
+    const st = stamm.get(asin) ?? { name: null, erstmals: null };
+    namen.set(asin, st.name);
+    const c = cur.get(asin);
     const umsatz = c ? (Number(c.umsatz_cents) || 0) / 100 : 0;
     const einheiten = c ? Number(c.einheiten) || 0 : 0;
     const hatEk = c ? (Number(c.einheiten_mit_ek) || 0) > 0 : false;
     const rohertrag = hatEk ? umsatz - (Number(c.wareneinsatz_cents) || 0) / 100 : null;
     snapshots.push(baueSnapshot({
-      asin: a.asin,
-      produktname: a.produktname ?? null,
-      erstmals_gesehen: a.erstmals_gesehen ? String(a.erstmals_gesehen).slice(0, 10) : null,
+      asin,
+      produktname: st.name,
+      erstmals_gesehen: st.erstmals,
       umsatz: Math.round(umsatz * 100) / 100,
       einheiten,
       rohertrag: rohertrag == null ? null : Math.round(rohertrag * 100) / 100,
-      umsatz_vorperiode: prev.has(a.asin) ? prev.get(a.asin)! : null,
+      umsatz_vorperiode: prev.has(asin) ? prev.get(asin)! : null,
       portfolio_umsatz: portfolio,
     }, curBis));
   }
