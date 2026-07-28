@@ -17,6 +17,7 @@ import { asinTimeline, changeEvents, setzeKontext } from "../_shared/flightrecor
 import { experimentDetail, listeExperimente } from "../_shared/experiments.ts";
 import { pulseOverview } from "../_shared/overview.ts";
 import { diagnosenLauf, listeDiagnosen, setzeDiagnoseStatus } from "../_shared/diagnostics.ts";
+import { erstelleTask, listeTasks, setzeTaskStatus, taskAusDiagnose } from "../_shared/tasks.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, listeKunden, listeTenants, loeseFirmaAuf, meinKonto } from "../_shared/admin.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
@@ -148,6 +149,18 @@ Deno.serve(async (req) => {
         const r = await setzeDiagnoseStatus(service, tenantId, String((args as any)?.id ?? ""), String((args as any)?.status ?? ""));
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
+      if (action === "task_erstellen") {
+        const r = await erstelleTask(service, tenantId, userData.user.id, args as any);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "task_aus_diagnose") {
+        const r = await taskAusDiagnose(service, tenantId, userData.user.id, String((args as any)?.diagnose_id ?? ""));
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "task_status") {
+        const r = await setzeTaskStatus(service, tenantId, String((args as any)?.id ?? ""), String((args as any)?.status ?? ""));
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
       return json({ error: "Unbekannte Aktion", action }, 400);
     } catch (e) {
       return json({ error: "Aktion fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
@@ -194,6 +207,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "diagnosen") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await listeDiagnosen(service, tenantId) });
+    }
+    if (resource === "tasks") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await listeTasks(service, tenantId) });
     }
     const ergebnis = await rufeToolAuf(resource, args, ctx);
     return json({ ok: true, resource, tenant_id: tenantId, data: ergebnis });
