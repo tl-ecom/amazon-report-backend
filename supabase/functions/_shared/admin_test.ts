@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { ablehnenKonto, freigebenKonto, ladeEin, loeseFirmaAuf, meinKonto } from "./admin.ts";
+import { ablehnenKonto, freigebenKonto, ladeEin, loeseFirmaAuf, meinKonto, setzeTarif } from "./admin.ts";
 
 // RPC-Stub: erfasst den letzten Aufruf und liefert wählbares Ergebnis/Fehler.
 function rpcStub(result: unknown, fehler: string | null = null) {
@@ -142,4 +142,20 @@ Deno.test("ladeEin lädt ein und gibt das Konto direkt frei", async () => {
 Deno.test("ladeEin wirft bei Invite-Fehler", async () => {
   const { client } = inviteStub({ admin: true, inviteError: "already registered" });
   await assertRejects(() => ladeEin(client, "u", "dup@x.de"), Error, "invite");
+});
+
+Deno.test("setzeTarif ohne tenant_id wirft", async () => {
+  await assertRejects(() => setzeTarif(rpcStub(null).client, "a", "", "vip"), Error, "tenant_id");
+});
+
+Deno.test("setzeTarif reicht caller/tenant/tarif an die RPC durch", async () => {
+  const { client, calls } = rpcStub(null);
+  await setzeTarif(client, "admin-id", "tenant-id", "coaching");
+  assertEquals(calls[0].name, "admin_setze_tarif");
+  assertEquals(calls[0].args, { p_caller: "admin-id", p_tenant_id: "tenant-id", p_tarif: "coaching" });
+});
+
+Deno.test("setzeTarif wirft bei RPC-Fehler (z. B. ungültiger Tarif)", async () => {
+  const { client } = rpcStub(null, "ungültiger Tarif");
+  await assertRejects(() => setzeTarif(client, "a", "t", "bogus"), Error, "admin_setze_tarif");
 });

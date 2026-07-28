@@ -19,7 +19,7 @@ import { pulseOverview } from "../_shared/overview.ts";
 import { diagnosenLauf, listeDiagnosen, setzeDiagnoseStatus } from "../_shared/diagnostics.ts";
 import { erstelleTask, listeTasks, setzeTaskStatus, taskAusDiagnose } from "../_shared/tasks.ts";
 import { generiereBrief, listeBriefs, setzeCoachNotiz } from "../_shared/brief.ts";
-import { ablehnenKonto, freigebenKonto, ladeEin, listeKunden, listeTenants, loeseFirmaAuf, meinKonto } from "../_shared/admin.ts";
+import { ablehnenKonto, freigebenKonto, ladeEin, listeKunden, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif } from "../_shared/admin.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
 const CORS = {
@@ -109,6 +109,18 @@ Deno.serve(async (req) => {
       return json({ ok: true, action: body.action, data: r });
     } catch (e) {
       return json({ error: "Aktion fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
+    }
+  }
+
+  // Tarif eines Kunden setzen (Admin). Früh, unabhängig von der Tenant-Auflösung.
+  if (body?.action === "admin_setze_tarif") {
+    const tid = String((args as any)?.tenant_id ?? "");
+    if (!tid) return json({ error: "tenant_id fehlt" }, 400);
+    try {
+      const r = await setzeTarif(service, userId, tid, String((args as any)?.tarif ?? ""));
+      return json({ ok: true, action: body.action, data: r });
+    } catch (e) {
+      return json({ error: "Tarif setzen fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
     }
   }
 

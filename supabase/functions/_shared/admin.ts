@@ -54,6 +54,18 @@ export async function ablehnenKonto(
   return { ok: true };
 }
 
+/** Tarif/Mitgliedstyp einer Firma setzen (Admin). RPC self-gated auf platform_admins. */
+export async function setzeTarif(
+  supabase: any, callerId: string, tenantId: string, tarif: string,
+): Promise<{ ok: true }> {
+  if (!tenantId) throw new Error("tenant_id fehlt");
+  const { error } = await supabase.rpc("admin_setze_tarif", {
+    p_caller: callerId, p_tenant_id: tenantId, p_tarif: tarif,
+  });
+  if (error) throw new Error(`admin_setze_tarif: ${error.message}`);
+  return { ok: true };
+}
+
 /**
  * Direkte Einladung: verschickt eine Supabase-Invite-Mail (Nutzer setzt sein
  * Passwort über den bestehenden `type=invite`-Flow) und gibt das Konto SOFORT frei
