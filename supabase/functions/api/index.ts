@@ -16,7 +16,7 @@ import { ladeVerlaufFactory } from "../_shared/verlauf.ts";
 import { asinTimeline, changeEvents, setzeKontext } from "../_shared/flightrecorder.ts";
 import { experimentDetail, listeExperimente } from "../_shared/experiments.ts";
 import { pulseOverview } from "../_shared/overview.ts";
-import { listeTenants, loeseFirmaAuf } from "../_shared/admin.ts";
+import { ablehnenKonto, freigebenKonto, listeKunden, listeTenants, loeseFirmaAuf, meinKonto } from "../_shared/admin.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
 const CORS = {
@@ -73,6 +73,39 @@ Deno.serve(async (req) => {
       return json({ ok: true, resource: "admin_tenants", data: await listeTenants(service, userId) });
     } catch (e) {
       return json({ error: "admin_tenants fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
+    }
+  }
+  if (body?.resource === "admin_kunden") {
+    try {
+      return json({ ok: true, resource: "admin_kunden", data: await listeKunden(service, userId) });
+    } catch (e) {
+      return json({ error: "admin_kunden fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
+    }
+  }
+
+  // Eigener Konto-Status: MUSS vor der Tenant-Auflösung stehen, denn ein wartendes
+  // Konto hat noch keinen Tenant und würde sonst mit 403 abgewiesen.
+  if (body?.resource === "mein_konto") {
+    try {
+      return json({ ok: true, resource: "mein_konto", data: await meinKonto(service, userId) });
+    } catch (e) {
+      return json({ error: "mein_konto fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
+    }
+  }
+
+  // Admin-Freigabe/Ablehnung: ebenfalls FRÜH — ein Admin ohne eigene Firma würde
+  // sonst an der Tenant-Auflösung (409 "Bitte Firma wählen") hängenbleiben, bevor
+  // er überhaupt jemanden freigeben kann. Die RPC self-gated auf platform_admins.
+  if (body?.action === "admin_konto_freigeben" || body?.action === "admin_konto_ablehnen") {
+    const zielUser = String((args as any)?.user_id ?? "");
+    if (!zielUser) return json({ error: "user_id fehlt" }, 400);
+    try {
+      const r = body.action === "admin_konto_freigeben"
+        ? await freigebenKonto(service, userId, zielUser, (args as any)?.firmenname)
+        : await ablehnenKonto(service, userId, zielUser);
+      return json({ ok: true, action: body.action, data: r });
+    } catch (e) {
+      return json({ error: "Aktion fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
     }
   }
 
