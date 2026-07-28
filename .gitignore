@@ -1,0 +1,27 @@
+# Secrets & Umgebung
+.env
+.env.local
+*.key
+*.pem
+
+# Supabase lokale Artefakte
+supabase/.branches
+supabase/.temp
+.supabase
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Node
+node_modules/
+
+# Google-Drive-Sync-Temp (der Ordner wird über Drive gespiegelt)
+.tmp.drivedownload/
+.tmp.driveupload/

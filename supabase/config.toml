@@ -1,0 +1,52 @@
+# Minimale Supabase-Projektkonfiguration.
+# project_id wird beim `supabase link` gesetzt/überschrieben.
+project_id = "amazon-report-backend"
+
+[functions.get-access-token]
+verify_jwt = true
+
+[functions.request-report]
+verify_jwt = true
+
+[functions.check-report]
+verify_jwt = true
+
+[functions.fetch-report]
+verify_jwt = true
+
+[functions.sync-report]
+verify_jwt = true
+
+[functions.sync-ads-report]
+verify_jwt = true
+
+[functions.get-sales-overview]
+verify_jwt = true
+
+[functions.get-orders-overview]
+verify_jwt = true
+
+# MCP-Server: authentifiziert per eigenem Bearer-Token (mcp_tokens), NICHT per
+# Supabase-JWT. Deshalb verify_jwt = false — die Auth macht die Function selbst.
+[functions.mcp]
+verify_jwt = false
+
+# Web-Read-Endpunkt fürs Frontend: Supabase-Session-JWT. verify_jwt = true, damit
+# Supabase die Session validiert; den Tenant leitet die Function via my_tenant_id ab.
+[functions.api]
+verify_jwt = true
+
+# Erst-Connect eines Sellers (SP-API Self-Auth): eingeloggter Nutzer reicht seine
+# eigenen Credentials ein. Session-JWT, Tenant via my_tenant_id.
+[functions.connect-sp]
+verify_jwt = true
+
+# Adapter für MCP-Clients ohne Custom-Header (z. B. ChatGPT): Token aus URL-Query
+# -> Bearer-Header an mcp. Auth macht mcp selbst -> verify_jwt = false.
+[functions.mcp-url]
+verify_jwt = false
+
+# Backfill-Orchestrator: verarbeitet einen History-Chunk pro Aufruf. Wird nur vom
+# pg_cron-Treiber mit service_role aufgerufen -> verify_jwt = true.
+[functions.backfill]
+verify_jwt = true

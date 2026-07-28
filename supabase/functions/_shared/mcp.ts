@@ -1,0 +1,347 @@
+// mcp.ts — protokoll-stabiler Kern des MCP-Servers (JSON-RPC 2.0).
+//
+// Reines Modul: kein Netz, keine DB. Der Zugriff auf report_data wird als
+// `ladeReport`-Funktion INJIZIERT (ctx.ladeReport). Damit ist der ganze
+// Dispatch unit-testbar, ohne Supabase.
+//
+// STATELESS mit Absicht: kein initialize-Handshake-Zwang, keine Session-ID.
+// Die MCP-Spec bewegt sich genau dorthin (Release Candidate 2026-07-28 entfernt
+// Session-IDs), und Edge Functions sind pro Aufruf ohnehin zustandslos. Jede
+// JSON-RPC-Request steht für sich.
+//
+// Die eigentliche Rechenlogik kommt aus metrics.ts / orders.ts — hier wird NICHT
+// neu gerechnet, nur als MCP-Tool exponiert (so wie es die Architektur vorsieht).
+
+import { baueOverview } from "./metrics.ts";
+import { baueOrdersOverview } from "./orders.ts";
+import { baueListingsOverview } from "./listings.ts";
+import { baueProductPerformance, Quelle } from "./product.ts";
+import { baueReturnsOverview } from "./returns.ts";
+import { baueAdsOverview } from "./ads.ts";
+
+// Vom Server nach außen gemeldete Protokollversionen (neueste zuerst).
+// Beim initialize wird die vom Client angeforderte zurückgespiegelt, wenn wir
+// sie kennen — sonst unsere neueste.
+const UNTERSTUETZTE_VERSIONEN = ["2025-11-25", "2025-06-18", "2025-03-26"];
+const SERVER_INFO = { name: "amazon-report-backend", version: "0.1.0" };
+
+const SALES_TYPE = "GET_SALES_AND_TRAFFIC_REPORT";
+const ORDERS_TYPE = "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL";
+const LISTINGS_TYPE = "GET_MERCHANT_LISTINGS_ALL_DATA";
+const RETURNS_TYPE = "GET_FLAT_FILE_RETURNS_DATA_BY_RETURN_DATE";
+
+export interface ReportRow {
+  payload: unknown;
+  data_timestamp: string;
+  is_provisional: boolean;
+}
+
+export interface McpContext {
+  /**
+   * Liest die is_latest-Zeile eines Report-Typs für DIESEN Tenant. null = keine
+   * Daten. source default 'sp'; 'ads' für die Advertising-Reports.
+   */
+  ladeReport: (reportType: string, source?: string) => Promise<ReportRow | null>;
+  /**
+   * Aggregiert die Verlaufs-Tabellen über einen Zeitraum (art: sales|orders|
+   * returns, args: { von?, bis? } als 'YYYY-MM-DD'). Optional — nur api/mcp
+   * verdrahten es (mit DB-Zugriff); im Unit-Test bleibt es undefined.
+   */
+  ladeVerlauf?: (art: "sales" | "orders" | "returns", args: Record<string, unknown>) => Promise<unknown>;
+}
+
+interface ToolDef {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  handle: (args: Record<string, unknown>, ctx: McpContext) => Promise<unknown>;
+}
+
+const LEERES_SCHEMA = { type: "object", properties: {}, additionalProperties: false };
+
+const ZEITRAUM_SCHEMA = {
+  type: "object",
+  properties: {
+    von: { type: "string", description: "Startdatum 'YYYY-MM-DD' (inklusiv). Default: vor 90 Tagen." },
+    bis: { type: "string", description: "Enddatum 'YYYY-MM-DD' (inklusiv). Default: heute." },
+  },
+  additionalProperties: false,
+};
+
+const TOOLS: ToolDef[] = [
+  {
+    name: "get_sales_overview",
+    description:
+      "Deterministisch gerechnete Sales-&-Traffic-Kennzahlen des Sellers (Umsatz, " +
+      "Sessions, Conversion-Rate, Durchschnittspreis, je ASIN). Aus den Rohwerten " +
+      "gerechnet, nicht aus Amazons Prozentspalten. Deckt EINEN Marktplatz ab. " +
+      "Enthält data_timestamp, is_provisional und die verwendeten Formeln.",
+    inputSchema: LEERES_SCHEMA,
+    handle: async (_args, ctx) => {
+      const row = await ctx.ladeReport(SALES_TYPE);
+      if (!row) return keineDaten(SALES_TYPE);
+      return baueOverview(row.payload as Record<string, any>, row.data_timestamp, row.is_provisional);
+    },
+  },
+  {
+    name: "get_orders_overview",
+    description:
+      "Deterministisch gerechnete Bestell-Kennzahlen (Bestellungen, Einheiten, " +
+      "Umsatz je Kanal/ASIN/Status). Enthält MEHRERE Vertriebskanäle inkl. " +
+      "Multi-Channel-Fulfillment — NICHT mit get_sales_overview vergleichen. " +
+      "Leere Preise bedeuten 'unbekannt', nicht 0; das steht in umsatzVollstaendig " +
+      "und warnungen. Enthält data_timestamp und die verwendeten Formeln.",
+    inputSchema: LEERES_SCHEMA,
+    handle: async (_args, ctx) => {
+      const row = await ctx.ladeReport(ORDERS_TYPE);
+      if (!row) return keineDaten(ORDERS_TYPE);
+      return baueOrdersOverview(row.payload as Record<string, any>, row.data_timestamp, row.is_provisional);
+    },
+  },
+  {
+    name: "get_listings_overview",
+    description:
+      "Momentaufnahme aller Angebote des Sellers: Anzahl nach Status (aktiv/inaktiv), " +
+      "aktive Angebote nach Fulfillment (Merchant/FBA), Preisspanne, und vor allem " +
+      "Out-of-Stock: aktive MERCHANT-Angebote mit Bestand 0 (die live sind, aber " +
+      "nichts verkaufen können). WICHTIG: Der FBA-Lagerbestand steht NICHT hier — " +
+      "FBA-Angebote führen ihre Menge in einem separaten Report. Preise sind Zahlen " +
+      "ohne Währung (Marktplatz-abhängig, DE = EUR).",
+    inputSchema: LEERES_SCHEMA,
+    handle: async (_args, ctx) => {
+      const row = await ctx.ladeReport(LISTINGS_TYPE);
+      if (!row) return keineDaten(LISTINGS_TYPE);
+      return baueListingsOverview(row.payload as Record<string, any>, row.data_timestamp);
+    },
+  },
+  {
+    name: "get_product_performance",
+    description:
+      "Steckbrief je ASIN, der die drei Quellen ZUSAMMENFÜHRT, aber getrennt hält: " +
+      "Sales & Traffic (Sessions/Umsatz, EIN Marktplatz, sein Zeitraum), Bestellungen " +
+      "(mehrere Kanäle, anderer Zeitraum) und Angebot/Bestand (Momentaufnahme). WICHTIG: " +
+      "Die Quellen decken verschiedene Zeiträume/Kanäle ab und dürfen NICHT zu einer " +
+      "Gesamtzahl addiert werden — jede ist einzeln mit Herkunft ausgewiesen. Liefert " +
+      "deterministische Hinweise (z.B. Traffic ohne Verkauf, nur über Fremdkanäle " +
+      "verkauft, Out-of-Stock). Optional 'asin' für ein Produkt, sonst alle mit " +
+      "Traffic/Verkauf; 'limit' begrenzt die Liste.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        asin: { type: "string", description: "Genau diesen ASIN zeigen (auch wenn nur ein Listing existiert)." },
+        limit: { type: "number", description: "Höchstzahl Produkte (nach S&T-Umsatz sortiert)." },
+      },
+      additionalProperties: false,
+    },
+    handle: async (args, ctx) => {
+      // Dieses Tool braucht ALLE drei Reports — anders als die übrigen.
+      const [s, o, l] = await Promise.all([
+        ctx.ladeReport(SALES_TYPE),
+        ctx.ladeReport(ORDERS_TYPE),
+        ctx.ladeReport(LISTINGS_TYPE),
+      ]);
+      if (!s && !o && !l) return keineDaten("Sales & Traffic / Orders / Listings");
+      const q = (r: typeof s): Quelle | null =>
+        r ? { payload: r.payload as Record<string, any>, data_timestamp: r.data_timestamp } : null;
+      const asin = typeof args.asin === "string" ? args.asin.trim() : undefined;
+      const limit = typeof args.limit === "number" ? args.limit : undefined;
+      return baueProductPerformance(q(s), q(o), q(l), { asin, limit });
+    },
+  },
+  {
+    name: "get_returns_overview",
+    description:
+      "Merchant-Retouren nach Antragsdatum: Anzahl, Einheiten, erstattete Beträge, " +
+      "gruppiert nach Retourengrund, Resolution, Status und ASIN. HINWEIS: an echten " +
+      "Retouren-Daten noch nicht validiert (Report war bei Erstellung leer) — die " +
+      "Antwort trägt `unvalidiert: true`. Die Retourenquote (Retouren / verkaufte " +
+      "Einheiten) ist NICHT enthalten: der Nenner kommt aus Sales/Orders.",
+    inputSchema: LEERES_SCHEMA,
+    handle: async (_args, ctx) => {
+      const row = await ctx.ladeReport(RETURNS_TYPE);
+      if (!row) return keineDaten(RETURNS_TYPE);
+      return baueReturnsOverview(row.payload as Record<string, any>, row.data_timestamp);
+    },
+  },
+  {
+    name: "get_ads_overview",
+    description:
+      "Amazon-Advertising-Kennzahlen (Sponsored Products): Impressions, Klicks, " +
+      "Spend, attribuierter Umsatz, ACOS und ROAS — je Kampagne und je ASIN. ACOS " +
+      "(Spend/Umsatz) ist die zentrale Effizienzkennzahl. Aus Rohwerten gerechnet. " +
+      "WICHTIG: ist der Zeitraum jünger als ~72h, ist der Datensatz vorläufig " +
+      "(is_provisional) — Amazon passt Spend/Umsatz noch an. Getrennt von den " +
+      "organischen Zahlen (get_sales_overview): Ads misst NUR die beworbene Leistung.",
+    inputSchema: LEERES_SCHEMA,
+    handle: async (_args, ctx) => {
+      const row = await ctx.ladeReport("sp-advertised-product", "ads");
+      if (!row) return keineDaten("sp-advertised-product (Ads)");
+      const p = row.payload as Record<string, any>;
+      return baueAdsOverview(p.rows ?? [], row.data_timestamp, row.is_provisional);
+    },
+  },
+  {
+    name: "get_sales_history",
+    description:
+      "Sales-&-Traffic-Kennzahlen über einen FREI WÄHLBAREN Zeitraum aus der " +
+      "historischen Tagesreihe (bis ~24 Monate zurück). Liefert Gesamt-Kennzahlen " +
+      "(Umsatz, Sessions, CVR, Durchschnittspreis — aus Rohwerten) UND eine " +
+      "Monatsreihe für Vergleiche/Trends. Für Jahresvergleiche, 'letzte 12 Monate', " +
+      "Vormonat vs. Vorjahr usw. Zeitraum via von/bis ('YYYY-MM-DD').",
+    inputSchema: ZEITRAUM_SCHEMA,
+    handle: async (args, ctx) => {
+      if (!ctx.ladeVerlauf) return verlaufNichtVerfuegbar();
+      return ctx.ladeVerlauf("sales", args);
+    },
+  },
+  {
+    name: "get_orders_history",
+    description:
+      "Bestell-Kennzahlen über einen FREI WÄHLBAREN Zeitraum aus der Historie (bis " +
+      "~24 Monate). Bestellungen, Einheiten, Umsatz je Kanal/Status/ASIN. Gleiche " +
+      "ehrliche Logik wie get_orders_overview (leere Preise = unbekannt, mehrere " +
+      "Kanäle getrennt). Zeitraum via von/bis ('YYYY-MM-DD').",
+    inputSchema: ZEITRAUM_SCHEMA,
+    handle: async (args, ctx) => {
+      if (!ctx.ladeVerlauf) return verlaufNichtVerfuegbar();
+      return ctx.ladeVerlauf("orders", args);
+    },
+  },
+  {
+    name: "get_returns_history",
+    description:
+      "Retouren über einen FREI WÄHLBAREN Zeitraum aus der Historie (bis ~24 Monate): " +
+      "Anzahl, Einheiten, erstattete Beträge, nach Grund/Resolution/Status/ASIN. " +
+      "Zeitraum via von/bis ('YYYY-MM-DD').",
+    inputSchema: ZEITRAUM_SCHEMA,
+    handle: async (args, ctx) => {
+      if (!ctx.ladeVerlauf) return verlaufNichtVerfuegbar();
+      return ctx.ladeVerlauf("returns", args);
+    },
+  },
+];
+
+function verlaufNichtVerfuegbar(): Record<string, unknown> {
+  return { fehler: "Verlaufs-Abfrage in diesem Kontext nicht verfügbar." };
+}
+
+function keineDaten(reportType: string): Record<string, unknown> {
+  return {
+    keine_daten: true,
+    hinweis: `Für ${reportType} liegen noch keine Daten vor. Der tägliche Sync füllt sie; ` +
+      "einmalig kann sync-report aufgerufen werden.",
+  };
+}
+
+// --- JSON-RPC ---
+
+interface JsonRpcRequest {
+  jsonrpc?: string;
+  id?: string | number | null;
+  method?: string;
+  params?: Record<string, unknown>;
+}
+
+interface JsonRpcResponse {
+  jsonrpc: "2.0";
+  id: string | number | null;
+  result?: unknown;
+  error?: { code: number; message: string; data?: unknown };
+}
+
+function ergebnis(id: string | number | null, result: unknown): JsonRpcResponse {
+  return { jsonrpc: "2.0", id, result };
+}
+
+function fehler(id: string | number | null, code: number, message: string, data?: unknown): JsonRpcResponse {
+  return { jsonrpc: "2.0", id, error: { code, message, ...(data !== undefined ? { data } : {}) } };
+}
+
+export function toolListe(): Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> {
+  return TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
+}
+
+export function toolNamen(): string[] {
+  return TOOLS.map((t) => t.name);
+}
+
+/**
+ * Ruft einen Tool-Handler direkt auf und gibt das ROHE Ergebnis zurück (ohne
+ * MCP-content-Hülle). Damit kann der Web-Endpunkt `api` dieselbe getestete Logik
+ * nutzen wie der MCP-Server, statt sie zu duplizieren.
+ */
+export function rufeToolAuf(name: string, args: Record<string, unknown>, ctx: McpContext): Promise<unknown> {
+  const tool = TOOLS.find((t) => t.name === name);
+  if (!tool) throw new Error(`Unbekannte Ressource: ${name}`);
+  return tool.handle(args, ctx);
+}
+
+function waehleProtokoll(angefragt: unknown): string {
+  return typeof angefragt === "string" && UNTERSTUETZTE_VERSIONEN.includes(angefragt)
+    ? angefragt
+    : UNTERSTUETZTE_VERSIONEN[0];
+}
+
+/**
+ * Verarbeitet EINE JSON-RPC-Nachricht.
+ * Rückgabe null = Notification (keine Antwort schicken, z.B. notifications/*).
+ */
+export async function dispatch(
+  req: JsonRpcRequest,
+  ctx: McpContext
+): Promise<JsonRpcResponse | null> {
+  const id = req.id ?? null;
+  const method = req.method;
+
+  // Notifications haben keine id und erwarten keine Antwort.
+  if (method && method.startsWith("notifications/")) return null;
+
+  switch (method) {
+    case "initialize":
+      return ergebnis(id, {
+        protocolVersion: waehleProtokoll(req.params?.protocolVersion),
+        capabilities: { tools: {} },
+        serverInfo: SERVER_INFO,
+      });
+
+    case "ping":
+      return ergebnis(id, {});
+
+    case "tools/list":
+      return ergebnis(id, { tools: toolListe() });
+
+    case "tools/call": {
+      const name = req.params?.name as string | undefined;
+      const args = (req.params?.arguments as Record<string, unknown>) ?? {};
+      const tool = TOOLS.find((t) => t.name === name);
+      if (!tool) {
+        return fehler(id, -32602, `Unbekanntes Tool: ${name}`);
+      }
+      try {
+        const daten = await tool.handle(args, ctx);
+        // MCP-Ergebnis: menschenlesbarer JSON-Text UND strukturiert.
+        // isError bleibt false — ein "keine Daten"-Zustand ist kein Protokollfehler.
+        return ergebnis(id, {
+          content: [{ type: "text", text: JSON.stringify(daten, null, 2) }],
+          structuredContent: daten,
+          isError: false,
+        });
+      } catch (e) {
+        // Tool-Ausführungsfehler werden laut MCP als result mit isError:true
+        // gemeldet, NICHT als JSON-RPC-Fehler — so sieht das Modell die Ursache.
+        return ergebnis(id, {
+          content: [{ type: "text", text: `Fehler im Tool ${name}: ${String(e)}` }],
+          isError: true,
+        });
+      }
+    }
+
+    default:
+      return fehler(id, -32601, `Methode nicht unterstützt: ${method ?? "(keine)"}`);
+  }
+}
+
+/** Baut eine JSON-RPC-Fehlerantwort für kaputte Eingaben (Parse/Struktur). */
+export function protokollFehler(id: string | number | null, message: string): JsonRpcResponse {
+  return fehler(id, -32700, message);
+}

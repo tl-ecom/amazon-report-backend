@@ -1,0 +1,39 @@
+name: CI
+
+# Typecheck + Unit-Tests bei jedem Push/PR. Deploy NUR, wenn alles grün ist und
+# der Push auf main läuft — kein Hand-Deploy mehr, kein Deploy von rotem Code.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: Typecheck & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Typecheck (jede Function + ihre Imports)
+        run: deno check supabase/functions/*/index.ts
+      - name: Unit-Tests (_shared)
+        run: deno test supabase/functions/_shared/
+
+  deploy:
+    name: Deploy Edge Functions
+    needs: check
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: irvnghhxfjjnpodclfuc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Deploy all functions
+        run: supabase functions deploy --project-ref "$PROJECT_REF"
