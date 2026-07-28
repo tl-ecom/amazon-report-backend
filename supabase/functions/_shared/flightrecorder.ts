@@ -6,6 +6,8 @@
 // außer im status (bearbeitet/ignoriert); die Interpretation landet ausschließlich
 // in change_event_context.
 
+import { erstelleExperiment } from "./experiments.ts";
+
 export type Klassifikation =
   | "geplanter_test"
   | "operative_anpassung"
@@ -99,7 +101,7 @@ export async function setzeKontext(
 
   // Eigentümerschaft prüfen — NIE aus dem Body vertrauen.
   const { data: ev, error: evErr } = await supabase
-    .from("change_events").select("id").eq("id", eventId).eq("tenant_id", tenant_id).maybeSingle();
+    .from("change_events").select("id, asin, seller_sku, effective_at").eq("id", eventId).eq("tenant_id", tenant_id).maybeSingle();
   if (evErr) throw new Error(`Lookup: ${evErr.message}`);
   if (!ev) throw new Error("Change Event nicht gefunden (oder nicht dieser Tenant).");
 
@@ -127,5 +129,17 @@ export async function setzeKontext(
     .eq("id", eventId).eq("tenant_id", tenant_id);
   if (updErr) throw new Error(`Status-Update: ${updErr.message}`);
 
-  return { ok: true, change_event_id: eventId, status };
+  // Geplanter Test → automatisch ein Experiment anlegen (idempotent je Event).
+  let experiment_erstellt = false;
+  if (klass === "geplanter_test") {
+    await erstelleExperiment(supabase, tenant_id, ev, {
+      hypothesis: args.hypothesis,
+      target_metric: args.target_metric,
+      target_value: args.target_value,
+      user_id,
+    });
+    experiment_erstellt = true;
+  }
+
+  return { ok: true, change_event_id: eventId, status, experiment_erstellt };
 }
