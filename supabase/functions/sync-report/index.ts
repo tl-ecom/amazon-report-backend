@@ -35,6 +35,7 @@ import {
 } from "../_shared/ratelimit.ts";
 import { entferneSpalten, parseTsvBytes, pruefeFlatFile } from "../_shared/tsv.ts";
 import { schreibeVerlauf } from "../_shared/history.ts";
+import { schreibeSnapshots } from "../_shared/snapshots.ts";
 
 const SP_ENDPOINT = "https://sellingpartnerapi-eu.amazon.com";
 const DEFAULT_REPORT_TYPE = "GET_SALES_AND_TRAFFIC_REPORT";
@@ -468,6 +469,18 @@ Deno.serve(async (req) => {
       return json({ error: "Verlauf-Schreiben fehlgeschlagen", detail: verlauf.fehler }, 500);
     }
 
+    // ASIN-Snapshots + asins-Entität aus dem Listings-Report (Flight-Recorder-Boden).
+    // Andere Report-Typen: no-op. Vergleichsbasis der späteren Change-Engine.
+    const snapshot = await schreibeSnapshots(supabase, tenant_id, reportType, fetched.payload, {
+      snapshot_ts: dataTimestamp,
+      import_report_id: reportId,
+      marketplace_id: ctx.marketplace_id,
+    });
+    if (snapshot.fehler) {
+      await markJobFatal(supabase, tenant_id, reportId, `Snapshot: ${snapshot.fehler}`);
+      return json({ error: "Snapshot-Schreiben fehlgeschlagen", detail: snapshot.fehler }, 500);
+    }
+
     await supabase
       .from("report_jobs")
       .update({
@@ -500,6 +513,7 @@ Deno.serve(async (req) => {
       is_provisional: isProvisional,
       history_only: historyOnly,
       verlauf: { tabelle: verlauf.tabelle, zeilen: verlauf.zeilen },
+      snapshot: { asins: snapshot.asins, snapshots: snapshot.snapshots },
       zeitraum: { von: spec.dataStartTime ?? null, bis: spec.dataEndTime ?? null },
       // Nur bei Flat-File-Reports gefüllt:
       ...(p?.format === "tsv"
