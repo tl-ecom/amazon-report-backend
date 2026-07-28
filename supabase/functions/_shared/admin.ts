@@ -72,6 +72,20 @@ export async function setzeTarifFeature(
   return { ok: true };
 }
 
+/** Firma OHNE Mitglied anlegen (Admin). Für den Coach, der einen Kunden verwaltet,
+ * bevor dieser ein eigenes Login hat — Daten via Coach-Ansicht + Coach-Connect. */
+export async function legeFirmaAn(
+  supabase: any, callerId: string, name: string, tarif: string,
+): Promise<unknown> {
+  if (!(await istPlattformAdmin(supabase, callerId))) throw new Error("nicht autorisiert");
+  const n = (name ?? "").trim();
+  if (!n) throw new Error("Firmenname fehlt");
+  const t = ["premium", "vip", "coaching"].includes(tarif) ? tarif : "coaching";
+  const { data, error } = await supabase.from("tenants").insert({ name: n, tarif: t }).select("id, name").single();
+  if (error) throw new Error(`tenants insert: ${error.message}`);
+  return { firma: data };
+}
+
 /** Tarif/Mitgliedstyp einer Firma setzen (Admin). RPC self-gated auf platform_admins. */
 export async function setzeTarif(
   supabase: any, callerId: string, tenantId: string, tarif: string,

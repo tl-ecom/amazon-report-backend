@@ -24,7 +24,7 @@ import { erstelleNote, listeNotes, loescheNote, setzeNoteSichtbarkeit } from "..
 import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
 import { ertragVerlauf, listeEk, loescheEk, setzeEk } from "../_shared/ertrag.ts";
 import { ladeEinstellungen, setzeEinstellungen } from "../_shared/einstellungen.ts";
-import { ablehnenKonto, freigebenKonto, ladeEin, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
+import { ablehnenKonto, freigebenKonto, ladeEin, legeFirmaAn, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
 const CORS = {
@@ -139,6 +139,17 @@ Deno.serve(async (req) => {
       return json({ ok: true, action: body.action, data: r });
     } catch (e) {
       return json({ error: "Feature setzen fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
+    }
+  }
+
+  // Firma OHNE Mitglied anlegen (Admin) — der Coach verwaltet den Kunden, bevor
+  // dieser ein Login hat. Früh, unabhängig von der Tenant-Auflösung.
+  if (body?.action === "admin_firma_anlegen") {
+    try {
+      const r = await legeFirmaAn(service, userId, String((args as any)?.name ?? ""), String((args as any)?.tarif ?? "coaching"));
+      return json({ ok: true, action: body.action, data: r });
+    } catch (e) {
+      return json({ error: "Firma anlegen fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
     }
   }
 
