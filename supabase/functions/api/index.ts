@@ -326,7 +326,7 @@ Deno.serve(async (req) => {
       return json({ ok: true, resource, tenant_id: tenantId, data: await kpiVerlauf(service, tenantId) });
     }
     if (resource === "produkt_uebersicht") {
-      return json({ ok: true, resource, tenant_id: tenantId, data: await produktUebersicht(service, tenantId, (args as any)?.tage) });
+      return json({ ok: true, resource, tenant_id: tenantId, data: await produktUebersicht(service, tenantId, args as any) });
     }
     if (resource === "sqp_asins") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await sqpAsins(service, tenantId) });

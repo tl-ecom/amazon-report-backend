@@ -12,10 +12,26 @@ interface Row {
   wareneinsatz_cents: number; einheiten_mit_ek: number; retouren: number;
 }
 
-export async function produktUebersicht(supabase: any, tenant_id: string, tage = 90): Promise<unknown> {
-  const fenster = Number(tage) > 0 ? Number(tage) : 90;
-  const von = new Date(Date.now() - fenster * 86400000).toISOString().slice(0, 10);
-  const { data, error } = await supabase.rpc("produkt_uebersicht", { p_tenant: tenant_id, p_von: von });
+function istDatum(s: unknown): s is string {
+  return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
+export async function produktUebersicht(
+  supabase: any, tenant_id: string, opts?: { tage?: unknown; von?: unknown; bis?: unknown },
+): Promise<unknown> {
+  let von: string, bis: string;
+  if (istDatum(opts?.von) && istDatum(opts?.bis)) {
+    // Frei gewählter Zeitraum (Kalender).
+    von = opts!.von as string;
+    bis = opts!.bis as string;
+    if (von > bis) [von, bis] = [bis, von];
+  } else {
+    // Preset: letzte N Tage.
+    const fenster = Number(opts?.tage) > 0 ? Number(opts?.tage) : 90;
+    von = new Date(Date.now() - fenster * 86400000).toISOString().slice(0, 10);
+    bis = new Date().toISOString().slice(0, 10);
+  }
+  const { data, error } = await supabase.rpc("produkt_uebersicht", { p_tenant: tenant_id, p_von: von, p_bis: bis });
   if (error) throw new Error(`produkt_uebersicht: ${error.message}`);
 
   const produkte = ((data ?? []) as Row[]).map((r) => {
@@ -38,7 +54,7 @@ export async function produktUebersicht(supabase: any, tenant_id: string, tage =
   });
 
   return {
-    tage: fenster,
+    von, bis,
     waehrung: "EUR",
     produkte,
     summe_retouren: produkte.reduce((s, p) => s + p.retouren, 0),
