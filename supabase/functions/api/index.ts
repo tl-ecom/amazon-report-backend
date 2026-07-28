@@ -22,6 +22,7 @@ import { generiereBrief, listeBriefs, setzeCoachNotiz } from "../_shared/brief.t
 import { ladeFeatures, zugriffErlaubt } from "../_shared/entitlements.ts";
 import { erstelleNote, listeNotes, loescheNote, setzeNoteSichtbarkeit } from "../_shared/notes.ts";
 import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
+import { produktUebersicht } from "../_shared/produkte.ts";
 import { ertragVerlauf, listeEk, loescheEk, setzeEk } from "../_shared/ertrag.ts";
 import { ladeEinstellungen, setzeEinstellungen } from "../_shared/einstellungen.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, legeFirmaAn, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
@@ -318,6 +319,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "kpi_verlauf") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await kpiVerlauf(service, tenantId) });
+    }
+    if (resource === "produkt_uebersicht") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await produktUebersicht(service, tenantId, (args as any)?.tage) });
     }
     if (resource === "ertrag_verlauf") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await ertragVerlauf(service, tenantId) });
