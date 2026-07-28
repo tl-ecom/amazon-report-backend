@@ -12,6 +12,7 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   weekly_briefs: "brief",
   fr_change_events: "aenderungen",
   fr_asin_timeline: "aenderungen",
+  fr_produkte: "aenderungen",
   fr_experiments: "experimente",
   fr_experiment_detail: "experimente",
   get_sales_history: "verlauf",
@@ -47,6 +48,7 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   brief_generieren: "brief",
   brief_notiz: "brief",
   fr_set_context: "aenderungen",
+  fr_manuelle_aenderung: "aenderungen",
 };
 
 /** Reine Zugriffsentscheidung. Admins immer erlaubt; ungelistete Keys immer erlaubt;

@@ -13,7 +13,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { McpContext, rufeToolAuf, toolNamen } from "../_shared/mcp.ts";
 import { ladeVerlaufFactory } from "../_shared/verlauf.ts";
-import { asinTimeline, changeEvents, setzeKontext } from "../_shared/flightrecorder.ts";
+import { asinTimeline, changeEvents, erfasseManuelleAenderung, frProdukte, setzeKontext } from "../_shared/flightrecorder.ts";
 import { experimentDetail, listeExperimente } from "../_shared/experiments.ts";
 import { pulseOverview } from "../_shared/overview.ts";
 import { diagnosenLauf, listeDiagnosen, setzeDiagnoseStatus } from "../_shared/diagnostics.ts";
@@ -208,6 +208,10 @@ Deno.serve(async (req) => {
         const r = await setzeKontext(service, tenantId, userData.user.id, args as any);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
+      if (action === "fr_manuelle_aenderung") {
+        const r = await erfasseManuelleAenderung(service, tenantId, userData.user.id, args as any);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
       if (action === "sqp_laden") {
         const r = await anstossenSqp(service, tenantId, String((args as any)?.asin ?? ""));
         return json({ ok: true, action, tenant_id: tenantId, data: r });
@@ -300,6 +304,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "fr_asin_timeline") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await asinTimeline(service, tenantId, args as any) });
+    }
+    if (resource === "fr_produkte") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await frProdukte(service, tenantId) });
     }
     if (resource === "fr_experiments") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await listeExperimente(service, tenantId, args as any) });
