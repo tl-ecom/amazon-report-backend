@@ -114,3 +114,33 @@ export const STRATEGIE_DEFINITIONEN: Record<Rolle, StrategieDefinition> = {
     beschreibung: "Auslauf — Restbestand abverkaufen, Ressourcen abziehen.",
   },
 };
+
+// -----------------------------------------------------------------------------
+// Schwellen für die VORSCHLAGS-Logik (Regel-Engine, deterministisch).
+// Auch das sind Benchmarks — DU füllst sie. Solange ein für eine Regel nötiger
+// Wert null ist, greift die Regel nicht; fehlen die zentralen Signale, gibt die
+// Engine eine OFFENE FRAGE (low confidence) aus statt still zuzuweisen.
+// -----------------------------------------------------------------------------
+export interface VorschlagSchwellen {
+  /** Jünger als X Wochen ⇒ launch-Kandidat. */
+  launch_max_alter_wochen: number | null;
+  /** Ab X Wochen gilt ein Produkt als „reif" (hold/harvest/exit statt launch). */
+  reif_ab_wochen: number | null;
+  /** Umsatztrend ≥ X (relativ, z. B. 0.2 = +20 %) ⇒ Wachstum (scale-Kandidat). */
+  scale_min_umsatz_trend: number | null;
+  /** Umsatztrend ≤ X (relativ, negativ) ⇒ Rückgang (harvest/exit-Kandidat). */
+  schrumpf_umsatz_trend: number | null;
+  /** Bestandsreichweite ≥ X Tage nötig, um skalieren zu empfehlen. */
+  scale_min_reichweite_tage: number | null;
+  /** Deckungsbeitrag/Stück gilt ab diesem Wert als profitabel (i. d. R. 0). */
+  db_stueck_positiv_ab: number | null;
+}
+
+export const VORSCHLAG_SCHWELLEN: VorschlagSchwellen = {
+  launch_max_alter_wochen: null,
+  reif_ab_wochen: null,
+  scale_min_umsatz_trend: null,
+  schrumpf_umsatz_trend: null,
+  scale_min_reichweite_tage: null,
+  db_stueck_positiv_ab: null,
+};
