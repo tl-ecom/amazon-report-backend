@@ -18,6 +18,7 @@ import { experimentDetail, listeExperimente } from "../_shared/experiments.ts";
 import { pulseOverview } from "../_shared/overview.ts";
 import { diagnosenLauf, listeDiagnosen, setzeDiagnoseStatus } from "../_shared/diagnostics.ts";
 import { erstelleTask, listeTasks, setzeTaskStatus, taskAusDiagnose } from "../_shared/tasks.ts";
+import { generiereBrief, listeBriefs, setzeCoachNotiz } from "../_shared/brief.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, listeKunden, listeTenants, loeseFirmaAuf, meinKonto } from "../_shared/admin.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
@@ -161,6 +162,14 @@ Deno.serve(async (req) => {
         const r = await setzeTaskStatus(service, tenantId, String((args as any)?.id ?? ""), String((args as any)?.status ?? ""));
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
+      if (action === "brief_generieren") {
+        const r = await generiereBrief(service, tenantId, userData.user.id);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "brief_notiz") {
+        const r = await setzeCoachNotiz(service, tenantId, String((args as any)?.id ?? ""), String((args as any)?.notiz ?? ""));
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
       return json({ error: "Unbekannte Aktion", action }, 400);
     } catch (e) {
       return json({ error: "Aktion fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
@@ -210,6 +219,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "tasks") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await listeTasks(service, tenantId) });
+    }
+    if (resource === "weekly_briefs") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await listeBriefs(service, tenantId) });
     }
     const ergebnis = await rufeToolAuf(resource, args, ctx);
     return json({ ok: true, resource, tenant_id: tenantId, data: ergebnis });
