@@ -19,6 +19,7 @@ import { pulseOverview } from "../_shared/overview.ts";
 import { diagnosenLauf, listeDiagnosen, setzeDiagnoseStatus } from "../_shared/diagnostics.ts";
 import { erstelleTask, listeTasks, setzeTaskStatus, taskAusDiagnose } from "../_shared/tasks.ts";
 import { generiereBrief, listeBriefs, setzeCoachNotiz } from "../_shared/brief.ts";
+import { ladeFeatures, zugriffErlaubt } from "../_shared/entitlements.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
@@ -90,7 +91,10 @@ Deno.serve(async (req) => {
   // Konto hat noch keinen Tenant und würde sonst mit 403 abgewiesen.
   if (body?.resource === "mein_konto") {
     try {
-      return json({ ok: true, resource: "mein_konto", data: await meinKonto(service, userId) });
+      const konto = await meinKonto(service, userId);
+      // Kunden bekommen die Feature-Flags ihres Tarifs mit (Admins sehen alles -> null).
+      const features = (!konto.is_admin && myTenant) ? await ladeFeatures(service, myTenant) : null;
+      return json({ ok: true, resource: "mein_konto", data: { ...konto, features } });
     } catch (e) {
       return json({ error: "mein_konto fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
     }
@@ -165,6 +169,17 @@ Deno.serve(async (req) => {
     return json({ error: firma.fehler, is_admin: firma.is_admin }, firma.code ?? 403);
   }
   const tenantId = firma.tenant;
+
+  // Feature-Gating: Kunden nur auf die in ihrem Tarif aktiven Ressourcen/Aktionen.
+  // Admins/Coaches (is_admin) umgehen das. Serverseitig, damit nicht per Direktaufruf
+  // umgehbar — nicht nur im Frontend versteckt.
+  if (!firma.is_admin) {
+    const gateKey = (body?.resource ?? body?.action) as string | undefined;
+    const features = await ladeFeatures(service, tenantId);
+    if (!zugriffErlaubt(gateKey, features, false)) {
+      return json({ error: "In deinem Tarif nicht enthalten.", gesperrt: true }, 403);
+    }
+  }
 
   // --- Schreib-Aktionen (Flight Recorder: Kontext bestätigen) ---
   // Bewusst getrennt von den Read-Ressourcen und NICHT über die KI-Tools —
