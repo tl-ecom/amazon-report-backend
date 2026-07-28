@@ -20,6 +20,7 @@ import { diagnosenLauf, listeDiagnosen, setzeDiagnoseStatus } from "../_shared/d
 import { erstelleTask, listeTasks, setzeTaskStatus, taskAusDiagnose } from "../_shared/tasks.ts";
 import { generiereBrief, listeBriefs, setzeCoachNotiz } from "../_shared/brief.ts";
 import { ladeFeatures, zugriffErlaubt } from "../_shared/entitlements.ts";
+import { erstelleNote, listeNotes, loescheNote, setzeNoteSichtbarkeit } from "../_shared/notes.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
@@ -219,6 +220,20 @@ Deno.serve(async (req) => {
         const r = await setzeCoachNotiz(service, tenantId, String((args as any)?.id ?? ""), String((args as any)?.notiz ?? ""));
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
+      // Coaching-Notizen schreiben: NUR Coach/Admin (der Coachee liest nur freigegebene).
+      if (action === "note_erstellen" || action === "note_sichtbarkeit" || action === "note_loeschen") {
+        if (!firma.is_admin) return json({ error: "Nur der Coach darf Notizen bearbeiten.", gesperrt: true }, 403);
+        if (action === "note_erstellen") {
+          const r = await erstelleNote(service, tenantId, userData.user.id, args as any);
+          return json({ ok: true, action, tenant_id: tenantId, data: r });
+        }
+        if (action === "note_sichtbarkeit") {
+          const r = await setzeNoteSichtbarkeit(service, tenantId, String((args as any)?.id ?? ""), String((args as any)?.sichtbarkeit ?? ""));
+          return json({ ok: true, action, tenant_id: tenantId, data: r });
+        }
+        const r = await loescheNote(service, tenantId, String((args as any)?.id ?? ""));
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
       return json({ error: "Unbekannte Aktion", action }, 400);
     } catch (e) {
       return json({ error: "Aktion fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
@@ -271,6 +286,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "weekly_briefs") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await listeBriefs(service, tenantId) });
+    }
+    if (resource === "coaching_notes") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await listeNotes(service, tenantId, firma.is_admin) });
     }
     const ergebnis = await rufeToolAuf(resource, args, ctx);
     return json({ ok: true, resource, tenant_id: tenantId, data: ergebnis });
