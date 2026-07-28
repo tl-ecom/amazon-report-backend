@@ -51,7 +51,26 @@ Deno.serve(async (req) => {
         continue;
       }
       const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) return json({ error: "Finances API Fehler", status: resp.status, detail: data }, 502);
+      if (!resp.ok) {
+        // Diagnose: gleicher Token gegen einen rollenfreien Endpoint. Sellers 200 +
+        // Finances 403 = Token gültig, nur die Finance-Rolle fehlt in der Autorisierung.
+        let sellersStatus = 0;
+        try {
+          const s = await fetch(`${SP_ENDPOINT}/sellers/v1/marketplaceParticipations`, {
+            headers: { "x-amz-access-token": accessToken },
+          });
+          sellersStatus = s.status;
+        } catch { /* egal */ }
+        return json({
+          error: "Finances API Fehler",
+          status: resp.status,
+          detail: data,
+          token_check_sellers_status: sellersStatus,
+          diagnose: sellersStatus === 200
+            ? "Token gültig (Sellers 200) — es fehlt NUR die Finance-Rolle in der Autorisierung."
+            : `Sellers-Endpoint antwortete ${sellersStatus} — Token/Autorisierung prüfen.`,
+        }, 502);
+      }
 
       verarbeiteFinancialEvents(data?.payload?.FinancialEvents, akku);
       nextToken = data?.payload?.NextToken || undefined;
