@@ -49,6 +49,10 @@ verify_jwt = true
 [functions.connect-sp]
 verify_jwt = true
 
+# Erst-Connect der Advertising API (getrennt von SP-API). Session-JWT, nur Coach.
+[functions.connect-ads]
+verify_jwt = true
+
 # Adapter für MCP-Clients ohne Custom-Header (z. B. ChatGPT): Token aus URL-Query
 # -> Bearer-Header an mcp. Auth macht mcp selbst -> verify_jwt = false.
 [functions.mcp-url]
