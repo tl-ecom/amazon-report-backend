@@ -155,3 +155,59 @@ export function findeAnspruchskandidaten(
     anzahl_verlust_events: verlustEvents,
   };
 }
+
+function vorTagen(tage: number): string {
+  return new Date(Date.now() - tage * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * DB-Wrapper für das Frontend/den MCP: lädt Adjustments (Inventar-Ledger) +
+ * Erstattungen + einen Preis-Fallback je ASIN (Ø Verkaufspreis der letzten 2 J.)
+ * und reicht sie durch findeAnspruchskandidaten. Reichert Kandidaten mit
+ * Produktnamen an und liefert den abgedeckten Zeitraum mit.
+ */
+export async function radarDaten(supabase: any, tenant_id: string): Promise<unknown> {
+  const [adjRes, reimbRes, prodRes, asinRes] = await Promise.all([
+    supabase.from("fba_inventar_adjustments").select("asin, quantity, datum, reason").eq("tenant_id", tenant_id),
+    supabase.from("fba_reimbursements").select("asin, quantity_total, quantity_cash, quantity_inventory, amount_total_cents, approval_date").eq("tenant_id", tenant_id),
+    supabase.rpc("produkt_uebersicht", { p_tenant: tenant_id, p_von: vorTagen(730), p_bis: vorTagen(0) }),
+    supabase.from("asins").select("asin, produktname").eq("tenant_id", tenant_id),
+  ]);
+
+  const adjustments = (adjRes.data ?? []) as Adjustment[];
+  const reimbursements = (reimbRes.data ?? []) as Reimbursement[];
+
+  // Preis-Fallback: Ø Verkaufspreis (Umsatz/Einheiten) je ASIN in Cent.
+  const preisProAsin: Record<string, number> = {};
+  for (const r of (prodRes.data ?? []) as any[]) {
+    const u = Number(r.umsatz_cents) || 0, e = Number(r.einheiten) || 0;
+    if (e > 0) preisProAsin[String(r.asin)] = Math.round(u / e);
+  }
+  const titel = new Map<string, string>(
+    ((asinRes.data ?? []) as any[]).map((a) => [String(a.asin), String(a.produktname ?? a.asin)]),
+  );
+
+  const erg = findeAnspruchskandidaten(adjustments, reimbursements, preisProAsin);
+
+  // Abgedeckter Zeitraum (min/max Adjustment-Datum) — zeigt, wie weit der Backfill reicht.
+  let von: string | null = null, bis: string | null = null;
+  for (const a of adjustments) {
+    const d = a.datum ?? null;
+    if (!d) continue;
+    if (!von || d < von) von = d;
+    if (!bis || d > bis) bis = d;
+  }
+
+  return {
+    waehrung: "EUR",
+    kandidaten: erg.kandidaten.map((k) => ({ ...k, produktname: titel.get(k.asin) ?? k.asin })),
+    summe_offen_einheiten: erg.summe_offen_einheiten,
+    summe_geschaetzt_cents: erg.summe_geschaetzt_cents,
+    kandidaten_ohne_wert: erg.kandidaten_ohne_wert,
+    erstattet_gesamt_cents: erg.erstattet_gesamt_cents,
+    anzahl_verlust_events: erg.anzahl_verlust_events,
+    anzahl_adjustments: adjustments.length,
+    anzahl_reimbursements: reimbursements.length,
+    zeitraum: von && bis ? { von, bis } : null,
+  };
+}

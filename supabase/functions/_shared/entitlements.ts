@@ -36,6 +36,7 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   sqp: "sqp",
   sqp_asins: "sqp",
   sqp_laden: "sqp",
+  reimbursements_radar: "erstattungen",
   coaching_notes: "notes",
   // Aktionen
   note_erstellen: "notes",
