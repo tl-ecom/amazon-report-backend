@@ -14,6 +14,7 @@
 export const FENSTER_TAGE = 90;          // Beobachtungsfenster der Velocity
 export const MIN_VELO = 0.3;             // < 0,3 Stk/Tag: zu selten, Nulltage sind normal -> ignorieren
 export const LEER_TAGE = 7;              // >= 7 Tage kein Verkauf trotz Velocity -> wahrscheinlich leer
+export const LEER_MAX_TAGE = 45;         // > 45 Tage tot: kein Stockout mehr, sondern Ladenhüter (siehe #5)
 export const KRITISCH_TAGE = 4;          // 4–6 Tage -> Verkäufe brechen ab (Warnung)
 export const BUYBOX_MIN = 90;            // Buy-Box unter 90 % -> Verfügbarkeitsproblem
 export const BUYBOX_MIN_SESSIONS = 20;   // nur relevant, wenn überhaupt Traffic da ist
@@ -50,10 +51,12 @@ export function bewerteAsin(i: AsinInput): Bewertung {
   const tageOhne = nz(i.tage_ohne_verkauf);
   const preis = nz(i.avg_preis_cents);
 
-  if (tageOhne >= LEER_TAGE) {
+  if (tageOhne >= LEER_TAGE && tageOhne <= LEER_MAX_TAGE) {
     const verlust = Math.round(velo * tageOhne * preis);
     return { status: "leer", schwere: 3, verlust_cents: verlust, verlust_art: "laufend" };
   }
+  // Länger als LEER_MAX_TAGE tot: kein akuter Stockout mehr -> Ladenhüter-Radar (#5), hier "ok".
+  if (tageOhne > LEER_MAX_TAGE) return { status: "ok", schwere: 0, verlust_cents: 0, verlust_art: null };
 
   if (i.buybox_pct != null && i.buybox_pct < BUYBOX_MIN && nz(i.sessions) >= BUYBOX_MIN_SESSIONS) {
     // Anteil entgangener Verkäufe ≈ (100 − BB) / BB, gedeckelt bei 1.

@@ -38,6 +38,7 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   sqp_laden: "sqp",
   reimbursements_radar: "erstattungen",
   stockout_radar: "nachschub",
+  ladenhueter_radar: "ladenhueter",
   coaching_notes: "notes",
   // Aktionen
   note_erstellen: "notes",

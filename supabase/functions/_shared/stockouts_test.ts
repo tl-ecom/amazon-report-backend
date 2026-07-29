@@ -40,6 +40,12 @@ Deno.test("leer schlägt buybox (Schwere-Reihenfolge)", () => {
   assertEquals(b.status, "leer");
 });
 
+Deno.test("länger als 45 Tage tot -> ok (Ladenhüter #5, kein Stockout)", () => {
+  const b = bewerteAsin(inp({ velo_tag: 1.5, tage_ohne_verkauf: 70, avg_preis_cents: 5000 }));
+  assertEquals(b.status, "ok");
+  assertEquals(b.verlust_cents, 0);
+});
+
 Deno.test("hohe Buy-Box + frischer Verkauf -> ok", () => {
   const b = bewerteAsin(inp({ velo_tag: 5, tage_ohne_verkauf: 0, buybox_pct: 98, sessions: 200 }));
   assertEquals(b.status, "ok");
