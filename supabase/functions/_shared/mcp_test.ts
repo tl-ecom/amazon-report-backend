@@ -65,13 +65,35 @@ Deno.test("ping antwortet leer", async () => {
 Deno.test("tools/list nennt alle Tools mit Schema", async () => {
   const r = await dispatch({ jsonrpc: "2.0", id: 2, method: "tools/list" }, leererCtx);
   const tools = (r!.result as any).tools;
-  assertEquals(tools.map((t: any) => t.name), ["get_sales_overview", "get_orders_overview", "get_listings_overview", "get_product_performance", "get_returns_overview", "get_ads_overview", "get_sales_history", "get_orders_history", "get_returns_history"]);
+  assertEquals(tools.map((t: any) => t.name), [
+    "get_sales_overview", "get_orders_overview", "get_listings_overview", "get_product_performance",
+    "get_returns_overview", "get_ads_overview", "get_sales_history", "get_orders_history", "get_returns_history",
+    "get_products", "get_kpi_history", "get_profit_history", "get_search_query_performance",
+    "get_diagnoses", "get_change_log", "get_strategy_overview",
+  ]);
   // Jedes Tool MUSS ein inputSchema haben, sonst lehnen manche Clients es ab.
   for (const t of tools) assertEquals(typeof t.inputSchema, "object");
 });
 
 Deno.test("toolListe ist stabil", () => {
-  assertEquals(toolListe().length, 9);
+  assertEquals(toolListe().length, 16);
+});
+
+Deno.test("Pulse-Tools rufen ladePulse mit der richtigen Datenart", async () => {
+  const gerufen: string[] = [];
+  const ctx = {
+    ladeReport: async () => null,
+    ladePulse: async (art: string) => { gerufen.push(art); return { ok: art }; },
+  } as any;
+  const paare: Array<[string, string]> = [
+    ["get_products", "produkte"], ["get_kpi_history", "kpi"], ["get_profit_history", "ertrag"],
+    ["get_search_query_performance", "sqp"], ["get_diagnoses", "diagnosen"],
+    ["get_change_log", "aenderungen"], ["get_strategy_overview", "strategie"],
+  ];
+  for (const [tool, art] of paare) {
+    await dispatch({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: {} } }, ctx);
+    assertEquals(gerufen.at(-1), art);
+  }
 });
 
 Deno.test("get_ads_overview liest source='ads' und rechnet ACOS", async () => {

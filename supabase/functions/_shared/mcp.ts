@@ -48,6 +48,12 @@ export interface McpContext {
    * verdrahten es (mit DB-Zugriff); im Unit-Test bleibt es undefined.
    */
   ladeVerlauf?: (art: "sales" | "orders" | "returns", args: Record<string, unknown>) => Promise<unknown>;
+  /**
+   * Liest die Pulse-Analytics (art: produkte|kpi|ertrag|sqp|diagnosen|aenderungen|
+   * strategie). READ-ONLY. Optional — nur mcp/api verdrahten es (mit DB-Zugriff);
+   * im Unit-Test bleibt es undefined. Schreib-Aktionen gibt es hier bewusst NICHT.
+   */
+  ladePulse?: (art: string, args: Record<string, unknown>) => Promise<unknown>;
 }
 
 interface ToolDef {
@@ -75,7 +81,8 @@ const TOOLS: ToolDef[] = [
       "Deterministisch gerechnete Sales-&-Traffic-Kennzahlen des Sellers (Umsatz, " +
       "Sessions, Conversion-Rate, Durchschnittspreis, je ASIN). Aus den Rohwerten " +
       "gerechnet, nicht aus Amazons Prozentspalten. Deckt EINEN Marktplatz ab. " +
-      "Enthält data_timestamp, is_provisional und die verwendeten Formeln.",
+      "Enthält data_timestamp, is_provisional und die verwendeten Formeln. " +
+      "ACHTUNG: nur der aktuelle Bericht (~letzte Wochen) — für ältere Zeiträume/24 Monate get_sales_history nutzen.",
     inputSchema: LEERES_SCHEMA,
     handle: async (_args, ctx) => {
       const row = await ctx.ladeReport(SALES_TYPE);
@@ -90,7 +97,8 @@ const TOOLS: ToolDef[] = [
       "Umsatz je Kanal/ASIN/Status). Enthält MEHRERE Vertriebskanäle inkl. " +
       "Multi-Channel-Fulfillment — NICHT mit get_sales_overview vergleichen. " +
       "Leere Preise bedeuten 'unbekannt', nicht 0; das steht in umsatzVollstaendig " +
-      "und warnungen. Enthält data_timestamp und die verwendeten Formeln.",
+      "und warnungen. Enthält data_timestamp und die verwendeten Formeln. " +
+      "ACHTUNG: nur der aktuelle Bericht (~letzte Wochen) — für ältere Zeiträume/24 Monate get_orders_history nutzen.",
     inputSchema: LEERES_SCHEMA,
     handle: async (_args, ctx) => {
       const row = await ctx.ladeReport(ORDERS_TYPE);
@@ -219,10 +227,90 @@ const TOOLS: ToolDef[] = [
       return ctx.ladeVerlauf("returns", args);
     },
   },
+  // --- Pulse-Analytics (READ-ONLY; alles, was wir über die 6 Overviews hinaus gebaut haben) ---
+  {
+    name: "get_products",
+    description:
+      "Per-Produkt-Übersicht je ASIN über einen FREI WÄHLBAREN Zeitraum (bis ~24 Monate): " +
+      "Umsatz, Einheiten, Retouren und — falls Einkaufspreise (EK) hinterlegt sind — " +
+      "Rohertrag/Rohmarge. Ideal zum Suchen/Filtern nach Produktname oder ASIN über die " +
+      "Historie. Zeitraum via von/bis ('YYYY-MM-DD'), Default letzte 90 Tage.",
+    inputSchema: ZEITRAUM_SCHEMA,
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("produkte", args) : pulseNichtVerfuegbar()),
+  },
+  {
+    name: "get_kpi_history",
+    description:
+      "Monatliche KPI-Zeitreihe des Kontos (bis ~24 Monate): Umsatz, Einheiten, Sessions, " +
+      "Conversion-Rate, Retourenquote sowie — sofern verbunden — Amazon-Gebühren und " +
+      "Nettogewinn/Nettomarge. Für Trends und Monatsvergleiche.",
+    inputSchema: LEERES_SCHEMA,
+    handle: async (_args, ctx) => (ctx.ladePulse ? ctx.ladePulse("kpi", {}) : pulseNichtVerfuegbar()),
+  },
+  {
+    name: "get_profit_history",
+    description:
+      "Monatlicher Ertrag: Umsatz, Wareneinsatz (EK), Rohertrag/Rohmarge und — sofern " +
+      "Gebühren verbunden — Nettogewinn/Nettomarge. Rohertrag nur, wo EK je ASIN hinterlegt " +
+      "ist; sonst null (nicht 0). Ads noch nicht enthalten.",
+    inputSchema: LEERES_SCHEMA,
+    handle: async (_args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ertrag", {}) : pulseNichtVerfuegbar()),
+  },
+  {
+    name: "get_search_query_performance",
+    description:
+      "Search-Query-Performance (Brand Analytics) je ASIN: eigene vs. Markt-CTR/CVR und " +
+      "Kaufanteil pro Suchbegriff. Mit 'asin' → die Suchbegriffe dieser ASIN; ohne 'asin' → " +
+      "Liste der ASINs, für die Daten vorliegen.",
+    inputSchema: {
+      type: "object",
+      properties: { asin: { type: "string", description: "ASIN, deren Suchbegriffe geliefert werden. Weglassen für die Liste verfügbarer ASINs." } },
+      additionalProperties: false,
+    },
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("sqp", args) : pulseNichtVerfuegbar()),
+  },
+  {
+    name: "get_diagnoses",
+    description:
+      "Pulse-Diagnosen (regelbasiert, KEINE Kausalitätsbehauptung): Beobachtung, Begründung, " +
+      "Datenbasis, Konfidenz, Priorität, Status. Beobachtung ≠ Begründung.",
+    inputSchema: LEERES_SCHEMA,
+    handle: async (_args, ctx) => (ctx.ladePulse ? ctx.ladePulse("diagnosen", {}) : pulseNichtVerfuegbar()),
+  },
+  {
+    name: "get_change_log",
+    description:
+      "Änderungs-Log je ASIN (automatisch erkannt: Preis, Bestand/Out-of-Stock, Listing-Status, " +
+      "Fulfillment; plus manuell erfasste wie Bilder/Bewertungen). Filter via asin, von/bis " +
+      "('YYYY-MM-DD'). Fakt getrennt von Interpretation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        asin: { type: "string" },
+        von: { type: "string", description: "'YYYY-MM-DD'" },
+        bis: { type: "string", description: "'YYYY-MM-DD'" },
+      },
+      additionalProperties: false,
+    },
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("aenderungen", args) : pulseNichtVerfuegbar()),
+  },
+  {
+    name: "get_strategy_overview",
+    description:
+      "Strategie-Layer je ASIN: aktive Rolle (launch/scale/hold/harvest/exit), Korridor-Status " +
+      "und die max. 3 wichtigsten Findings der Woche plus offene Rollen-Vorschläge. Nur für " +
+      "Produkte mit Umsatz oder fester Rolle.",
+    inputSchema: LEERES_SCHEMA,
+    handle: async (_args, ctx) => (ctx.ladePulse ? ctx.ladePulse("strategie", {}) : pulseNichtVerfuegbar()),
+  },
 ];
 
 function verlaufNichtVerfuegbar(): Record<string, unknown> {
   return { fehler: "Verlaufs-Abfrage in diesem Kontext nicht verfügbar." };
+}
+
+function pulseNichtVerfuegbar(): Record<string, unknown> {
+  return { fehler: "Diese Auswertung ist über diese Schnittstelle nicht verfügbar." };
 }
 
 function keineDaten(reportType: string): Record<string, unknown> {

@@ -18,6 +18,13 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { dispatch, McpContext, protokollFehler } from "../_shared/mcp.ts";
 import { ladeVerlaufFactory } from "../_shared/verlauf.ts";
+import { produktUebersicht } from "../_shared/produkte.ts";
+import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
+import { ertragVerlauf } from "../_shared/ertrag.ts";
+import { listeSqp, sqpAsins } from "../_shared/sqp.ts";
+import { listeDiagnosen } from "../_shared/diagnostics.ts";
+import { changeEvents } from "../_shared/flightrecorder.ts";
+import { strategieUebersicht } from "../_shared/strategie_lauf.ts";
 
 Deno.serve(async (req) => {
   // MCP spricht ausschließlich POST. GET/anderes klar abweisen.
@@ -66,6 +73,22 @@ Deno.serve(async (req) => {
       return data;
     },
     ladeVerlauf: (art, verlaufArgs) => ladeVerlaufFactory(supabase, tenant_id)(art, verlaufArgs),
+    // Pulse-Analytics (read-only). tenant_id kommt aus dem Token, nie aus dem Body.
+    ladePulse: async (art, pulseArgs) => {
+      switch (art) {
+        case "produkte": return await produktUebersicht(supabase, tenant_id, pulseArgs);
+        case "kpi": return await kpiVerlauf(supabase, tenant_id);
+        case "ertrag": return await ertragVerlauf(supabase, tenant_id);
+        case "sqp": {
+          const asin = String((pulseArgs?.asin as string) ?? "").trim();
+          return asin ? await listeSqp(supabase, tenant_id, asin) : await sqpAsins(supabase, tenant_id);
+        }
+        case "diagnosen": return await listeDiagnosen(supabase, tenant_id);
+        case "aenderungen": return await changeEvents(supabase, tenant_id, { alle: true, ...pulseArgs });
+        case "strategie": return await strategieUebersicht(supabase, tenant_id);
+        default: return { fehler: `Unbekannte Datenart: ${art}` };
+      }
+    },
   };
 
   // MCP erlaubt Batch (Array) oder Einzelnachricht.
