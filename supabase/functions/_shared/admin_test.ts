@@ -68,13 +68,20 @@ Deno.test("freigebenKonto reicht caller/user/firmenname an die RPC durch", async
   const { client, calls } = rpcStub(null);
   await freigebenKonto(client, "admin-id", "ziel-id", "Meine Firma");
   assertEquals(calls[0].name, "admin_konto_freigeben");
-  assertEquals(calls[0].args, { p_caller: "admin-id", p_user_id: "ziel-id", p_firmenname: "Meine Firma" });
+  assertEquals(calls[0].args, { p_caller: "admin-id", p_user_id: "ziel-id", p_firmenname: "Meine Firma", p_tenant_id: null });
 });
 
 Deno.test("freigebenKonto ohne Firmenname sendet null", async () => {
   const s = rpcStub(null);
   await freigebenKonto(s.client, "a", "z");
   assertEquals((s.calls[0].args as any).p_firmenname, null);
+  assertEquals((s.calls[0].args as any).p_tenant_id, null);
+});
+
+Deno.test("freigebenKonto an bestehende Firma sendet p_tenant_id", async () => {
+  const s = rpcStub(null);
+  await freigebenKonto(s.client, "a", "z", null, "firma-123");
+  assertEquals((s.calls[0].args as any).p_tenant_id, "firma-123");
 });
 
 Deno.test("ablehnenKonto wirft bei RPC-Fehler", async () => {

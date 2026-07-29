@@ -117,7 +117,7 @@ Deno.serve(async (req) => {
     if (!zielUser) return json({ error: "user_id fehlt" }, 400);
     try {
       const r = body.action === "admin_konto_freigeben"
-        ? await freigebenKonto(service, userId, zielUser, (args as any)?.firmenname)
+        ? await freigebenKonto(service, userId, zielUser, (args as any)?.firmenname, (args as any)?.firma_id)
         : await ablehnenKonto(service, userId, zielUser);
       return json({ ok: true, action: body.action, data: r });
     } catch (e) {
@@ -175,7 +175,7 @@ Deno.serve(async (req) => {
     const email = String((args as any)?.email ?? "").trim();
     if (!email) return json({ error: "email fehlt" }, 400);
     try {
-      const r = await ladeEin(service, userId, email, (args as any)?.firmenname);
+      const r = await ladeEin(service, userId, email, (args as any)?.firmenname, (args as any)?.firma_id);
       return json({ ok: true, action: body.action, data: r });
     } catch (e) {
       return json({ error: "Einladung fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);

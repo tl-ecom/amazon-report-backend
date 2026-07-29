@@ -36,10 +36,11 @@ export async function meinKonto(supabase: any, callerId: string): Promise<{ stat
 /** Konto freigeben: legt bei Bedarf Firma + Mitgliedschaft an. Die RPC prüft selbst,
  * dass der Aufrufer Plattform-Admin ist (self-gating) — sonst wirft sie. */
 export async function freigebenKonto(
-  supabase: any, callerId: string, userId: string, firmenname?: string | null,
+  supabase: any, callerId: string, userId: string, firmenname?: string | null, tenantId?: string | null,
 ): Promise<{ ok: true }> {
   const { error } = await supabase.rpc("admin_konto_freigeben", {
     p_caller: callerId, p_user_id: userId, p_firmenname: firmenname ?? null,
+    p_tenant_id: tenantId ?? null,
   });
   if (error) throw new Error(`admin_konto_freigeben: ${error.message}`);
   return { ok: true };
@@ -105,7 +106,7 @@ export async function setzeTarif(
  * Braucht die Admin-Auth-API, deshalb explizite Admin-Prüfung statt RPC-Self-Gate.
  */
 export async function ladeEin(
-  supabase: any, callerId: string, email: string, firmenname?: string | null,
+  supabase: any, callerId: string, email: string, firmenname?: string | null, tenantId?: string | null,
 ): Promise<{ ok: true; email: string }> {
   if (!(await istPlattformAdmin(supabase, callerId))) {
     throw new Error("nicht autorisiert");
@@ -117,9 +118,10 @@ export async function ladeEin(
 
   const neu = data?.user;
   if (neu?.id) {
-    // Direkt freigeben -> legt Firma + Mitgliedschaft an, Status = freigegeben.
+    // Direkt freigeben -> an bestehende Firma (tenantId) hängen ODER neue anlegen.
     await supabase.rpc("admin_konto_freigeben", {
       p_caller: callerId, p_user_id: neu.id, p_firmenname: firmenname ?? null,
+      p_tenant_id: tenantId ?? null,
     });
   }
   return { ok: true, email };
