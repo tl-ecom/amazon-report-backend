@@ -556,6 +556,7 @@ Deno.serve(async (req) => {
               zeilen: p.rowCount,
               zeichensatz: p.encoding,
               spalten: p.header?.length ?? 0,
+              spalten_namen: p.header ?? [], // für Diagnose (echte, ggf. lokalisierte Header)
               // Sichtbar machen, dass gefiltert wurde — nicht stillschweigend.
               entfernte_pii_spalten: p.entfernteSpalten ?? [],
             },
