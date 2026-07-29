@@ -352,6 +352,23 @@ Deno.serve(async (req) => {
     if (resource === "returns_uebersicht") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await returnsVerlaufUebersicht(service, tenantId, args as any) });
     }
+    if (resource === "verbindungen") {
+      const { data: acs } = await service
+        .from("auth_contexts")
+        .select("source, status, marketplace_id, profile_id, connected_at")
+        .eq("tenant_id", tenantId).in("source", ["sp", "ads"]);
+      const map: Record<string, unknown> = { sp: { connected: false }, ads: { connected: false } };
+      for (const r of acs ?? []) {
+        map[(r as any).source] = {
+          connected: (r as any).status === "connected",
+          status: (r as any).status,
+          marketplace_id: (r as any).marketplace_id ?? null,
+          profile_id: (r as any).profile_id ?? null,
+          connected_at: (r as any).connected_at ?? null,
+        };
+      }
+      return json({ ok: true, resource, tenant_id: tenantId, data: map });
+    }
     if (resource === "fr_experiments") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await listeExperimente(service, tenantId, args as any) });
     }
