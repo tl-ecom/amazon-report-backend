@@ -36,19 +36,21 @@ export function mcpDirektUrl(base: string): string {
 export async function erzeugeMcpToken(
   supabase: any,
   tenant_id: string,
-  _user_id: string,
+  user_id: string,
   args: any,
 ): Promise<unknown> {
   const name = (String(args?.name ?? "").trim().slice(0, 60)) || "ChatGPT";
+  // "alte_widerrufen" nur die EIGENEN — nie fremde/Coach-Token.
   if (args?.alte_widerrufen) {
-    await supabase.from("mcp_tokens").update({ revoked: true }).eq("tenant_id", tenant_id).eq("revoked", false);
+    await supabase.from("mcp_tokens").update({ revoked: true })
+      .eq("tenant_id", tenant_id).eq("revoked", false).eq("created_by", user_id);
   }
 
   const token = zufallsToken();
   const token_hash = await sha256Hex(token);
   const { data, error } = await supabase
     .from("mcp_tokens")
-    .insert({ tenant_id, token_hash, name, revoked: false })
+    .insert({ tenant_id, token_hash, name, revoked: false, created_by: user_id })
     .select("id, name, created_at")
     .maybeSingle();
   if (error) throw new Error(`Token anlegen: ${error.message}`);
@@ -63,25 +65,42 @@ export async function erzeugeMcpToken(
   };
 }
 
-/** Listet die Tokens des Tenants — OHNE Klartext/Hash, nur Metadaten. */
-export async function listeMcpTokens(supabase: any, tenant_id: string): Promise<unknown> {
-  const { data, error } = await supabase
+/** Listet Tokens — OHNE Klartext/Hash. Teilnehmer (nicht-Admin) sehen NUR die
+ *  selbst erstellten; Coach/Admin sieht alle des Tenants (inkl. Coach-Token). */
+export async function listeMcpTokens(
+  supabase: any, tenant_id: string, user_id: string, isAdmin: boolean,
+): Promise<unknown> {
+  let q = supabase
     .from("mcp_tokens")
-    .select("id, name, created_at, last_used_at, revoked")
+    .select("id, name, created_at, last_used_at, revoked, created_by")
     .eq("tenant_id", tenant_id)
     .order("created_at", { ascending: false });
+  if (!isAdmin) q = q.eq("created_by", user_id);
+  const { data, error } = await q;
   if (error) throw new Error(`mcp_tokens: ${error.message}`);
-  return { tokens: data ?? [], mcp_url: mcpDirektUrl(Deno.env.get("SUPABASE_URL") ?? "") };
+  // created_by markiert Coach-Token für die UI, ohne fremde User-IDs breit zu streuen.
+  const tokens = (data ?? []).map((t: any) => ({
+    id: t.id, name: t.name, created_at: t.created_at, last_used_at: t.last_used_at,
+    revoked: t.revoked, coach_token: isAdmin ? t.created_by !== user_id : false,
+  }));
+  return { tokens, mcp_url: mcpDirektUrl(Deno.env.get("SUPABASE_URL") ?? "") };
 }
 
-/** Widerruft einen Token (nur der eigene Tenant). */
-export async function widerrufeMcpToken(supabase: any, tenant_id: string, _user_id: string, args: any): Promise<unknown> {
+/** Widerruft einen Token. Teilnehmer nur EIGENE; Coach/Admin jeden des Tenants. */
+export async function widerrufeMcpToken(
+  supabase: any, tenant_id: string, user_id: string, isAdmin: boolean, args: any,
+): Promise<unknown> {
   const id = String(args?.id ?? "").trim();
   if (!id) throw new Error("id fehlt");
-  const { data, error } = await supabase
+  const { data: tok, error: lErr } = await supabase
+    .from("mcp_tokens").select("id, created_by").eq("id", id).eq("tenant_id", tenant_id).maybeSingle();
+  if (lErr) throw new Error(`Widerruf-Lookup: ${lErr.message}`);
+  if (!tok) throw new Error("Token nicht gefunden.");
+  if (!isAdmin && tok.created_by !== user_id) throw new Error("Nur eigene Zugänge widerrufbar.");
+
+  const { error } = await supabase
     .from("mcp_tokens").update({ revoked: true })
-    .eq("id", id).eq("tenant_id", tenant_id).select("id").maybeSingle();
+    .eq("id", id).eq("tenant_id", tenant_id);
   if (error) throw new Error(`Widerruf: ${error.message}`);
-  if (!data) throw new Error("Token nicht gefunden.");
   return { ok: true };
 }

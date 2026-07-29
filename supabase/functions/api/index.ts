@@ -238,7 +238,7 @@ Deno.serve(async (req) => {
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
       if (action === "mcp_token_widerrufen") {
-        const r = await widerrufeMcpToken(service, tenantId, userData.user.id, args as any);
+        const r = await widerrufeMcpToken(service, tenantId, userData.user.id, firma.is_admin, args as any);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
       if (action === "sqp_laden") {
@@ -347,7 +347,7 @@ Deno.serve(async (req) => {
       return json({ ok: true, resource, tenant_id: tenantId, data: await strategieUebersicht(service, tenantId) });
     }
     if (resource === "mcp_tokens") {
-      return json({ ok: true, resource, tenant_id: tenantId, data: await listeMcpTokens(service, tenantId) });
+      return json({ ok: true, resource, tenant_id: tenantId, data: await listeMcpTokens(service, tenantId, userData.user.id, firma.is_admin) });
     }
     if (resource === "fr_experiments") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await listeExperimente(service, tenantId, args as any) });

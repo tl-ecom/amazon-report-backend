@@ -130,6 +130,15 @@ Deno.serve(async (req) => {
       return json({ error: "auth_context speichern fehlgeschlagen", detail: upErr.message }, 500);
     }
 
+    // --- 3b) Automatisch: Sofort-Sync (aktuelle Daten + ASINs) + 24-Monats-Backfill.
+    // Best-effort — die Verbindung gilt auch dann als hergestellt, wenn das hakt.
+    // sync_jetzt stößt die Standard-Reports an; backfill_starten legt die History-
+    // Chunks an, die der backfill-alle-Cron dann abarbeitet. Beide idempotent.
+    try {
+      await service.rpc("sync_jetzt", { p_tenant: tenantId });
+      await service.rpc("backfill_starten", { p_tenant: tenantId, p_monate: 24 });
+    } catch (_) { /* nicht blockierend */ }
+
     // --- 4) Antwort — KEINE Secrets ---
     return json({
       ok: true,
