@@ -106,13 +106,20 @@ export async function salesRange(supabase: any, tenant_id: string, args: any): P
     e.sessions += r.sessions;
     proMonat.set(monat, e);
   }
-  const monatlich = [...proMonat].map(([monat, e]) => ({
-    monat,
-    umsatz: Math.round(e.umsatz_cents) / 100,
-    units: e.units,
-    sessions: e.sessions,
-    cvr: e.sessions ? Math.round((e.units / e.sessions) * 10000) / 100 : null,
-  }));
+  // Angeschnittenen START-Monat weglassen: beginnt der Zeitraum mitten im Monat,
+  // hat dieser Monat nur wenige Tage -> irreführender Stummel-Balken. Der laufende
+  // End-Monat (bis heute) bleibt bewusst drin (= „so weit diesen Monat").
+  const vonMonat = von.slice(0, 7);
+  const startAngeschnitten = von.slice(8, 10) !== "01";
+  const monatlich = [...proMonat]
+    .filter(([monat]) => !(startAngeschnitten && monat === vonMonat))
+    .map(([monat, e]) => ({
+      monat,
+      umsatz: Math.round(e.umsatz_cents) / 100,
+      units: e.units,
+      sessions: e.sessions,
+      cvr: e.sessions ? Math.round((e.units / e.sessions) * 10000) / 100 : null,
+    }));
 
   return {
     art: "sales",
