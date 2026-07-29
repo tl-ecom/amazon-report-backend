@@ -30,6 +30,7 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   get_listings_overview: "listings",
   get_ads_overview: "ads",
   get_returns_overview: "returns",
+  returns_uebersicht: "returns",
   get_product_performance: "products",
   produkt_uebersicht: "products",
   sqp: "sqp",

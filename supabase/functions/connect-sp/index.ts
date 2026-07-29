@@ -143,6 +143,7 @@ Deno.serve(async (req) => {
     // Chunks an, die der backfill-alle-Cron dann abarbeitet. Beide idempotent.
     try {
       await service.rpc("sync_jetzt", { p_tenant: tenantId });
+      await service.rpc("sync_finances_jetzt", { p_tenant: tenantId }); // Gebühren
       await service.rpc("backfill_starten", { p_tenant: tenantId, p_monate: 24 });
     } catch (_) { /* nicht blockierend */ }
 

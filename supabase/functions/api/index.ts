@@ -12,7 +12,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { McpContext, rufeToolAuf, toolNamen } from "../_shared/mcp.ts";
-import { ladeVerlaufFactory } from "../_shared/verlauf.ts";
+import { ladeVerlaufFactory, returnsVerlaufUebersicht } from "../_shared/verlauf.ts";
 import { asinTimeline, changeEvents, erfasseManuelleAenderung, frProdukte, setzeKontext } from "../_shared/flightrecorder.ts";
 import { bestaetigeStrategie, listeStrategien, setzeReview, strategieHistorie, verwerfeVorschlag } from "../_shared/strategie_flow.ts";
 import { laufeStrategie, strategieUebersicht } from "../_shared/strategie_lauf.ts";
@@ -348,6 +348,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "mcp_tokens") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await listeMcpTokens(service, tenantId, userData.user.id, firma.is_admin) });
+    }
+    if (resource === "returns_uebersicht") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await returnsVerlaufUebersicht(service, tenantId, args as any) });
     }
     if (resource === "fr_experiments") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await listeExperimente(service, tenantId, args as any) });
