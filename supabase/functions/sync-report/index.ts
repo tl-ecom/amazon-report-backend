@@ -124,6 +124,21 @@ const REPORT_KONFIG: Record<string, ReportKonfig> = {
     maxDays: 30,
     piiSpalten: ["customer-comments"],
   },
+  GET_FBA_REIMBURSEMENTS_DATA: {
+    format: "tsv",
+    // Was Amazon dir erstattet hat. Selten -> längeres Fenster sinnvoll. Braucht die
+    // Rolle "Finanzen und Buchhaltung" (bei Vaneja vorhanden). Keine Endkundendaten.
+    stableLagDays: 0,
+    maxDays: 180,
+  },
+  GET_LEDGER_DETAIL_VIEW_DATA: {
+    format: "tsv",
+    // Inventar-Ledger (Bewegungen); wir filtern beim Ingest auf Adjustments
+    // (Verlust/Schaden/Fund). Braucht die Rolle "Lagerbestands-/Bestellverfolgung".
+    reportOptions: { aggregateByLocation: "COUNTRY" },
+    stableLagDays: 0,
+    maxDays: 60,
+  },
   GET_FBA_MYI_UNSUPPRESSED_INVENTORY_DATA: {
     format: "tsv",
     // Momentaufnahme des FBA-Bestands, KEIN Zeitraum.
