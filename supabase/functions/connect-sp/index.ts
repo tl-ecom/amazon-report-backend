@@ -58,6 +58,13 @@ Deno.serve(async (req) => {
 
     const service = createClient(SUPABASE_URL, SERVICE_KEY);
 
+    // NUR der Coach (Plattform-Admin) darf die SP-API-Verbindung verwalten.
+    // Teilnehmer (auch Firmen-'admin'/'viewer') werden abgewiesen — der Coach stellt
+    // die Verbindung her (Coach-Connect via company_id).
+    if (!(await istPlattformAdmin(service, userData.user.id))) {
+      return json({ error: "Nur der Coach darf die SP-API-Verbindung verwalten." }, 403);
+    }
+
     // Zieltenant: die eigene Firma — ODER, NUR als Plattform-Admin, ein gewählter
     // Kunde (company_id). So kann der Betreiber in der Coach-Ansicht die Verbindung
     // für den Coachee herstellen, ohne sich als dieser einloggen zu müssen.
