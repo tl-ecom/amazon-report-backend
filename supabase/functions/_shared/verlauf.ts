@@ -181,39 +181,62 @@ export async function returnsRange(supabase: any, tenant_id: string, args: any):
  *  Overview-Tab sonst leer. Hier tolerant über beide Quellen, gleiche Ausgabeform. */
 export async function returnsVerlaufUebersicht(supabase: any, tenant_id: string, args: any): Promise<unknown> {
   const { von, bis } = zeitraum(args);
-  const rows = await alleZeilen(supabase, "returns_history", tenant_id, "return_request_date", von, bisExklusiv(bis));
+  const asinFilter = typeof args?.asin === "string" && args.asin.trim() ? args.asin.trim() : null;
 
+  // Retouren + verkaufte Einheiten je ASIN (für die Retourenquote in % vom Verkauf).
+  const [rows, prodRes] = await Promise.all([
+    alleZeilen(supabase, "returns_history", tenant_id, "return_request_date", von, bisExklusiv(bis)),
+    supabase.rpc("produkt_uebersicht", { p_tenant: tenant_id, p_von: von, p_bis: bis }),
+  ]);
+  const verkauft = new Map<string, { name: string; einheiten: number }>();
+  for (const p of prodRes.data ?? []) {
+    verkauft.set(p.asin, { name: p.produktname ?? p.asin, einheiten: Number(p.einheiten) || 0 });
+  }
+
+  const proAsin = new Map<string, { asin: string; name: string; retouren: number; einheiten: number }>();
+  const proGrund = new Map<string, number>(); // je nach Filter: eine ASIN oder alle
   let retouren = 0, einheiten = 0, erstattetCents = 0, erstattetBekannt = false;
   let waehrung: string | null = null;
-  const proGrund = new Map<string, number>();
-  const proAsin = new Map<string, { asin: string; name: string; retouren: number; einheiten: number }>();
 
   for (const r of rows) {
-    const menge = Number(r.return_quantity) || 1;
-    retouren += 1;
-    einheiten += menge;
-    if (r.refunded_cents != null) { erstattetCents += Number(r.refunded_cents) || 0; erstattetBekannt = true; }
-    if (!waehrung && r.currency) waehrung = String(r.currency);
-    const grund = (r.return_reason && String(r.return_reason).trim()) || "Unbekannt";
-    proGrund.set(grund, (proGrund.get(grund) ?? 0) + 1);
     const asin = (r.asin && String(r.asin).trim()) || "—";
-    const e = proAsin.get(asin) ?? { asin, name: (r.item_name && String(r.item_name)) || asin, retouren: 0, einheiten: 0 };
-    e.retouren += 1; e.einheiten += menge;
-    proAsin.set(asin, e);
+    const menge = Number(r.return_quantity) || 1;
+
+    // Je ASIN IMMER (unabhängig vom Filter) — für Tabelle + Auswahl.
+    const ea = proAsin.get(asin) ?? { asin, name: verkauft.get(asin)?.name ?? ((r.item_name && String(r.item_name)) || asin), retouren: 0, einheiten: 0 };
+    ea.retouren += 1; ea.einheiten += menge;
+    proAsin.set(asin, ea);
+
+    // Gründe + Gesamt: auf die gewählte ASIN beziehen (sonst global).
+    if (!asinFilter || asin === asinFilter) {
+      retouren += 1; einheiten += menge;
+      if (r.refunded_cents != null) { erstattetCents += Number(r.refunded_cents) || 0; erstattetBekannt = true; }
+      if (!waehrung && r.currency) waehrung = String(r.currency);
+      const grund = (r.return_reason && String(r.return_reason).trim()) || "Unbekannt";
+      proGrund.set(grund, (proGrund.get(grund) ?? 0) + 1);
+    }
   }
+
+  const nach_asin = [...proAsin.values()].map((a) => {
+    const vk = verkauft.get(a.asin)?.einheiten ?? 0;
+    // Retourenquote = zurückgesandte Einheiten / verkaufte Einheiten.
+    return { ...a, verkauft: vk, retourenquote: vk > 0 ? Math.round((a.einheiten / vk) * 1000) / 10 : null };
+  }).sort((a, b) => b.retouren - a.retouren);
 
   return {
     zeitraum: { von, bis },
     unvalidiert: false,
     warnungen: [] as string[],
+    asin_filter: asinFilter,
     gesamt: {
       retouren, einheiten,
       erstattet_bekannt: erstattetBekannt ? Math.round(erstattetCents) / 100 : null,
       waehrung: waehrung ?? "EUR",
     },
     nach_grund: [...proGrund].map(([grund, r]) => ({ grund, retouren: r })).sort((a, b) => b.retouren - a.retouren),
-    nach_asin: [...proAsin.values()].sort((a, b) => b.retouren - a.retouren),
-    quelle: "returns_history (normalisiert, FBM+FBA)",
+    nach_asin,
+    asins: nach_asin.map((a) => ({ asin: a.asin, name: a.name })),
+    quelle: "returns_history + produkt_uebersicht",
   };
 }
 
