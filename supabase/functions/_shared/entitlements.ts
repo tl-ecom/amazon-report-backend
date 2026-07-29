@@ -39,6 +39,7 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   reimbursements_radar: "erstattungen",
   stockout_radar: "nachschub",
   ladenhueter_radar: "ladenhueter",
+  board_report: "board",
   coaching_notes: "notes",
   // Aktionen
   note_erstellen: "notes",

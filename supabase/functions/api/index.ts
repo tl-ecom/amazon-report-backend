@@ -30,6 +30,7 @@ import { anstossenSqp, listeSqp, sqpAsins } from "../_shared/sqp.ts";
 import { radarDaten } from "../_shared/reimbursements.ts";
 import { stockoutRadar } from "../_shared/stockouts.ts";
 import { ladenhueterRadar } from "../_shared/ladenhueter.ts";
+import { boardReport } from "../_shared/board.ts";
 import { ertragVerlauf, listeEk, loescheEk, setzeEk } from "../_shared/ertrag.ts";
 import { ladeEinstellungen, setzeEinstellungen } from "../_shared/einstellungen.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, legeFirmaAn, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
@@ -413,6 +414,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "ladenhueter_radar") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await ladenhueterRadar(service, tenantId) });
+    }
+    if (resource === "board_report") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await boardReport(service, tenantId) });
     }
     if (resource === "ertrag_verlauf") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await ertragVerlauf(service, tenantId) });
