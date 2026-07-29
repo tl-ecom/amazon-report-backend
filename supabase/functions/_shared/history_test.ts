@@ -80,3 +80,16 @@ Deno.test("baueReimbursementsRows: leerer Payload -> []", () => {
   assertEquals(baueReimbursementsRows("t1", null).length, 0);
   assertEquals(baueLedgerAdjustmentsRows("t1", {}).length, 0);
 });
+
+Deno.test("baueLedgerAdjustmentsRows: gequotete Header UND Werte (Ledger-Report)", () => {
+  const payload = { rows: [{
+    '"Date"': '"2026-06-05"', '"Event Type"': '"Adjustments"', '"ASIN"': '"B0X"',
+    '"MSKU"': '"CX9"', '"Quantity"': '"-4"', '"Reason"': '"M"', '"Disposition"': '"SELLABLE"',
+  }] };
+  const rows = baueLedgerAdjustmentsRows("t1", payload) as any[];
+  assertEquals(rows.length, 1);
+  assertEquals(rows[0].asin, "B0X");
+  assertEquals(rows[0].quantity, -4);
+  assertEquals(rows[0].reason, "M");
+  assertEquals(rows[0].sku, "CX9");
+});
