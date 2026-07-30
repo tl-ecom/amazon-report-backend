@@ -131,22 +131,32 @@ async function tenantAusToken(req: Request, supabase: any): Promise<string | nul
 
   const hash = await sha256Hex(token);
 
-  const { data, error } = await supabase
+  // 1) Statischer Token (mcp_tokens) — der bestehende „einfache" Weg.
+  const { data: statisch } = await supabase
     .from("mcp_tokens")
     .select("id, tenant_id")
     .eq("token_hash", hash)
     .eq("revoked", false)
     .maybeSingle();
+  if (statisch) {
+    supabase.from("mcp_tokens").update({ last_used_at: new Date().toISOString() }).eq("id", statisch.id).then(() => {}, () => {});
+    return statisch.tenant_id as string;
+  }
 
-  if (error || !data) return null;
+  // 2) OAuth-Access-Token (oauth_tokens) — Self-Serve-Weg. Muss gültig, nicht
+  //    widerrufen und nicht abgelaufen sein.
+  const { data: oauth } = await supabase
+    .from("oauth_tokens")
+    .select("id, tenant_id, access_expires_at")
+    .eq("access_hash", hash)
+    .eq("revoked", false)
+    .maybeSingle();
+  if (oauth && new Date(oauth.access_expires_at).getTime() > Date.now()) {
+    supabase.from("oauth_tokens").update({ last_used_at: new Date().toISOString() }).eq("id", oauth.id).then(() => {}, () => {});
+    return oauth.tenant_id as string;
+  }
 
-  // last_used_at nachziehen — nicht blockierend, Fehler hier sind egal.
-  supabase.from("mcp_tokens").update({ last_used_at: new Date().toISOString() }).eq("id", data.id).then(
-    () => {},
-    () => {}
-  );
-
-  return data.tenant_id as string;
+  return null;
 }
 
 async function sha256Hex(s: string): Promise<string> {
