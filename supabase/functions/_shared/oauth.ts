@@ -73,6 +73,23 @@ export async function sha256Hex(s: string): Promise<string> {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** Base64url ohne Padding aus Bytes. */
+export function base64Url(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** PKCE-Challenge (S256) aus einem code_verifier. */
+export async function pkceS256(verifier: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  return base64Url(new Uint8Array(buf));
+}
+
+/** Prüft PKCE: S256(code_verifier) == gespeicherte code_challenge. */
+export async function pkceStimmt(verifier: string, challenge: string): Promise<boolean> {
+  if (!verifier || !challenge) return false;
+  return (await pkceS256(verifier)) === challenge;
+}
+
 /** Kryptografisch zufälliges URL-sicheres Token (Base64url ohne Padding). */
 export function zufallsToken(bytes = 32): string {
   const b = new Uint8Array(bytes);

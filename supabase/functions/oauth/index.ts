@@ -12,7 +12,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
-  baueAsMetadata, baueResourceMetadata, escHtml, oauthBasis, pruefeAuthorizeParams,
+  baueAsMetadata, baueResourceMetadata, escHtml, oauthBasis, pkceStimmt, pruefeAuthorizeParams,
   pruefeRedirectUris, pruefeTicket, redirectMitCode, sha256Hex, signeTicket, zufallsToken,
 } from "../_shared/oauth.ts";
 
@@ -22,8 +22,10 @@ const CORS = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
-const CODE_TTL_MS = 5 * 60 * 1000;   // Auth-Code 5 Min gültig
-const TICKET_TTL_MS = 10 * 60 * 1000; // Coach-Login-Ticket 10 Min gültig
+const CODE_TTL_MS = 5 * 60 * 1000;      // Auth-Code 5 Min gültig
+const TICKET_TTL_MS = 10 * 60 * 1000;   // Coach-Login-Ticket 10 Min gültig
+const ACCESS_TTL_MS = 60 * 60 * 1000;   // Access-Token 1 Std
+const REFRESH_TTL_MS = 30 * 86400 * 1000; // Refresh-Token 30 Tage
 
 const SB_URL = () => Deno.env.get("SUPABASE_URL")!;
 const ANON = () => Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -65,10 +67,103 @@ Deno.serve(async (req) => {
     return req.method === "GET" ? authorizeGet(req, issuer) : authorizePost(req, issuer);
   }
   if (path.endsWith("/token")) {
-    return json({ error: "temporarily_unavailable", error_description: "Token-Endpoint folgt in Schritt 3" }, 501);
+    return req.method === "POST" ? tokenPost(req) : json({ error: "invalid_request", error_description: "POST erforderlich" }, 405);
   }
   return json({ error: "not_found" }, 404);
 });
+
+// --- /token: Code einlösen bzw. Refresh (RFC 6749 + PKCE RFC 7636) ---
+async function tokenPost(req: Request): Promise<Response> {
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    return oauthErr("invalid_request", "Body muss application/x-www-form-urlencoded sein");
+  }
+  const grant = String(form.get("grant_type") ?? "");
+  if (grant === "authorization_code") return codeGegenToken(form);
+  if (grant === "refresh_token") return refreshGrant(form);
+  return oauthErr("unsupported_grant_type", `grant_type '${grant}' nicht unterstützt`);
+}
+
+async function codeGegenToken(form: FormData): Promise<Response> {
+  const code = String(form.get("code") ?? "");
+  const verifier = String(form.get("code_verifier") ?? "");
+  const client_id = String(form.get("client_id") ?? "");
+  const redirect_uri = String(form.get("redirect_uri") ?? "");
+  if (!code || !verifier || !client_id) return oauthErr("invalid_request", "code, code_verifier, client_id erforderlich");
+
+  const code_hash = await sha256Hex(code);
+  const db = service();
+  const { data: row } = await db.from("oauth_auth_codes").select("*").eq("code_hash", code_hash).maybeSingle();
+  if (!row) return oauthErr("invalid_grant", "Code unbekannt");
+  if (row.used) return oauthErr("invalid_grant", "Code bereits eingelöst");
+  if (new Date(row.expires_at).getTime() < Date.now()) return oauthErr("invalid_grant", "Code abgelaufen");
+  if (row.client_id !== client_id) return oauthErr("invalid_grant", "client_id passt nicht zum Code");
+  if (redirect_uri && row.redirect_uri !== redirect_uri) return oauthErr("invalid_grant", "redirect_uri passt nicht");
+  if (!(await pkceStimmt(verifier, row.code_challenge))) return oauthErr("invalid_grant", "PKCE-Verifier falsch");
+
+  // Single-Use: Code sofort verbrauchen.
+  await db.from("oauth_auth_codes").update({ used: true }).eq("code_hash", code_hash);
+  return tokenAusstellen(row.client_id, row.user_id, row.tenant_id, row.scope);
+}
+
+async function refreshGrant(form: FormData): Promise<Response> {
+  const refresh = String(form.get("refresh_token") ?? "");
+  const client_id = String(form.get("client_id") ?? "");
+  if (!refresh) return oauthErr("invalid_request", "refresh_token erforderlich");
+
+  const refresh_hash = await sha256Hex(refresh);
+  const db = service();
+  const { data: row } = await db.from("oauth_tokens").select("*").eq("refresh_hash", refresh_hash).eq("revoked", false).maybeSingle();
+  if (!row) return oauthErr("invalid_grant", "Refresh-Token unbekannt oder widerrufen");
+  if (row.refresh_expires_at && new Date(row.refresh_expires_at).getTime() < Date.now()) return oauthErr("invalid_grant", "Refresh-Token abgelaufen");
+  if (client_id && row.client_id !== client_id) return oauthErr("invalid_grant", "client_id passt nicht");
+
+  // Access UND Refresh rotieren (Best Practice).
+  const access = zufallsToken(32);
+  const neuRefresh = zufallsToken(32);
+  const now = Date.now();
+  const { error } = await db.from("oauth_tokens").update({
+    access_hash: await sha256Hex(access),
+    refresh_hash: await sha256Hex(neuRefresh),
+    access_expires_at: new Date(now + ACCESS_TTL_MS).toISOString(),
+    refresh_expires_at: new Date(now + REFRESH_TTL_MS).toISOString(),
+    last_used_at: new Date().toISOString(),
+  }).eq("id", row.id);
+  if (error) return oauthErr("server_error", error.message, 500);
+  return tokenAntwort(access, neuRefresh, row.scope);
+}
+
+async function tokenAusstellen(client_id: string, user_id: string, tenant_id: string, scope: string | null): Promise<Response> {
+  const access = zufallsToken(32);
+  const refresh = zufallsToken(32);
+  const now = Date.now();
+  const { error } = await service().from("oauth_tokens").insert({
+    access_hash: await sha256Hex(access),
+    refresh_hash: await sha256Hex(refresh),
+    client_id, user_id, tenant_id, scope: scope || "mcp",
+    access_expires_at: new Date(now + ACCESS_TTL_MS).toISOString(),
+    refresh_expires_at: new Date(now + REFRESH_TTL_MS).toISOString(),
+    revoked: false,
+  });
+  if (error) return oauthErr("server_error", error.message, 500);
+  return tokenAntwort(access, refresh, scope);
+}
+
+function tokenAntwort(access: string, refresh: string, scope: string | null): Response {
+  return json({
+    access_token: access,
+    token_type: "Bearer",
+    expires_in: Math.floor(ACCESS_TTL_MS / 1000),
+    refresh_token: refresh,
+    scope: scope || "mcp",
+  });
+}
+
+function oauthErr(error: string, error_description: string, status = 400): Response {
+  return json({ error, error_description }, status);
+}
 
 // --- Dynamic Client Registration (RFC 7591) ---
 async function dcrRegister(req: Request): Promise<Response> {

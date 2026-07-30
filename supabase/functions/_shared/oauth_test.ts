@@ -1,7 +1,7 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert@1";
 import {
-  baueAsMetadata, baueResourceMetadata, escHtml, pruefeAuthorizeParams, pruefeRedirectUris,
-  pruefeTicket, redirectMitCode, ressourcenMetadatenUrl, signeTicket,
+  baueAsMetadata, baueResourceMetadata, escHtml, pkceS256, pkceStimmt, pruefeAuthorizeParams,
+  pruefeRedirectUris, pruefeTicket, redirectMitCode, ressourcenMetadatenUrl, signeTicket,
 } from "./oauth.ts";
 
 Deno.test("AS-Metadaten: Endpunkte relativ zum Issuer, PKCE S256, public client", () => {
@@ -52,6 +52,15 @@ Deno.test("redirectMitCode hängt code + state an, behält vorhandene Query", ()
 
 Deno.test("escHtml neutralisiert Sonderzeichen", () => {
   assertEquals(escHtml(`<b>"&'`), "&lt;b&gt;&quot;&amp;&#39;");
+});
+
+Deno.test("PKCE S256 gegen RFC-7636-Testvektor", async () => {
+  const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+  const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+  assertEquals(await pkceS256(verifier), challenge);
+  assertEquals(await pkceStimmt(verifier, challenge), true);
+  assertEquals(await pkceStimmt("falsch", challenge), false);
+  assertEquals(await pkceStimmt(verifier, ""), false);
 });
 
 Deno.test("Ticket: sign -> prüfen roundtrip; abgelaufen/verfälscht -> null", async () => {
