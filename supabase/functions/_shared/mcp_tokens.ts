@@ -77,7 +77,7 @@ export async function erzeugeMcpToken(
     .maybeSingle();
   if (error) throw new Error(`Token anlegen: ${error.message}`);
 
-  const base = Deno.env.get("SUPABASE_URL") ?? "";
+  const base = oeffentlicheBasis();
   const slug = await tenantSlug(supabase, tenant_id);
   return {
     id: data?.id,
@@ -86,6 +86,12 @@ export async function erzeugeMcpToken(
     connector_url: mcpConnectorUrl(base, token, slug),
     mcp_url: mcpDirektUrl(base, slug),
   };
+}
+
+/** Öffentliche Basis-URL: gebrandete Domain (MCP_PUBLIC_BASE), sonst Supabase.
+ *  Der Pfad /functions/v1/… bleibt gleich → ein einziger Proxy-Rewrite genügt. */
+export function oeffentlicheBasis(): string {
+  return Deno.env.get("MCP_PUBLIC_BASE") ?? Deno.env.get("SUPABASE_URL") ?? "";
 }
 
 /** Listet Tokens — OHNE Klartext/Hash. Teilnehmer (nicht-Admin) sehen NUR die
@@ -107,7 +113,7 @@ export async function listeMcpTokens(
     revoked: t.revoked, coach_token: isAdmin ? t.created_by !== user_id : false,
   }));
   const slug = await tenantSlug(supabase, tenant_id);
-  return { tokens, mcp_url: mcpDirektUrl(Deno.env.get("SUPABASE_URL") ?? "", slug) };
+  return { tokens, mcp_url: mcpDirektUrl(oeffentlicheBasis(), slug) };
 }
 
 /** Widerruft einen Token. Teilnehmer nur EIGENE; Coach/Admin jeden des Tenants. */
