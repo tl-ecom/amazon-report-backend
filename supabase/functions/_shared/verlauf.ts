@@ -69,6 +69,70 @@ function bisExklusiv(bis: string): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Alle Kalendertage von..bis (inklusiv, UTC), als 'YYYY-MM-DD'. */
+function tageIm(von: string, bis: string): string[] {
+  const raus: string[] = [];
+  const d = new Date(von + "T00:00:00Z");
+  const end = new Date(bis + "T00:00:00Z");
+  // 400-Tage-Sicherung gegen kaputte Eingaben (von>bis liefert leer).
+  for (let i = 0; d.getTime() <= end.getTime() && i < 3700; i++) {
+    raus.push(d.toISOString().slice(0, 10));
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return raus;
+}
+
+const FEHLEND_CAP = 62; // fehlende_tage-Liste deckeln (Anzahl bleibt vollständig)
+
+export interface ZeitraumAnalyse {
+  angefragt: { von: string; bis: string };
+  verfuegbar: { von: string; bis: string } | null;
+  latest_available_date: string | null;
+  tage_mit_daten: number;
+  fehlende_tage: string[];
+  fehlende_tage_anzahl: number;
+  is_provisional: boolean;
+  warnungen: string[];
+}
+
+/**
+ * Vergleicht den ANGEFRAGTEN Zeitraum mit den TATSÄCHLICH vorhandenen Tagesdaten.
+ * Rein & testbar. Kernprinzip Ehrlichkeit: nie stillschweigend behaupten, der
+ * volle Zeitraum sei enthalten. `is_provisional` = es fehlt mindestens ein Tag.
+ */
+export function analysiereZeitraum(von: string, bis: string, vorhandeneDaten: string[]): ZeitraumAnalyse {
+  const set = new Set(vorhandeneDaten.map((d) => String(d).slice(0, 10)));
+  const alle = tageIm(von, bis);
+  const imBereich = [...set].filter((t) => t >= von && t <= bis).sort();
+  const fehlend = alle.filter((t) => !set.has(t));
+
+  const verfuegbar = imBereich.length ? { von: imBereich[0], bis: imBereich[imBereich.length - 1] } : null;
+  const warnungen: string[] = [];
+  if (!verfuegbar) {
+    warnungen.push("Keine Sales-&-Traffic-Daten im angefragten Zeitraum.");
+  } else {
+    if (verfuegbar.bis < bis) {
+      warnungen.push(`Sales-&-Traffic-Daten reichen nur bis ${verfuegbar.bis}; Amazon liefert die letzten 1–2 Tage verzögert.`);
+    }
+    if (verfuegbar.von > von) {
+      warnungen.push(`Daten beginnen erst am ${verfuegbar.von}; davor liegen keine Sales-&-Traffic-Daten vor.`);
+    }
+    const innen = fehlend.filter((t) => t > verfuegbar.von && t < verfuegbar.bis);
+    if (innen.length) warnungen.push(`${innen.length} Tag(e) innerhalb des verfügbaren Zeitraums fehlen (Datenlücke).`);
+  }
+
+  return {
+    angefragt: { von, bis },
+    verfuegbar,
+    latest_available_date: verfuegbar?.bis ?? null,
+    tage_mit_daten: imBereich.length,
+    fehlende_tage: fehlend.slice(0, FEHLEND_CAP),
+    fehlende_tage_anzahl: fehlend.length,
+    is_provisional: fehlend.length > 0,
+    warnungen,
+  };
+}
+
 // --- Sales (aus sales_daily) ---
 
 export async function salesRange(supabase: any, tenant_id: string, args: any): Promise<unknown> {
@@ -121,9 +185,23 @@ export async function salesRange(supabase: any, tenant_id: string, args: any): P
       cvr: e.sessions ? Math.round((e.units / e.sessions) * 10000) / 100 : null,
     }));
 
+  // Ehrlichkeit: angefragten Zeitraum mit den TATSÄCHLICH vorhandenen Tagen abgleichen.
+  const analyse = analysiereZeitraum(von, bis, rows.map((r) => String(r.datum)));
+  const data_timestamp = rows.reduce((m: string, r: any) => (r.updated_at && String(r.updated_at) > m ? String(r.updated_at) : m), "") || null;
+
   return {
     art: "sales",
-    zeitraum: { von, bis, tage: rows.length },
+    // zeitraum bleibt (Rückwärtskompatibilität); tage = Tage MIT Daten, nicht Kalendertage.
+    zeitraum: { von, bis, tage: analyse.tage_mit_daten },
+    angefragter_zeitraum: analyse.angefragt,
+    verfuegbarer_zeitraum: analyse.verfuegbar,
+    latest_available_date: analyse.latest_available_date,
+    tage_mit_daten: analyse.tage_mit_daten,
+    fehlende_tage: analyse.fehlende_tage,
+    fehlende_tage_anzahl: analyse.fehlende_tage_anzahl,
+    is_provisional: analyse.is_provisional,
+    warnungen: analyse.warnungen,
+    data_timestamp,
     gesamt,
     monatlich,
     quelle: "sales_daily (Verlauf)",
