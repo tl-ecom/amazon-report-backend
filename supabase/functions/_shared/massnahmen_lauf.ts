@@ -90,33 +90,4 @@ export async function setzeMassnahmeStatus(supabase: any, tenant_id: string, arg
   return { ok: true };
 }
 
-/**
- * Wiedervorlage: was seit dem vorletzten Befund passiert ist. Grundlage für
- * „Letzter Lauf: drei Maßnahmen, zwei erledigt, erwarteter Effekt +X €/Monat".
- * Der Ist-Abgleich (tatsächliche Veränderung) folgt mit dem Loop-Baustein.
- */
-export async function wiedervorlage(supabase: any, tenant_id: string, asin: string): Promise<unknown> {
-  if (!asin) return { vorhanden: false };
-  const { data: befunde } = await supabase.from("strategie_befund")
-    .select("id, stichtag, erstellt_am").eq("tenant_id", tenant_id).eq("asin", asin)
-    .order("erstellt_am", { ascending: false }).limit(2);
-  const vorletzter = (befunde ?? [])[1] ?? null;
-  if (!vorletzter) return { vorhanden: false };
-
-  const { data: m } = await supabase.from("strategie_massnahme")
-    .select("id, text, effekt_eur, status, grund, erledigt_am")
-    .eq("tenant_id", tenant_id).eq("asin", asin).eq("befund_id", vorletzter.id);
-  const massnahmen = (m ?? []) as any[];
-  const erledigt = massnahmen.filter((x) => x.status === "erledigt");
-
-  return {
-    vorhanden: massnahmen.length > 0,
-    seit: vorletzter.stichtag,
-    gesamt: massnahmen.length,
-    erledigt: erledigt.length,
-    verworfen: massnahmen.filter((x) => x.status === "verworfen").length,
-    offen: massnahmen.filter((x) => x.status === "offen").length,
-    erwarteter_effekt_erledigt: summeEffekt(erledigt),
-    massnahmen,
-  };
-}
+// Die Wiedervorlage mit Ist-Abgleich liegt in wiedervorlage_lauf.ts (loopDaten).
