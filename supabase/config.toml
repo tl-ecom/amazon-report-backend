@@ -58,6 +58,11 @@ verify_jwt = true
 [functions.mcp-url]
 verify_jwt = false
 
+# MCP-OAuth-2.1-Authorization-Server (Discovery/DCR/authorize/token). OAuth-Clients
+# bringen keinen Supabase-JWT mit -> verify_jwt = false, Auth macht die Function selbst.
+[functions.oauth]
+verify_jwt = false
+
 # Backfill-Orchestrator: verarbeitet einen History-Chunk pro Aufruf. Wird nur vom
 # pg_cron-Treiber mit service_role aufgerufen -> verify_jwt = true.
 [functions.backfill]

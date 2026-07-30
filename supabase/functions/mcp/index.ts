@@ -25,6 +25,7 @@ import { listeSqp, sqpAsins } from "../_shared/sqp.ts";
 import { listeDiagnosen } from "../_shared/diagnostics.ts";
 import { changeEvents } from "../_shared/flightrecorder.ts";
 import { strategieUebersicht } from "../_shared/strategie_lauf.ts";
+import { oauthBasis, ressourcenMetadatenUrl } from "../_shared/oauth.ts";
 
 Deno.serve(async (req) => {
   // MCP spricht ausschließlich POST. GET/anderes klar abweisen.
@@ -43,10 +44,18 @@ Deno.serve(async (req) => {
   // --- Auth: Bearer-Token → Tenant ---
   const tenant_id = await tenantAusToken(req, supabase);
   if (!tenant_id) {
-    // 401 mit WWW-Authenticate, wie es MCP-Clients erwarten.
+    // 401 mit WWW-Authenticate + resource_metadata (RFC 9728), damit MCP-Clients
+    // den OAuth-Flow finden. Der statische Bearer-Token (mcp_tokens) bleibt gültig.
+    const metaUrl = ressourcenMetadatenUrl(oauthBasis().issuer);
     return new Response(
       JSON.stringify(protokollFehler(null, "Ungültiger oder fehlender Bearer-Token")),
-      { status: 401, headers: { "Content-Type": "application/json", "WWW-Authenticate": "Bearer" } }
+      {
+        status: 401,
+        headers: {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": `Bearer resource_metadata="${metaUrl}"`,
+        },
+      }
     );
   }
 
