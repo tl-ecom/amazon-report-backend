@@ -17,15 +17,37 @@ function zufallsToken(): string {
   return `oppulse_${hex}`;
 }
 
-/** Fertige Connector-URL (Token in der Query) — rein/testbar. Für Clients wie den
- *  ChatGPT-Connector, die kein eigenes Bearer-Feld haben (Adapter mcp-url). */
-export function mcpConnectorUrl(base: string, token: string): string {
-  return `${base.replace(/\/+$/, "")}/functions/v1/mcp-url?token=${token}`;
+/**
+ * Firmen-Slug für die Connector-URL. Zweck: ChatGPT identifiziert einen Connector
+ * über seine URL — damit der Coach e-One UND Vaneja GLEICHZEITIG einbinden kann,
+ * braucht jede Firma eine eigene URL. Der Slug ist rein zur Unterscheidung; der
+ * Zugriff wird weiter allein durch Token/OAuth (Tenant-Bindung) entschieden.
+ */
+export function slugFuerTenant(name: string | null | undefined, tenantId: string): string {
+  const basis = String(name ?? "").toLowerCase().normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24);
+  const suffix = tenantId.replace(/-/g, "").slice(0, 6);
+  return basis ? `${basis}-${suffix}` : suffix;
 }
 
-/** Direkte MCP-URL (Token gehört in den Authorization-Header) — für Clients, die das können. */
-export function mcpDirektUrl(base: string): string {
-  return `${base.replace(/\/+$/, "")}/functions/v1/mcp`;
+/** Fertige Connector-URL (Token in der Query) — rein/testbar. Für Clients wie den
+ *  ChatGPT-Connector, die kein eigenes Bearer-Feld haben (Adapter mcp-url). Mit
+ *  optionalem Firmen-Slug im Pfad, damit ChatGPT je Firma einen eigenen Connector sieht. */
+export function mcpConnectorUrl(base: string, token: string, slug?: string): string {
+  const pfad = slug ? `/mcp-url/${slug}` : `/mcp-url`;
+  return `${base.replace(/\/+$/, "")}/functions/v1${pfad}?token=${token}`;
+}
+
+/** Direkte MCP-URL (Token gehört in den Authorization-Header bzw. OAuth) — mit optionalem Firmen-Slug. */
+export function mcpDirektUrl(base: string, slug?: string): string {
+  const pfad = slug ? `/mcp/${slug}` : `/mcp`;
+  return `${base.replace(/\/+$/, "")}/functions/v1${pfad}`;
+}
+
+/** Lädt den Firmennamen und baut den Slug (für die per-Firma-URLs). */
+export async function tenantSlug(supabase: any, tenant_id: string): Promise<string> {
+  const { data } = await supabase.from("tenants").select("name").eq("id", tenant_id).maybeSingle();
+  return slugFuerTenant(data?.name ?? null, tenant_id);
 }
 
 /**
@@ -56,12 +78,13 @@ export async function erzeugeMcpToken(
   if (error) throw new Error(`Token anlegen: ${error.message}`);
 
   const base = Deno.env.get("SUPABASE_URL") ?? "";
+  const slug = await tenantSlug(supabase, tenant_id);
   return {
     id: data?.id,
     name: data?.name,
     token, // NUR jetzt sichtbar
-    connector_url: mcpConnectorUrl(base, token),
-    mcp_url: mcpDirektUrl(base),
+    connector_url: mcpConnectorUrl(base, token, slug),
+    mcp_url: mcpDirektUrl(base, slug),
   };
 }
 
@@ -83,7 +106,8 @@ export async function listeMcpTokens(
     id: t.id, name: t.name, created_at: t.created_at, last_used_at: t.last_used_at,
     revoked: t.revoked, coach_token: isAdmin ? t.created_by !== user_id : false,
   }));
-  return { tokens, mcp_url: mcpDirektUrl(Deno.env.get("SUPABASE_URL") ?? "") };
+  const slug = await tenantSlug(supabase, tenant_id);
+  return { tokens, mcp_url: mcpDirektUrl(Deno.env.get("SUPABASE_URL") ?? "", slug) };
 }
 
 /** Widerruft einen Token. Teilnehmer nur EIGENE; Coach/Admin jeden des Tenants. */
