@@ -1,5 +1,8 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert@1";
-import { baueAsMetadata, baueResourceMetadata, pruefeRedirectUris, ressourcenMetadatenUrl } from "./oauth.ts";
+import {
+  baueAsMetadata, baueResourceMetadata, escHtml, pruefeAuthorizeParams, pruefeRedirectUris,
+  pruefeTicket, redirectMitCode, ressourcenMetadatenUrl, signeTicket,
+} from "./oauth.ts";
 
 Deno.test("AS-Metadaten: Endpunkte relativ zum Issuer, PKCE S256, public client", () => {
   const m = baueAsMetadata("https://h/functions/v1/oauth") as any;
@@ -30,4 +33,33 @@ Deno.test("redirect_uris: leer, kaputt, oder http-nicht-localhost -> Fehler", ()
   assertThrows(() => pruefeRedirectUris([]));
   assertThrows(() => pruefeRedirectUris(["kein-url"]));
   assertThrows(() => pruefeRedirectUris(["http://evil.example/cb"]));
+});
+
+Deno.test("authorize-Params: nur code + PKCE-S256", () => {
+  assertEquals(pruefeAuthorizeParams({ response_type: "code", code_challenge: "abc", code_challenge_method: "S256" }).ok, true);
+  assertEquals(pruefeAuthorizeParams({ response_type: "token", code_challenge: "abc", code_challenge_method: "S256" }).ok, false);
+  assertEquals(pruefeAuthorizeParams({ response_type: "code", code_challenge: "", code_challenge_method: "S256" }).ok, false);
+  assertEquals(pruefeAuthorizeParams({ response_type: "code", code_challenge: "abc", code_challenge_method: "plain" }).ok, false);
+});
+
+Deno.test("redirectMitCode hängt code + state an, behält vorhandene Query", () => {
+  const u = redirectMitCode("https://chatgpt.com/cb?x=1", "CODE", "STATE");
+  const p = new URL(u);
+  assertEquals(p.searchParams.get("code"), "CODE");
+  assertEquals(p.searchParams.get("state"), "STATE");
+  assertEquals(p.searchParams.get("x"), "1");
+});
+
+Deno.test("escHtml neutralisiert Sonderzeichen", () => {
+  assertEquals(escHtml(`<b>"&'`), "&lt;b&gt;&quot;&amp;&#39;");
+});
+
+Deno.test("Ticket: sign -> prüfen roundtrip; abgelaufen/verfälscht -> null", async () => {
+  const secret = "server-secret";
+  const exp = 1_000_000;
+  const t = await signeTicket(secret, "user-123", exp);
+  assertEquals(await pruefeTicket(secret, t, 999_999), "user-123"); // vor Ablauf
+  assertEquals(await pruefeTicket(secret, t, 1_000_001), null);      // abgelaufen
+  assertEquals(await pruefeTicket("anderes-secret", t, 999_999), null); // falsches Secret
+  assertEquals(await pruefeTicket(secret, t + "x", 999_999), null);  // verfälscht
 });

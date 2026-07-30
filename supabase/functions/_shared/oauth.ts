@@ -79,3 +79,53 @@ export function zufallsToken(bytes = 32): string {
   crypto.getRandomValues(b);
   return btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
+
+/** Protokoll-Prüfung der /authorize-Parameter (PKCE-Pflicht, nur S256). Rein. */
+export function pruefeAuthorizeParams(
+  p: { response_type?: string | null; code_challenge?: string | null; code_challenge_method?: string | null },
+): { ok: true } | { ok: false; fehler: string } {
+  if (p.response_type !== "code") return { ok: false, fehler: "response_type muss 'code' sein" };
+  if (!p.code_challenge) return { ok: false, fehler: "code_challenge fehlt (PKCE ist Pflicht)" };
+  if (p.code_challenge_method !== "S256") return { ok: false, fehler: "code_challenge_method muss S256 sein" };
+  return { ok: true };
+}
+
+/** Baut die Redirect-URL zurück zum Client mit code (+ state). */
+export function redirectMitCode(redirectUri: string, code: string, state?: string | null): string {
+  const u = new URL(redirectUri);
+  u.searchParams.set("code", code);
+  if (state) u.searchParams.set("state", state);
+  return u.toString();
+}
+
+/** HTML-Attribut/Text-Escaping für in Seiten eingebettete Parameter. */
+export function escHtml(s: unknown): string {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+/**
+ * Signiertes Kurzticket „User X ist angemeldet" (HMAC-SHA256 mit Server-Secret) —
+ * damit der Coach nach dem Login die Firma wählen kann, OHNE das Passwort erneut
+ * einzugeben. Format: `<userId>.<expMs>.<sigHex>`.
+ */
+export async function signeTicket(secret: string, userId: string, expMs: number): Promise<string> {
+  const payload = `${userId}.${expMs}`;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  const sigHex = [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `${payload}.${sigHex}`;
+}
+
+/** Prüft ein Ticket; gibt die userId zurück oder null (ungültig/abgelaufen). */
+export async function pruefeTicket(secret: string, ticket: string, jetztMs: number): Promise<string | null> {
+  const i1 = ticket.indexOf(".");
+  const i2 = ticket.indexOf(".", i1 + 1);
+  if (i1 < 0 || i2 < 0) return null;
+  const userId = ticket.slice(0, i1);
+  const exp = Number(ticket.slice(i1 + 1, i2));
+  if (!Number.isFinite(exp) || exp < jetztMs) return null;
+  const erwartet = await signeTicket(secret, userId, exp);
+  return erwartet === ticket ? userId : null;
+}
