@@ -18,6 +18,7 @@ import { bestaetigeStrategie, listeStrategien, setzeReview, strategieHistorie, v
 import { laufeStrategie, strategieUebersicht } from "../_shared/strategie_lauf.ts";
 import { setzeKorridor, wizardAsin, wizardProdukte, wizardRollen, zuruecksetzenKorridor } from "../_shared/strategie_wizard.ts";
 import { erzeugeBefund, letzterBefund } from "../_shared/befund_lauf.ts";
+import { erstelleMassnahme, listeMassnahmen, setzeMassnahmeStatus, wiedervorlage } from "../_shared/massnahmen_lauf.ts";
 import { erzeugeMcpToken, listeMcpTokens, widerrufeMcpToken } from "../_shared/mcp_tokens.ts";
 import { experimentDetail, listeExperimente } from "../_shared/experiments.ts";
 import { pulseOverview } from "../_shared/overview.ts";
@@ -250,6 +251,14 @@ Deno.serve(async (req) => {
         const r = await erzeugeBefund(service, tenantId, userData.user.id, args as any);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
+      if (action === "massnahme_erstellen") {
+        const r = await erstelleMassnahme(service, tenantId, userData.user.id, args as any);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "massnahme_status") {
+        const r = await setzeMassnahmeStatus(service, tenantId, args as any);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
       // MCP-Zugang (ChatGPT/Claude): Token erzeugen/widerrufen. Klartext nur bei Erzeugung.
       if (action === "mcp_token_erzeugen") {
         const r = await erzeugeMcpToken(service, tenantId, userData.user.id, args as any);
@@ -375,6 +384,12 @@ Deno.serve(async (req) => {
     }
     if (resource === "wizard_befund") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await letzterBefund(service, tenantId, String((args as any)?.asin ?? "")) });
+    }
+    if (resource === "wizard_massnahmen") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await listeMassnahmen(service, tenantId, String((args as any)?.asin ?? "")) });
+    }
+    if (resource === "wizard_wiedervorlage") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await wiedervorlage(service, tenantId, String((args as any)?.asin ?? "")) });
     }
     if (resource === "mcp_tokens") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await listeMcpTokens(service, tenantId, userData.user.id, firma.is_admin) });
