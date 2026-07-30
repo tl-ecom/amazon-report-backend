@@ -128,7 +128,8 @@ async function confirmPost(req: Request): Promise<Response> {
   } catch {
     return json({ error: "invalid_request", error_description: "JSON erwartet" }, 400);
   }
-  const p = paramsAus((k) => body?.[k]);
+  // response_type wurde schon in GET /authorize validiert; hier tolerant defaulten.
+  const p = paramsAus((k) => (k === "response_type" ? (body?.response_type || "code") : body?.[k]));
 
   const client = await ladeClient(p.client_id);
   if (!client) return json({ error: "invalid_client", error_description: "Unbekannter Client" }, 400);
