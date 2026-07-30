@@ -16,15 +16,17 @@
 /** Erlaubte Kennzahlen. Muss mit dem DB-Domain `strategie_kennzahl` übereinstimmen.
  *  Rank ist bewusst NICHT dabei (keine Datenquelle angebunden). */
 export type Kennzahl =
-  | "acos"                     // Advertising Cost of Sale (%)
-  | "tacos"                    // Total ACoS (%)
-  | "umsatz"                   // Umsatz im Zeitraum
-  | "einheiten"                // verkaufte Einheiten
-  | "cvr"                      // Conversion Rate (%)
-  | "deckungsbeitrag_stueck"   // DB pro Einheit (Umsatz − EK − Gebühren)
-  | "bestandsreichweite"       // Tage Reichweite (Achtung: bei FBA oft unbekannt)
-  | "umsatzanteil_portfolio";  // Anteil dieser ASIN am Portfolio-Umsatz (%)
+  | "acos"                          // Advertising Cost of Sale (%)
+  | "tacos"                         // Total ACoS (%)
+  | "umsatz"                        // Umsatz im Zeitraum
+  | "einheiten"                     // verkaufte Einheiten
+  | "cvr"                           // Conversion Rate (%)
+  | "deckungsbeitrag_stueck"        // DB pro Einheit (Umsatz − EK − Gebühren, VOR Werbung)
+  | "deckungsbeitrag_nach_werbung"  // DB nach Werbung (Brief) — braucht Ads + EK
+  | "bestandsreichweite"            // Tage Reichweite (Achtung: bei FBA oft unbekannt)
+  | "umsatzanteil_portfolio";       // Anteil dieser ASIN am Portfolio-Umsatz (%)
 
+// Interne, STABILE Rollen-Keys. Anzeige-Namen (Brief) stehen im `label`.
 export type Rolle = "launch" | "scale" | "hold" | "harvest" | "exit";
 
 export interface Korridor {
@@ -48,6 +50,9 @@ export interface AlertRegel {
 
 export interface StrategieDefinition {
   rolle: Rolle;
+  /** Anzeige-Name (Brief-Rolle), z. B. "Volumentreiber". Optional im Engine-Typ —
+   *  der Wizard liest den Namen aus der DB-Spalte strategie_definitionen.label. */
+  label?: string;
   /** Die EINE entscheidende Kennzahl. null = noch nicht konfiguriert. */
   leading_kpi: Kennzahl | null;
   korridor: Korridor;
@@ -70,48 +75,53 @@ export interface StrategieDefinition {
 export const STRATEGIE_DEFINITIONEN: Record<Rolle, StrategieDefinition> = {
   launch: {
     rolle: "launch",
+    label: "Launch",
     leading_kpi: null,
     korridor: { min: null, max: null },
     alert_regeln: [],
     muted_metrics: [],
     max_dauer_tage: null,
-    beschreibung: "Neueinführung — Sichtbarkeit/Rank aufbauen; Anlaufverluste bewusst.",
+    beschreibung: "Sichtbarkeit kaufen, Marge nachrangig.",
   },
   scale: {
     rolle: "scale",
+    label: "Volumentreiber",
     leading_kpi: null,
     korridor: { min: null, max: null },
     alert_regeln: [],
     muted_metrics: [],
     max_dauer_tage: null,
-    beschreibung: "Wachstum — profitabel skalieren, Volumen ausbauen.",
+    beschreibung: "Umsatz und Rang halten, Marge dünn akzeptiert.",
   },
   hold: {
     rolle: "hold",
+    label: "Verteidigung",
     leading_kpi: null,
     korridor: { min: null, max: null },
     alert_regeln: [],
     muted_metrics: [],
     max_dauer_tage: null,
-    beschreibung: "Halten — stabile Position/Cashcow verteidigen.",
+    beschreibung: "Position gegen Wettbewerber halten.",
   },
   harvest: {
     rolle: "harvest",
+    label: "Margenbringer",
     leading_kpi: null,
     korridor: { min: null, max: null },
     alert_regeln: [],
     muted_metrics: [],
     max_dauer_tage: null,
-    beschreibung: "Ernten — Marge maximieren, Ausgaben zurückfahren.",
+    beschreibung: "Deckungsbeitrag vor Umsatz.",
   },
   exit: {
     rolle: "exit",
+    label: "Auslauf",
     leading_kpi: null,
     korridor: { min: null, max: null },
     alert_regeln: [],
     muted_metrics: [],
     max_dauer_tage: null,
-    beschreibung: "Auslauf — Restbestand abverkaufen, Ressourcen abziehen.",
+    beschreibung: "Bestand abverkaufen, Werbung minimieren.",
   },
 };
 
