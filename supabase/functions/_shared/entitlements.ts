@@ -17,6 +17,7 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   fr_experiment_detail: "experimente",
   get_sales_history: "verlauf",
   get_orders_history: "verlauf",
+  get_orders_revenue: "verlauf",
   get_returns_history: "verlauf",
   kpi_verlauf: "verlauf",
   ertrag_verlauf: "verlauf",

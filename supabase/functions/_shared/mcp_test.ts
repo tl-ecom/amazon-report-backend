@@ -67,7 +67,8 @@ Deno.test("tools/list nennt alle Tools mit Schema", async () => {
   const tools = (r!.result as any).tools;
   assertEquals(tools.map((t: any) => t.name), [
     "get_sales_overview", "get_orders_overview", "get_listings_overview", "get_product_performance",
-    "get_returns_overview", "get_ads_overview", "get_sales_history", "get_orders_history", "get_returns_history",
+    "get_returns_overview", "get_ads_overview", "get_sales_history", "get_orders_history", "get_orders_revenue",
+    "get_returns_history",
     "get_products", "get_kpi_history", "get_profit_history", "get_search_query_performance",
     "get_diagnoses", "get_change_log", "get_strategy_overview",
   ]);
@@ -76,7 +77,7 @@ Deno.test("tools/list nennt alle Tools mit Schema", async () => {
 });
 
 Deno.test("toolListe ist stabil", () => {
-  assertEquals(toolListe().length, 16);
+  assertEquals(toolListe().length, 17);
 });
 
 Deno.test("Pulse-Tools rufen ladePulse mit der richtigen Datenart", async () => {

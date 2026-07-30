@@ -47,7 +47,7 @@ export interface McpContext {
    * returns, args: { von?, bis? } als 'YYYY-MM-DD'). Optional — nur api/mcp
    * verdrahten es (mit DB-Zugriff); im Unit-Test bleibt es undefined.
    */
-  ladeVerlauf?: (art: "sales" | "orders" | "returns", args: Record<string, unknown>) => Promise<unknown>;
+  ladeVerlauf?: (art: "sales" | "orders" | "returns" | "orders_umsatz", args: Record<string, unknown>) => Promise<unknown>;
   /**
    * Liest die Pulse-Analytics (art: produkte|kpi|ertrag|sqp|diagnosen|aenderungen|
    * strategie). READ-ONLY. Optional — nur mcp/api verdrahten es (mit DB-Zugriff);
@@ -213,6 +213,21 @@ const TOOLS: ToolDef[] = [
     handle: async (args, ctx) => {
       if (!ctx.ladeVerlauf) return verlaufNichtVerfuegbar();
       return ctx.ladeVerlauf("orders", args);
+    },
+  },
+  {
+    name: "get_orders_revenue",
+    description:
+      "TAGESAKTUELLER Umsatz aus den BESTELLUNGEN (orders_history) über einen frei " +
+      "wählbaren Zeitraum — näher an Sellerboard und aktueller als get_sales_history " +
+      "(Sales & Traffic hat 1–2 Tage Amazon-Verzug). Tag-Grenze Europe/Berlin, Stornos " +
+      "ausgeschlossen, Pending inkl. Liefert Gesamt-Umsatz/Einheiten, Monatsreihe und " +
+      "Preisabdeckung; fehlende Preise => Umsatz ist eine Untergrenze. Zeitraum via " +
+      "von/bis ('YYYY-MM-DD').",
+    inputSchema: ZEITRAUM_SCHEMA,
+    handle: async (args, ctx) => {
+      if (!ctx.ladeVerlauf) return verlaufNichtVerfuegbar();
+      return ctx.ladeVerlauf("orders_umsatz", args);
     },
   },
   {

@@ -16,7 +16,7 @@ import { aggregiereNachDatum } from "./metrics.ts";
 import { baueOrdersOverview } from "./orders.ts";
 import { baueReturnsOverview } from "./returns.ts";
 
-export type VerlaufArt = "sales" | "orders" | "returns";
+export type VerlaufArt = "sales" | "orders" | "returns" | "orders_umsatz";
 
 /** 'YYYY-MM-DD' von heute mit Offset. */
 function tagOffset(tage: number): string {
@@ -238,6 +238,76 @@ export async function ordersRange(supabase: any, tenant_id: string, args: any): 
   return ov;
 }
 
+// --- Orders-basierter Umsatz (tagesaktuell, aus orders_history) ---
+
+export interface OrdersTag {
+  datum: string;
+  umsatz_cents: number;
+  einheiten: number;
+  zeilen: number;
+  zeilen_ohne_preis: number;
+}
+
+/**
+ * Baut aus Tages-Aggregaten (RPC orders_umsatz_taeglich) die Monatsreihe + Gesamt.
+ * Rein & testbar. Ehrlichkeit: fehlende Preise -> Umsatz ist eine Untergrenze;
+ * Pending/laufender Tag können sich noch ändern.
+ */
+export function baueOrdersUmsatz(tage: OrdersTag[], von: string, waehrung = "EUR"): Record<string, unknown> {
+  let umsatzC = 0, einheiten = 0, zeilen = 0, ohnePreis = 0;
+  const proMonat = new Map<string, { umsatz_cents: number; units: number }>();
+  for (const t of tage) {
+    const uc = Number(t.umsatz_cents) || 0;
+    umsatzC += uc;
+    einheiten += Number(t.einheiten) || 0;
+    zeilen += Number(t.zeilen) || 0;
+    ohnePreis += Number(t.zeilen_ohne_preis) || 0;
+    const monat = String(t.datum).slice(0, 7);
+    const e = proMonat.get(monat) ?? { umsatz_cents: 0, units: 0 };
+    e.umsatz_cents += uc;
+    e.units += Number(t.einheiten) || 0;
+    proMonat.set(monat, e);
+  }
+  // Angeschnittenen Startmonat weglassen (wie bei salesRange), sonst Stummel-Balken.
+  const vonMonat = von.slice(0, 7);
+  const startAngeschnitten = von.slice(8, 10) !== "01";
+  const monatlich = [...proMonat]
+    .filter(([m]) => !(startAngeschnitten && m === vonMonat))
+    .map(([monat, e]) => ({ monat, umsatz: Math.round(e.umsatz_cents) / 100, units: e.units }));
+
+  const preis_abdeckung = zeilen > 0 ? Math.round(((zeilen - ohnePreis) / zeilen) * 1000) / 10 : null;
+  const warnungen: string[] = [];
+  if (ohnePreis > 0) warnungen.push(`${ohnePreis} Bestellzeilen ohne Preis (z. B. in Zustellung) — der Umsatz ist eine Untergrenze.`);
+  warnungen.push("Tagesaktuell inkl. Pending, ohne Stornos (Tag-Grenze Europe/Berlin). Der laufende Tag und offene Bestellungen können sich noch ändern.");
+
+  return {
+    gesamt: {
+      umsatz: Math.round(umsatzC) / 100,
+      einheiten, zeilen, zeilen_ohne_preis: ohnePreis,
+      preis_abdeckung, waehrung,
+    },
+    monatlich,
+    warnungen,
+    is_provisional: true, // Orders sind naturgemäß in Bewegung (Pending, laufender Tag)
+  };
+}
+
+export async function ordersUmsatzRange(supabase: any, tenant_id: string, args: any): Promise<unknown> {
+  const { von, bis } = zeitraum(args);
+  const { data, error } = await supabase.rpc("orders_umsatz_taeglich", { p_tenant: tenant_id, p_von: von, p_bis: bis });
+  if (error) throw new Error(`orders_umsatz: ${error.message}`);
+  const tage = (data ?? []) as OrdersTag[];
+  if (tage.length === 0) {
+    return { keine_daten: true, art: "orders_umsatz", zeitraum: { von, bis }, hinweis: "Keine Bestellungen im Zeitraum." };
+  }
+  return {
+    art: "orders_umsatz",
+    zeitraum: { von, bis },
+    ...baueOrdersUmsatz(tage, von),
+    quelle: "orders_history (tagesaktuell, Europe/Berlin, ohne Storno)",
+  };
+}
+
 // --- Returns (aus returns_history) ---
 
 export async function returnsRange(supabase: any, tenant_id: string, args: any): Promise<unknown> {
@@ -323,6 +393,7 @@ export function ladeVerlaufFactory(supabase: any, tenant_id: string) {
   return async (art: VerlaufArt, args: any): Promise<unknown> => {
     if (art === "sales") return salesRange(supabase, tenant_id, args);
     if (art === "orders") return ordersRange(supabase, tenant_id, args);
+    if (art === "orders_umsatz") return ordersUmsatzRange(supabase, tenant_id, args);
     if (art === "returns") return returnsRange(supabase, tenant_id, args);
     throw new Error(`Unbekannte Verlaufs-Art: ${art}`);
   };
