@@ -1,5 +1,57 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { baueFbaBestandRows, baueFbaReturnsRows, baueLedgerAdjustmentsRows, baueReimbursementsRows } from "./history.ts";
+import {
+  baueFbaBestandRows, baueFbaReturnsRows, baueGebuehrenvorschauRows,
+  baueLedgerAdjustmentsRows, baueReimbursementsRows, gewichtG, laengeCm,
+} from "./history.ts";
+
+Deno.test("laengeCm: normalisiert cm/mm/Zoll, unbekannte Einheit -> null", () => {
+  assertEquals(laengeCm("31.5", "centimeters"), 31.5);
+  assertEquals(laengeCm("31,5", "cm"), 31.5); // Komma-Dezimal
+  assertEquals(laengeCm("315", "millimeters"), 31.5);
+  assertEquals(laengeCm("10", "inches"), 25.4);
+  assertEquals(laengeCm("31.5", ""), 31.5); // ohne Einheit: cm annehmen (Report-Standard DE)
+  // Lieber KEIN Wert als ein falscher: unbekannte Einheit -> unbekannt.
+  assertEquals(laengeCm("10", "furlongs"), null);
+  assertEquals(laengeCm("", "cm"), null);
+  assertEquals(laengeCm("--", "cm"), null);
+});
+
+Deno.test("gewichtG: normalisiert kg/g/lb, unbekannte Einheit -> null", () => {
+  assertEquals(gewichtG("1.2", "kilograms"), 1200);
+  assertEquals(gewichtG("1.2", ""), 1200); // Report liefert DE in kg
+  assertEquals(gewichtG("850", "grams"), 850);
+  assertEquals(Math.round(gewichtG("2", "pounds") as number), 907);
+  assertEquals(gewichtG("2", "stone"), null);
+  assertEquals(gewichtG("", "kg"), null);
+});
+
+Deno.test("baueGebuehrenvorschauRows: uebernimmt Amazons Groessenklasse unveraendert", () => {
+  const rows = baueGebuehrenvorschauRows("t1", {
+    rows: [{
+      "sku": "VAN-001", "asin": "B0ABC", "product-name": "Obst Etagere",
+      "brand": "Vaneja", "fulfilled-by": "AMAZON_EU", "has-local-inventory": "Yes",
+      "your-price": "29.99", "sales-price": "27.99", "currency": "EUR",
+      "longest-side": "31.5", "median-side": "20.0", "shortest-side": "10.2",
+      "length-and-girth": "92.0", "unit-of-dimension": "centimeters",
+      "item-package-weight": "1.2", "unit-of-weight": "kilograms",
+      "product-size-weight-band": "Standard-Umschlag",
+      "estimated-fee-total": "8.42", "estimated-referral-fee-per-unit": "4.50",
+      "estimated-variable-closing-fee": "", "expected-domestic-fulfilment-fee-per-unit": "3.92",
+    }],
+  }) as any[];
+  assertEquals(rows.length, 1);
+  assertEquals(rows[0].groessenklasse, "Standard-Umschlag"); // NICHT selbst abgeleitet
+  assertEquals(rows[0].laengste_seite_cm, 31.5);
+  assertEquals(rows[0].gewicht_g, 1200);
+  assertEquals(rows[0].gebuehr_gesamt_cents, 842);
+  assertEquals(rows[0].fulfilment_cents, 392);
+  assertEquals(rows[0].closing_cents, null); // leer bleibt unbekannt, nicht 0
+});
+
+Deno.test("baueGebuehrenvorschauRows: ohne SKU wird uebersprungen; leer -> []", () => {
+  assertEquals(baueGebuehrenvorschauRows("t1", { rows: [{ asin: "B01" }] }).length, 0);
+  assertEquals(baueGebuehrenvorschauRows("t1", {}).length, 0);
+});
 
 Deno.test("baueFbaReturnsRows: mappt FBA-Spalten auf returns_history", () => {
   const payload = {

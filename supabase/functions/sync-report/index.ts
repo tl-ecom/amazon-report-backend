@@ -142,13 +142,18 @@ const REPORT_KONFIG: Record<string, ReportKonfig> = {
   GET_FBA_MYI_UNSUPPRESSED_INVENTORY_DATA: {
     format: "tsv",
     // Momentaufnahme des FBA-Bestands, KEIN Zeitraum.
-    // ACHTUNG: Am 2026-07-17 lieferte Amazon "Unauthorized / forbidden" schon beim
-    // Anfordern. Dieser Report braucht die App-Rolle "Amazon Fulfillment", die beim
-    // Test-Seller NICHT angehakt ist (nur Markenanalyse, Lagerbestands-/
-    // Bestellverfolgung, Verkaufspartner-Insights). Konfig bleibt bewusst stehen —
-    // sobald die Rolle angehakt + neu autorisiert ist, läuft der Report ohne
-    // Code-Änderung. Der Merchant-Bestand ist über GET_MERCHANT_LISTINGS_ALL_DATA
-    // abgedeckt; nur der FBA-Lagerbestand fehlt bis dahin.
+    // Historie: Am 2026-07-17 antwortete Amazon fuer die e-One-App mit
+    // "Unauthorized / forbidden". Das lag an DIESER App-Autorisierung, nicht am
+    // Report — mit der Vaneja-App laeuft er (2026-07-30: HTTP 200, 43 Zeilen).
+    snapshot: true,
+    stableLagDays: 0,
+    maxDays: 0,
+  },
+  GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA: {
+    format: "tsv",
+    // Gebuehrenvorschau je SKU: Amazons Groessenklasse, Masse/Gewicht und die
+    // erwarteten Gebuehren. Momentaufnahme, KEIN Zeitraum.
+    // Getestet 2026-07-31: HTTP 200, 59 Zeilen, 30 Spalten.
     snapshot: true,
     stableLagDays: 0,
     maxDays: 0,
