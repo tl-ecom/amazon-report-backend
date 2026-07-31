@@ -17,6 +17,14 @@ export interface Position {
   /** Signiert wie gebucht: negativ = Kosten. */
   betrag_cents: number;
   quelle: "abrechnung" | "lager";
+  /**
+   * Steckt in diesem Betrag noch Umsatzsteuer? Gebuchte Abrechnungsbetraege: ja.
+   * Werte aus dem Lagerbericht sind Rate-Card-Zahlen und bereits netto — sie
+   * noch einmal zu teilen wuerde die Steuer zweimal herausrechnen.
+   * Standard true, damit ein vergessenes Feld eher zu hohe als zu niedrige
+   * Kosten zeigt.
+   */
+  ust_enthalten?: boolean;
 }
 
 export interface Klassifizierung {
@@ -104,7 +112,8 @@ export function analysiereSteuerbarkeit(
   for (const p of positionen) {
     const typ = String(p.fee_typ ?? "").trim() || "Unbekannt";
     const eintrag = proTyp.get(typ) ?? { betrag: 0, quellen: new Set<string>() };
-    eintrag.betrag += -p.betrag_cents / teiler; // negativ gebucht -> positive Kosten
+    const teilen = p.ust_enthalten === false ? 1 : teiler;
+    eintrag.betrag += -p.betrag_cents / teilen; // negativ gebucht -> positive Kosten
     eintrag.quellen.add(p.quelle);
     proTyp.set(typ, eintrag);
   }

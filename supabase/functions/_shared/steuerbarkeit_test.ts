@@ -119,3 +119,21 @@ Deno.test("hebelLabel: geschlossene Fuenferliste, Unbekanntes bleibt stehen", ()
   assertEquals(hebelLabel("produkt_market_fit"), "Produkt-Market-Fit");
   assertEquals(hebelLabel("erfundener_hebel"), "erfundener_hebel");
 });
+
+Deno.test("analysiereSteuerbarkeit: bereits netto gebuchte Posten bleiben unberuehrt", () => {
+  // Lagerbericht liefert Rate-Card-Werte OHNE USt. Sie noch einmal zu teilen
+  // wuerde die Steuer zweimal herausrechnen und die Kosten kleinreden.
+  const r = analysiereSteuerbarkeit([
+    { fee_typ: "Commission", betrag_cents: -11900, quelle: "abrechnung" },
+    { fee_typ: "FBAStorageFee", betrag_cents: -10000, quelle: "lager", ust_enthalten: false },
+  ], KLASSEN, 1.19);
+  assertEquals(r.nicht_steuerbar, 100); // 119 / 1,19
+  assertEquals(r.steuerbar, 100);       // unveraendert
+});
+
+Deno.test("analysiereSteuerbarkeit: fehlendes Feld rechnet vorsichtig (Steuer enthalten)", () => {
+  // Standard true: lieber zu hohe Kosten zeigen als eine zu schoene Marge.
+  const r = analysiereSteuerbarkeit(
+    [{ fee_typ: "Commission", betrag_cents: -11900, quelle: "abrechnung" }], KLASSEN, 1.19);
+  assertEquals(r.nicht_steuerbar, 100);
+});
