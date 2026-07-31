@@ -37,6 +37,7 @@ import { ladenhueterRadar } from "../_shared/ladenhueter.ts";
 import { boardReport } from "../_shared/board.ts";
 import { ertragVerlauf, listeEk, loescheEk, setzeEk } from "../_shared/ertrag.ts";
 import { ladeEinstellungen, setzeEinstellungen } from "../_shared/einstellungen.ts";
+import { importiereEkCsv, importiereEkVonUrl, speichereEkUrl } from "../_shared/sellerboard_import.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, legeFirmaAn, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
@@ -279,6 +280,19 @@ Deno.serve(async (req) => {
       }
       if (action === "ek_setzen") {
         const r = await setzeEk(service, tenantId, String((args as any)?.asin ?? ""), (args as any)?.ek, String((args as any)?.gueltig_ab ?? ""));
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      // EK-Import aus Sellerboard. `schreiben:false` = Vorschau (nichts wird gespeichert).
+      if (action === "ek_import_csv") {
+        const r = await importiereEkCsv(service, tenantId, String((args as any)?.csv ?? ""), (args as any)?.schreiben === true);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "ek_import_url") {
+        const r = await importiereEkVonUrl(service, tenantId, (args as any)?.schreiben === true);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "ek_url_speichern") {
+        const r = await speichereEkUrl(service, tenantId, String((args as any)?.url ?? ""));
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
       if (action === "ek_loeschen") {
