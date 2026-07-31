@@ -4,7 +4,9 @@
 // service_role-Bearer (verify_jwt = true). Standard-Fenster: 90 Tage.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { akkuZuZeilen, verarbeiteFinancialEvents } from "../_shared/finances.ts";
+import {
+  akkuZuZeilen, detailZuZeilen, verarbeiteFinancialEvents, verarbeiteGebuehrenDetail,
+} from "../_shared/finances.ts";
 
 const SP_ENDPOINT = "https://sellingpartnerapi-eu.amazon.com";
 const MAX_SEITEN = 80; // Sicherheitskappe gegen Endlos-Pagination
@@ -32,7 +34,8 @@ Deno.serve(async (req) => {
     if (!accessToken) return json({ error: "Access-Token fehlgeschlagen" }, 502);
 
     const postedAfter = new Date(Date.now() - fenster * 86400000).toISOString();
-    const akku = new Map<string, number>();
+    const akku = new Map<string, number>();       // Monatssumme (wie bisher)
+    const detailAkku = new Map<string, number>(); // Monat × SKU × Gebührenart
     let nextToken: string | undefined;
     let seiten = 0;
 
@@ -73,6 +76,9 @@ Deno.serve(async (req) => {
       }
 
       verarbeiteFinancialEvents(data?.payload?.FinancialEvents, akku);
+      // Dieselben Events zusaetzlich je SKU/Gebuehrenart — Grundlage fuer den
+      // Nettogewinn JE PRODUKT (die Monatssumme allein reicht dafuer nicht).
+      verarbeiteGebuehrenDetail(data?.payload?.FinancialEvents, detailAkku);
       nextToken = data?.payload?.NextToken || undefined;
       seiten++;
       if (nextToken && seiten < MAX_SEITEN) await schlaf(PAUSE_MS);
@@ -87,11 +93,29 @@ Deno.serve(async (req) => {
       if (upErr) return json({ error: "Upsert fehlgeschlagen", detail: upErr.message }, 500);
     }
 
+    // Detailzeilen je Monat/SKU/Gebuehrenart. sku=null -> '' (ohne Artikelbezug).
+    const detailZeilen = detailZuZeilen(detailAkku);
+    if (detailZeilen.length > 0) {
+      const jetzt = new Date().toISOString();
+      const BATCH = 500;
+      for (let i = 0; i < detailZeilen.length; i += BATCH) {
+        const { error: dErr } = await supabase.from("finance_gebuehren").upsert(
+          detailZeilen.slice(i, i + BATCH).map((d) => ({
+            tenant_id, monat: d.monat, sku: d.sku ?? "", fee_typ: d.fee_typ,
+            betrag_cents: d.betrag_cents, updated_at: jetzt,
+          })),
+          { onConflict: "tenant_id,monat,sku,fee_typ" },
+        );
+        if (dErr) return json({ error: "Gebuehren-Detail-Upsert fehlgeschlagen", detail: dErr.message }, 500);
+      }
+    }
+
     return json({
       ok: true,
       seiten,
       abgeschnitten: seiten >= MAX_SEITEN && Boolean(nextToken),
       monate: zeilen.length,
+      gebuehren_detailzeilen: detailZeilen.length,
       gebuehren_gesamt_cents: zeilen.reduce((s, z) => s + z.gebuehren_cents, 0),
     });
   } catch (e) {
