@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { baueFbaReturnsRows, baueLedgerAdjustmentsRows, baueReimbursementsRows } from "./history.ts";
+import { baueFbaBestandRows, baueFbaReturnsRows, baueLedgerAdjustmentsRows, baueReimbursementsRows } from "./history.ts";
 
 Deno.test("baueFbaReturnsRows: mappt FBA-Spalten auf returns_history", () => {
   const payload = {
@@ -92,4 +92,34 @@ Deno.test("baueLedgerAdjustmentsRows: gequotete Header UND Werte (Ledger-Report)
   assertEquals(rows[0].quantity, -4);
   assertEquals(rows[0].reason, "M");
   assertEquals(rows[0].sku, "CX9");
+});
+
+Deno.test("baueFbaBestandRows: echte Bestandsmengen inkl. Nachschub unterwegs", () => {
+  // Echte Zeile aus dem Vaneja-Report (Koch Chemie): 0 verkaufsfaehig, 75 unterwegs.
+  const payload = { rows: [{
+    "sku": "18-Y92L-D87T", "asin": "B0H15QMFP1", "fnsku": "B0H15QMFP1",
+    "product-name": "Koch Chemie Mzr Mehrzweckreiniger", "your-price": "28.97",
+    "afn-fulfillable-quantity": "0", "afn-total-quantity": "77",
+    "afn-reserved-quantity": "0", "afn-unsellable-quantity": "0",
+    "afn-warehouse-quantity": "2", "afn-researching-quantity": "2",
+    "afn-inbound-shipped-quantity": "75", "afn-inbound-working-quantity": "0",
+    "afn-inbound-receiving-quantity": "0", "mfn-fulfillable-quantity": "",
+    "afn-listing-exists": "Yes", "mfn-listing-exists": "No",
+  }] };
+  const rows = baueFbaBestandRows("t1", payload) as any[];
+  assertEquals(rows.length, 1);
+  const r = rows[0];
+  assertEquals(r.asin, "B0H15QMFP1");
+  assertEquals(r.verkaufsfaehig, 0);      // echte 0 bleibt 0
+  assertEquals(r.gesamt, 77);
+  assertEquals(r.inbound_shipped, 75);    // Nachschub unterwegs
+  assertEquals(r.preis_cents, 2897);
+  assertEquals(r.afn_listing, true);
+  assertEquals(r.mfn_listing, false);
+  assertEquals(r.mfn_verkaufsfaehig, null); // LEER -> unbekannt, NICHT 0
+});
+
+Deno.test("baueFbaBestandRows: ohne SKU wird uebersprungen; leerer Payload -> []", () => {
+  assertEquals(baueFbaBestandRows("t1", { rows: [{ asin: "B01" }] }).length, 0);
+  assertEquals(baueFbaBestandRows("t1", null).length, 0);
 });
