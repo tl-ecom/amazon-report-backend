@@ -39,6 +39,7 @@ import { ertragVerlauf, listeEk, loescheEk, setzeEk } from "../_shared/ertrag.ts
 import { ladeEinstellungen, setzeEinstellungen } from "../_shared/einstellungen.ts";
 import { importiereEkCsv, importiereEkVonUrl, speichereEkUrl } from "../_shared/sellerboard_import.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, legeFirmaAn, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
+import { importiereFeeSchedule, listeFeeKlassifizierung, listeFeeSchedule, setzeFeeKlassifizierung } from "../_shared/fee_stammdaten.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
 const CORS = {
@@ -153,6 +154,44 @@ Deno.serve(async (req) => {
       return json({ ok: true, action: body.action, data: r });
     } catch (e) {
       return json({ error: "Feature setzen fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
+    }
+  }
+
+  // --- Gebühren-Stammdaten (Fee Decoder). Plattformweit, nur Admin. Früh, weil
+  // sie an keiner Firma hängen. Alle vier Handler self-gaten auf platform_admins.
+  if (body?.resource === "fee_schedule") {
+    try {
+      return json({ ok: true, resource: "fee_schedule", data: await listeFeeSchedule(service, userId) });
+    } catch (e) {
+      return json({ error: "fee_schedule fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
+    }
+  }
+  if (body?.resource === "fee_klassifizierung") {
+    try {
+      return json({ ok: true, resource: "fee_klassifizierung", data: await listeFeeKlassifizierung(service, userId) });
+    } catch (e) {
+      return json({ error: "fee_klassifizierung fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
+    }
+  }
+  if (body?.action === "fee_schedule_import") {
+    try {
+      const r = await importiereFeeSchedule(
+        service, userId,
+        String((args as any)?.csv ?? ""),
+        String((args as any)?.gueltig_ab ?? ""),
+        Boolean((args as any)?.schreiben),
+      );
+      return json({ ok: true, action: body.action, data: r });
+    } catch (e) {
+      return json({ error: "Import fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
+    }
+  }
+  if (body?.action === "fee_klassifizierung_setzen") {
+    try {
+      const r = await setzeFeeKlassifizierung(service, userId, args as Record<string, unknown>);
+      return json({ ok: true, action: body.action, data: r });
+    } catch (e) {
+      return json({ error: "Klassifizierung fehlgeschlagen", detail: String((e as Error)?.message ?? e) }, 400);
     }
   }
 

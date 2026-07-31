@@ -48,6 +48,25 @@ Deno.test("baueGebuehrenvorschauRows: uebernimmt Amazons Groessenklasse unveraen
   assertEquals(rows[0].closing_cents, null); // leer bleibt unbekannt, nicht 0
 });
 
+Deno.test("baueGebuehrenvorschauRows: gleiche SKU je Marktplatz bleibt getrennt", () => {
+  // Der Report fuehrt dieselbe SKU einmal je Store. Ohne Marktplatz im Schluessel
+  // wuerden franzoesische Gebuehren die deutschen ueberschreiben.
+  const rows = baueGebuehrenvorschauRows("t1", {
+    rows: [
+      { "sku": "VAN 001", "amazon-store": "DE", "expected-domestic-fulfilment-fee-per-unit": "3.92" },
+      { "sku": "VAN 001", "amazon-store": "FR", "expected-domestic-fulfilment-fee-per-unit": "5.10" },
+    ],
+  }) as any[];
+  assertEquals(rows.length, 2);
+  assertEquals(rows.find((r) => r.marketplace === "DE").fulfilment_cents, 392);
+  assertEquals(rows.find((r) => r.marketplace === "FR").fulfilment_cents, 510);
+});
+
+Deno.test("baueGebuehrenvorschauRows: ohne Store-Spalte -> DE", () => {
+  const rows = baueGebuehrenvorschauRows("t1", { rows: [{ sku: "A" }] }) as any[];
+  assertEquals(rows[0].marketplace, "DE");
+});
+
 Deno.test("baueGebuehrenvorschauRows: ohne SKU wird uebersprungen; leer -> []", () => {
   assertEquals(baueGebuehrenvorschauRows("t1", { rows: [{ asin: "B01" }] }).length, 0);
   assertEquals(baueGebuehrenvorschauRows("t1", {}).length, 0);
