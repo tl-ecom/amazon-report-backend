@@ -40,6 +40,7 @@ import { ladeEinstellungen, setzeEinstellungen } from "../_shared/einstellungen.
 import { importiereEkCsv, importiereEkVonUrl, speichereEkUrl } from "../_shared/sellerboard_import.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, legeFirmaAn, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
 import { importiereFeeSchedule, listeFeeKlassifizierung, listeFeeSchedule, setzeFeeKlassifizierung } from "../_shared/fee_stammdaten.ts";
+import { setzeUstFaktor, ustStatus } from "../_shared/ust_lauf.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
 const CORS = {
@@ -342,6 +343,17 @@ Deno.serve(async (req) => {
         const r = await setzeEinstellungen(service, tenantId, args as any);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
+      // Steuerfaktor der Gebühren bestätigen. `faktor: null` setzt zurück,
+      // `faktor: 1` heisst ausdrücklich "keine Umsatzsteuer".
+      if (action === "ust_faktor_setzen") {
+        const roh = (args as any)?.faktor;
+        const r = await setzeUstFaktor(
+          service, tenantId,
+          roh === null || roh === undefined || roh === "" ? null : Number(roh),
+          String((args as any)?.quelle ?? "manuell"),
+        );
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
       if (action === "diagnose_status") {
         const r = await setzeDiagnoseStatus(service, tenantId, String((args as any)?.id ?? ""), String((args as any)?.status ?? ""));
         return json({ ok: true, action, tenant_id: tenantId, data: r });
@@ -521,6 +533,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "einstellungen") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await ladeEinstellungen(service, tenantId) });
+    }
+    if (resource === "ust_faktor") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await ustStatus(service, tenantId) });
     }
     const ergebnis = await rufeToolAuf(resource, args, ctx);
     return json({ ok: true, resource, tenant_id: tenantId, data: ergebnis });

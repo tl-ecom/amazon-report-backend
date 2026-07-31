@@ -22,6 +22,9 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   kpi_verlauf: "verlauf",
   ertrag_verlauf: "verlauf",
   // Einkaufspreise sind ein eigener Menuepunkt -> eigener Feature-Key.
+  // Steuerfaktor der Gebühren: gehört zur Ertragsrechnung, hängt am EK-Bereich.
+  ust_faktor: "ek",
+  ust_faktor_setzen: "ek",
   asin_ek: "ek",
   ek_setzen: "ek",
   ek_loeschen: "ek",
