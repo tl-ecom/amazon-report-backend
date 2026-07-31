@@ -1,7 +1,8 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
   baueFbaBestandRows, baueFbaReturnsRows, baueGebuehrenvorschauRows,
-  baueLedgerAdjustmentsRows, baueReimbursementsRows, gewichtG, laengeCm,
+  baueLedgerAdjustmentsRows, baueReimbursementsRows, baueSettlementRows,
+  gewichtG, laengeCm,
 } from "./history.ts";
 
 Deno.test("laengeCm: normalisiert cm/mm/Zoll, unbekannte Einheit -> null", () => {
@@ -70,6 +71,41 @@ Deno.test("baueGebuehrenvorschauRows: ohne Store-Spalte -> DE", () => {
 Deno.test("baueGebuehrenvorschauRows: ohne SKU wird uebersprungen; leer -> []", () => {
   assertEquals(baueGebuehrenvorschauRows("t1", { rows: [{ asin: "B01" }] }).length, 0);
   assertEquals(baueGebuehrenvorschauRows("t1", {}).length, 0);
+});
+
+Deno.test("baueSettlementRows: normalisiert ohne zu interpretieren", () => {
+  const rows = baueSettlementRows("t1", {
+    rows: [
+      // Kopfzeile: nur Zeitraum und Auszahlungssumme, kein Betragstyp.
+      {
+        "settlement-id": "301", "settlement-start-date": "2026-07-01",
+        "settlement-end-date": "2026-07-14", "deposit-date": "2026-07-16",
+        "total-amount": "12345.67", "currency": "EUR",
+      },
+      {
+        "settlement-id": "301", "transaction-type": "Order", "order-id": "302-1",
+        "amount-type": "ItemFees", "amount-description": "FBAPerUnitFulfillmentFee",
+        "amount": "-4.43", "posted-date": "2026-07-03", "sku": "BIO001",
+        "quantity-purchased": "1", "marketplace-name": "amazon.de",
+      },
+    ],
+  }) as any[];
+  assertEquals(rows.length, 2);
+  const kopf = rows.find((r) => r.betrag_typ === null);
+  assertEquals(kopf.gesamtbetrag_cents, 1234567);
+  assertEquals(kopf.auszahlung_datum, "2026-07-16");
+  const zeile = rows.find((r) => r.betrag_typ === "ItemFees");
+  // Beschreibung UNVERAENDERT — die Auswertung passiert nicht hier.
+  assertEquals(zeile.betrag_beschreibung, "FBAPerUnitFulfillmentFee");
+  assertEquals(zeile.betrag_cents, -443);
+  assertEquals(zeile.sku, "BIO001");
+  assertEquals(zeile.menge, 1);
+});
+
+Deno.test("baueSettlementRows: dedupliziert identische Zeilen, leer -> []", () => {
+  const doppelt = { "settlement-id": "9", "amount": "-1.00", "amount-type": "ItemFees" };
+  assertEquals(baueSettlementRows("t1", { rows: [doppelt, { ...doppelt }] }).length, 1);
+  assertEquals(baueSettlementRows("t1", {}).length, 0);
 });
 
 Deno.test("baueFbaReturnsRows: mappt FBA-Spalten auf returns_history", () => {

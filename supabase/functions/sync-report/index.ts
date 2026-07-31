@@ -76,6 +76,12 @@ interface ReportKonfig {
    * days/maxDays/stableLagDays sind dann bedeutungslos.
    */
   snapshot?: boolean;
+  /**
+   * Report, den AMAZON selbst erzeugt (Abrechnungsbericht). Er kann nicht
+   * angefordert werden — createReport antwortet mit einem Fehler. Stattdessen
+   * werden die vorhandenen aufgelistet und der jüngste abgeholt.
+   */
+  vorhanden?: boolean;
 }
 
 const REPORT_KONFIG: Record<string, ReportKonfig> = {
@@ -154,6 +160,15 @@ const REPORT_KONFIG: Record<string, ReportKonfig> = {
     // Gebuehrenvorschau je SKU: Amazons Groessenklasse, Masse/Gewicht und die
     // erwarteten Gebuehren. Momentaufnahme, KEIN Zeitraum.
     // Getestet 2026-07-31: HTTP 200, 59 Zeilen, 30 Spalten.
+    snapshot: true,
+    stableLagDays: 0,
+    maxDays: 0,
+  },
+  GET_V2_SETTLEMENT_REPORT_DATA_FLAT_FILE_V2: {
+    format: "tsv",
+    // Abrechnungsbericht: die autoritative Geldquelle. Amazon erzeugt ihn je
+    // Auszahlungszeitraum selbst — deshalb auflisten statt anfordern.
+    vorhanden: true,
     snapshot: true,
     stableLagDays: 0,
     maxDays: 0,
@@ -323,18 +338,30 @@ Deno.serve(async (req) => {
         zeitfenster = { dataStartTime: start.toISOString(), dataEndTime: end.toISOString() };
       }
 
-      const requested = await requestReport(accessToken, {
-        reportType,
-        marketplaceIds: [ctx.marketplace_id],
-        ...(zeitfenster ?? {}),
-        // Nur mitschicken, wenn der Typ welche kennt.
-        ...(konfig.reportOptions ? { reportOptions: konfig.reportOptions } : {}),
-      }, deadline, rl);
+      if (konfig.vorhanden) {
+        // Von Amazon erzeugter Report (Abrechnung): den jüngsten fertigen holen.
+        // `nach` erlaubt gezielt ältere Abrechnungszeiträume (Backfill).
+        const gefunden = await findeVorhandenenReport(
+          accessToken, reportType, ctx.marketplace_id, body.nach ?? null, rl,
+        );
+        if (!gefunden.ok) {
+          return json({ error: "Kein Abrechnungsbericht verfügbar", detail: gefunden.detail }, 502);
+        }
+        reportId = gefunden.reportId!;
+      } else {
+        const requested = await requestReport(accessToken, {
+          reportType,
+          marketplaceIds: [ctx.marketplace_id],
+          ...(zeitfenster ?? {}),
+          // Nur mitschicken, wenn der Typ welche kennt.
+          ...(konfig.reportOptions ? { reportOptions: konfig.reportOptions } : {}),
+        }, deadline, rl);
 
-      if (!requested.ok) {
-        return json({ error: "SP-API Fehler beim Anfordern", detail: requested.detail }, 502);
+        if (!requested.ok) {
+          return json({ error: "SP-API Fehler beim Anfordern", detail: requested.detail }, 502);
+        }
+        reportId = requested.reportId!;
       }
-      reportId = requested.reportId!;
 
       const { error: insErr } = await supabase.from("report_jobs").insert({
         tenant_id,
@@ -580,6 +607,48 @@ Deno.serve(async (req) => {
     return json({ error: "Ausnahme", detail: String(e) }, 500);
   }
 });
+
+/**
+ * Von Amazon erzeugte Reports auflisten und den passenden auswählen.
+ * Nur für Typen mit `vorhanden: true` (Abrechnungsbericht) — die lassen sich
+ * nicht anfordern. Ohne `nach` gewinnt der jüngste fertige Report; mit `nach`
+ * (YYYY-MM-DD) der jüngste, dessen Datenende NICHT nach diesem Tag liegt.
+ */
+async function findeVorhandenenReport(
+  accessToken: string,
+  reportType: string,
+  marketplaceId: string,
+  nach: string | null,
+  rl: RateSammler,
+): Promise<{ ok: boolean; reportId?: string; detail?: unknown }> {
+  const url = new URL(`${SP_ENDPOINT}/reports/2021-06-30/reports`);
+  url.searchParams.set("reportTypes", reportType);
+  url.searchParams.set("marketplaceIds", marketplaceId);
+  url.searchParams.set("pageSize", "100");
+  const resp = await fetch(url.toString(), {
+    method: "GET",
+    headers: { "x-amz-access-token": accessToken },
+  });
+  merkeRate(rl, "getReports", resp);
+  const data = await resp.json();
+  if (!resp.ok) return { ok: false, detail: data };
+
+  const fertige = (data?.reports ?? [])
+    .filter((r: any) => r?.processingStatus === "DONE" && r?.reportDocumentId)
+    .sort((a: any, b: any) => String(b.dataEndTime ?? "").localeCompare(String(a.dataEndTime ?? "")));
+
+  if (fertige.length === 0) {
+    return {
+      ok: false,
+      detail: "Amazon führt keinen fertigen Abrechnungsbericht — er entsteht erst mit der nächsten Auszahlung.",
+    };
+  }
+  const treffer = nach
+    ? fertige.find((r: any) => String(r.dataEndTime ?? "").slice(0, 10) <= nach)
+    : fertige[0];
+  if (!treffer) return { ok: false, detail: `Kein Abrechnungsbericht mit Ende bis ${nach}` };
+  return { ok: true, reportId: treffer.reportId };
+}
 
 // --- Stufe 1: Report anfordern (429 nach Amazons eigenem Limit behandeln) ---
 async function requestReport(
