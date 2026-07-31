@@ -2,7 +2,7 @@ import { assertEquals } from "jsr:@std/assert@1";
 import {
   baueFbaBestandRows, baueFbaReturnsRows, baueGebuehrenvorschauRows,
   baueLedgerAdjustmentsRows, baueReimbursementsRows, baueSettlementRows,
-  gewichtG, laengeCm,
+  datumOderNull, gewichtG, laengeCm,
 } from "./history.ts";
 
 Deno.test("laengeCm: normalisiert cm/mm/Zoll, unbekannte Einheit -> null", () => {
@@ -71,6 +71,19 @@ Deno.test("baueGebuehrenvorschauRows: ohne Store-Spalte -> DE", () => {
 Deno.test("baueGebuehrenvorschauRows: ohne SKU wird uebersprungen; leer -> []", () => {
   assertEquals(baueGebuehrenvorschauRows("t1", { rows: [{ asin: "B01" }] }).length, 0);
   assertEquals(baueGebuehrenvorschauRows("t1", {}).length, 0);
+});
+
+Deno.test("datumOderNull: TT.MM.JJJJ wird NICHT als US-Datum gelesen", () => {
+  // Der Fehler, der im Abrechnungsbericht auffiel: new Date("05.06.2026")
+  // liefert in V8 den 6. Mai. Amazon meint aber den 5. Juni.
+  assertEquals(datumOderNull("05.06.2026"), "2026-06-05");
+  assertEquals(datumOderNull("31.12.2026"), "2026-12-31"); // als US-Datum unmoeglich
+  assertEquals(datumOderNull("1.7.2026"), "2026-07-01");   // ohne fuehrende Null
+  assertEquals(datumOderNull("2026-06-05"), "2026-06-05");
+  assertEquals(datumOderNull("2026-06-05T12:30:00Z"), "2026-06-05");
+  assertEquals(datumOderNull("05.13.2026"), null);         // Monat 13 gibt es nicht
+  assertEquals(datumOderNull(""), null);
+  assertEquals(datumOderNull("keine Ahnung"), null);
 });
 
 Deno.test("baueSettlementRows: normalisiert ohne zu interpretieren", () => {
