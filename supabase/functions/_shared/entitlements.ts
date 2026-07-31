@@ -48,6 +48,8 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   stockout_radar: "nachschub",
   ladenhueter_radar: "ladenhueter",
   board_report: "board",
+  // Fee Decoder — Modul 2 (Größenklassen-Korridor).
+  groessenklassen: "gebuehren",
   // MCP-Zugang (KI-Anbindung) — schaltbar, damit das Häkchen in der Tarif-Matrix
   // auch wirklich greift und nicht nur den Tab versteckt.
   mcp_tokens: "mcp",

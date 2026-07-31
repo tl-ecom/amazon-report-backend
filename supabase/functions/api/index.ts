@@ -41,6 +41,7 @@ import { importiereEkCsv, importiereEkVonUrl, speichereEkUrl } from "../_shared/
 import { ablehnenKonto, freigebenKonto, ladeEin, legeFirmaAn, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
 import { importiereFeeSchedule, listeFeeKlassifizierung, listeFeeSchedule, setzeFeeKlassifizierung } from "../_shared/fee_stammdaten.ts";
 import { setzeUstFaktor, ustStatus } from "../_shared/ust_lauf.ts";
+import { groessenklassenKorridor } from "../_shared/korridor_lauf.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
 const CORS = {
@@ -536,6 +537,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "ust_faktor") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await ustStatus(service, tenantId) });
+    }
+    if (resource === "groessenklassen") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await groessenklassenKorridor(service, tenantId, args as any) });
     }
     const ergebnis = await rufeToolAuf(resource, args, ctx);
     return json({ ok: true, resource, tenant_id: tenantId, data: ergebnis });
