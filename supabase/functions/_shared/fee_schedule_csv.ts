@@ -11,7 +11,12 @@
 //
 // Der Schlüssel `size_tier` muss exakt Amazons Bandnamen entsprechen — sonst
 // findet der Abgleich nichts. Der Import meldet daher zurück, welche Namen er
-// gelesen hat, statt sie stillschweigend zu normalisieren.
+// gelesen hat, statt sie stillschweigend zu normalisieren. Amazon liefert
+// englische IDs: StandardParcel, SmallParcel, ExtraLargeEnvelope, ...
+//
+// EINE ZEILE JE GEWICHTSSTUFE, nicht je Klasse: innerhalb von StandardParcel
+// reichen die Gebühren im echten Bestand von 4,01 € bis 6,12 €. Die Klasse
+// allein bestimmt die Gebühr also nicht — erst Klasse + Gewichtsstufe tun es.
 
 import { csvZeilen, ekCents, erkenneTrenner, datumIso } from "./sellerboard.ts";
 

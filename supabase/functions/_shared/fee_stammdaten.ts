@@ -40,20 +40,33 @@ export async function importiereFeeSchedule(
 
   const { error } = await supabase.from("fee_schedule").upsert(
     p.zeilen.map((z) => ({ ...z, quelle: "csv-import", updated_at: new Date().toISOString() })),
-    { onConflict: "marketplace,size_tier,gueltig_ab" },
+    { onConflict: "marketplace,size_tier,gueltig_ab,max_weight_g" },
   );
   if (error) throw new Error(`fee_schedule schreiben: ${error.message}`);
   erg.geschrieben = p.zeilen.length;
   return erg;
 }
 
-/** Gepflegte Gebührentabelle lesen (Admin-Ansicht). */
+/**
+ * Gepflegte Gebührentabelle + die Klassen, die real vorkommen, aber noch fehlen.
+ * Bewusst KEINE Platzhalterzeilen in der Tabelle: die bräuchten ein erfundenes
+ * Gültigkeitsdatum und sähen später aus wie gepflegte Daten.
+ */
 export async function listeFeeSchedule(supabase: any, callerId: string): Promise<unknown> {
   if (!(await istPlattformAdmin(supabase, callerId))) throw new Error("nicht autorisiert");
-  const { data, error } = await supabase.from("fee_schedule")
-    .select("*").order("marketplace").order("gueltig_ab", { ascending: false }).order("size_tier");
-  if (error) throw new Error(`fee_schedule lesen: ${error.message}`);
-  return { zeilen: data ?? [] };
+  const [gepflegt, beobachtet] = await Promise.all([
+    supabase.from("fee_schedule")
+      .select("*").order("marketplace").order("gueltig_ab", { ascending: false })
+      .order("size_tier").order("max_weight_g", { nullsFirst: false }),
+    supabase.rpc("fee_klassen_beobachtet"),
+  ]);
+  if (gepflegt.error) throw new Error(`fee_schedule lesen: ${gepflegt.error.message}`);
+  const alle = (beobachtet.data ?? []) as any[];
+  return {
+    zeilen: gepflegt.data ?? [],
+    beobachtet: alle,
+    offen: alle.filter((k) => !k.gepflegt),
+  };
 }
 
 /**

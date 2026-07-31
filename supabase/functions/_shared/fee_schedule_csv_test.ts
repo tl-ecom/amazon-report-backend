@@ -51,6 +51,20 @@ Deno.test("parseGebuehrenCsv: englische Kopfzeile mit Komma", () => {
   assertEquals(r.zeilen[0].gueltig_ab, "2026-01-01");
 });
 
+Deno.test("parseGebuehrenCsv: mehrere Gewichtsstufen je Klasse bleiben erhalten", () => {
+  // Amazons Tabelle listet je Klasse mehrere Stufen. Sie duerfen nicht kollabieren.
+  const csv = [
+    "Größenklasse;Max Gewicht;Gebühr",
+    "StandardParcel;250 g;4,01",
+    "StandardParcel;500 g;4,52",
+    "StandardParcel;unbegrenzt;6,12",
+  ].join("\n");
+  const r = parseGebuehrenCsv(csv, "2026-01-01");
+  assertEquals(r.zeilen.length, 3);
+  assertEquals(r.zeilen.map((z) => z.max_weight_g), [250, 500, null]);
+  assertEquals(r.zeilen.map((z) => z.fee_eur), [4.01, 4.52, 6.12]);
+});
+
 Deno.test("parseGebuehrenCsv: fehlendes Datum faellt auf den Standard zurueck", () => {
   const r = parseGebuehrenCsv("Größenklasse;Gebühr\nStandard;5,90", "2026-04-01");
   assertEquals(r.zeilen[0].gueltig_ab, "2026-04-01");
