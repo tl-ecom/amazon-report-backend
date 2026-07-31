@@ -164,6 +164,14 @@ const REPORT_KONFIG: Record<string, ReportKonfig> = {
     stableLagDays: 0,
     maxDays: 0,
   },
+  GET_FBA_INVENTORY_PLANNING_DATA: {
+    format: "tsv",
+    // Momentaufnahme OHNE Zeitraum. Mit Zeitfenster angefordert antwortet Amazon
+    // mit FATAL (beobachtet 2026-08-01 bei GET_FBA_INVENTORY_AGED_DATA).
+    snapshot: true,
+    stableLagDays: 0,
+    maxDays: 0,
+  },
   GET_FBA_STORAGE_FEE_CHARGES_DATA: {
     format: "tsv",
     // MONATLICHER Report. Ein Fenster im laufenden Monat liefert nichts und

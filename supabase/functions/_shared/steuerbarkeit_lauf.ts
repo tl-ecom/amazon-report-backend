@@ -13,6 +13,7 @@
 
 import { analysiereSteuerbarkeit, type Klassifizierung, type Position } from "./steuerbarkeit.ts";
 import { ladeUstFaktor } from "./ust_lauf.ts";
+import { teileLagergebuehr, type Altersstufen } from "./lageralter.ts";
 
 export async function steuerbarkeitReport(
   supabase: any, tenant_id: string, opts?: { von?: unknown; bis?: unknown },
@@ -22,17 +23,18 @@ export async function steuerbarkeitReport(
     ? String(opts?.von)
     : new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
 
-  const [abrechnung, lager, klass, ustFaktor] = await Promise.all([
+  const [abrechnung, lager, klass, ustFaktor, alter] = await Promise.all([
     supabase.from("settlement_zeilen")
       .select("betrag_beschreibung, betrag_cents, gebucht_am")
       .eq("tenant_id", tenant_id).eq("betrag_typ", "ItemFees")
       .gte("gebucht_am", von).lte("gebucht_am", bis),
     supabase.from("fba_lagergebuehren")
-      .select("monat, basis_cents, zuschlag_cents, gesamt_cents")
+      .select("monat, asin, basis_cents, zuschlag_cents, gesamt_cents")
       .eq("tenant_id", tenant_id)
       .gte("monat", von.slice(0, 7)).lte("monat", bis.slice(0, 7)),
     supabase.from("fee_type_classification").select("*"),
     ladeUstFaktor(supabase, tenant_id),
+    supabase.from("fba_bestandsalter").select("*").eq("tenant_id", tenant_id),
   ]);
   if (abrechnung.error) throw new Error(`settlement_zeilen: ${abrechnung.error.message}`);
   if (lager.error) throw new Error(`fba_lagergebuehren: ${lager.error.message}`);
@@ -48,8 +50,27 @@ export async function steuerbarkeitReport(
       quelle: "abrechnung" as const,
     }));
 
+  // Bestandsalter je ASIN buendeln (Momentaufnahme je SKU, mehrere je ASIN).
+  const alterJeAsin = new Map<string, Altersstufen>();
+  for (const a of (alter.data ?? []) as any[]) {
+    const asin = a.asin ? String(a.asin) : null;
+    if (!asin) continue;
+    const bisher = alterJeAsin.get(asin);
+    const plus = (x: unknown, y: number | null | undefined) => (Number(x) || 0) + (Number(y) || 0);
+    alterJeAsin.set(asin, {
+      alter_0_30: plus(bisher?.alter_0_30, a.alter_0_30),
+      alter_31_60: plus(bisher?.alter_31_60, a.alter_31_60),
+      alter_61_90: plus(bisher?.alter_61_90, a.alter_61_90),
+      alter_91_180: plus(bisher?.alter_91_180, a.alter_91_180),
+      alter_181_270: plus(bisher?.alter_181_270, a.alter_181_270),
+      alter_271_365: plus(bisher?.alter_271_365, a.alter_271_365),
+      alter_365_plus: plus(bisher?.alter_365_plus, a.alter_365_plus),
+    });
+  }
+
   // Lager: bereits netto -> ust_enthalten:false, damit der Faktor sie in Ruhe laesst.
   const alsKosten = (cents: number) => -Math.round(cents);
+  let geschaetzteZeilen = 0;
   for (const r of (lager.data ?? []) as any[]) {
     const gesamt = Number(r.gesamt_cents) || 0;
     const zuschlag = Number(r.zuschlag_cents) || 0;
@@ -57,10 +78,21 @@ export async function steuerbarkeitReport(
     // Zeile; die Gesamtsumme steht dagegen immer.
     const basis = gesamt - zuschlag;
     if (basis !== 0) {
-      positionen.push({
-        fee_typ: "FBALagergebuehrBasis", betrag_cents: alsKosten(basis),
-        quelle: "lager", ust_enthalten: false,
-      });
+      // Coaching-Regel: erste drei Monate unvermeidbar, danach selbst erzeugt.
+      const teil = teileLagergebuehr(basis, alterJeAsin.get(String(r.asin ?? "")) ?? null);
+      if (teil.geschaetzt) geschaetzteZeilen++;
+      if (teil.frisch_cents !== 0) {
+        positionen.push({
+          fee_typ: "FBALagergebuehrBis3Monate", betrag_cents: alsKosten(teil.frisch_cents),
+          quelle: "lager", ust_enthalten: false,
+        });
+      }
+      if (teil.alt_cents !== 0) {
+        positionen.push({
+          fee_typ: "FBALagergebuehrAb4Monate", betrag_cents: alsKosten(teil.alt_cents),
+          quelle: "lager", ust_enthalten: false,
+        });
+      }
     }
     if (zuschlag !== 0) {
       positionen.push({
@@ -86,6 +118,9 @@ export async function steuerbarkeitReport(
     quellen: {
       abrechnung_positionen: positionen.filter((p) => p.quelle === "abrechnung").length,
       lager_positionen: positionen.filter((p) => p.quelle === "lager").length,
+      // Zeilen ohne bekanntes Bestandsalter: dort gilt alles als frisch, die
+      // Aufteilung ist geschaetzt und eher zu guenstig fuer den Verkaeufer.
+      lager_ohne_altersangabe: geschaetzteZeilen,
     },
     ust_faktor: faktor,
     ...ergebnis,
