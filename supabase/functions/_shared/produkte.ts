@@ -10,6 +10,7 @@ function runde(n: number, stellen = 2): number {
 interface Row {
   asin: string; produktname: string; umsatz_cents: number; einheiten: number;
   wareneinsatz_cents: number; einheiten_mit_ek: number; retouren: number;
+  gebuehren_cents: number; gebuehren_bekannt: boolean; gebuehren_anteilig: boolean;
 }
 
 function istDatum(s: unknown): s is string {
@@ -41,6 +42,15 @@ export async function produktUebersicht(
     const hatEk = (Number(r.einheiten_mit_ek) || 0) > 0;
     const rohertrag = hatEk ? runde(umsatz - wareneinsatz) : null;
     const retouren = Number(r.retouren) || 0;
+
+    // Amazon-Gebühren je Produkt (signiert, negativ = Kosten).
+    const hatGeb = Boolean(r.gebuehren_bekannt);
+    const gebuehren = hatGeb ? (Number(r.gebuehren_cents) || 0) / 100 : null;
+    // Nettogewinn = Umsatz − Wareneinsatz + Gebühren(negativ). Nur mit BEIDEM.
+    const nettogewinn = hatEk && hatGeb && rohertrag != null ? runde(rohertrag + gebuehren!) : null;
+    // Zwischenstufe ohne EK: was nach Amazon übrig bleibt.
+    const umsatzNachGebuehren = hatGeb ? runde(umsatz + gebuehren!) : null;
+
     return {
       asin: r.asin,
       produktname: r.produktname,
@@ -50,13 +60,25 @@ export async function produktUebersicht(
       rohertrag,
       rohmarge: hatEk && umsatz > 0 && rohertrag != null ? runde((rohertrag / umsatz) * 100, 1) : null,
       retourenquote: einheiten > 0 ? runde((retouren / einheiten) * 100, 1) : null,
+      gebuehren: gebuehren == null ? null : runde(gebuehren),
+      gebuehrenquote: hatGeb && umsatz > 0 ? runde((-gebuehren! / umsatz) * 100, 1) : null,
+      gebuehren_anteilig: Boolean(r.gebuehren_anteilig),
+      umsatz_nach_gebuehren: umsatzNachGebuehren,
+      nettogewinn,
+      nettomarge: nettogewinn != null && umsatz > 0 ? runde((nettogewinn / umsatz) * 100, 1) : null,
     };
   });
 
+  const mitGebuehren = produkte.filter((p) => p.gebuehren != null);
   return {
     von, bis,
     waehrung: "EUR",
     produkte,
     summe_retouren: produkte.reduce((s, p) => s + p.retouren, 0),
+    // Gebühren-Überblick: was ist bekannt, wie verlässlich ist die Zuordnung?
+    hat_gebuehren: mitGebuehren.length > 0,
+    summe_gebuehren: mitGebuehren.length ? runde(mitGebuehren.reduce((s, p) => s + (p.gebuehren ?? 0), 0)) : null,
+    gebuehren_anteilig: produkte.some((p) => p.gebuehren_anteilig),
+    produkte_ohne_gebuehren: produkte.filter((p) => p.umsatz > 0 && p.gebuehren == null).length,
   };
 }
