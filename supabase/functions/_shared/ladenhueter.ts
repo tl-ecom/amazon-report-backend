@@ -129,6 +129,8 @@ export async function ladenhueterRadar(supabase: any, tenant_id: string): Promis
       hat_angebot: Boolean(r.hat_angebot),
       angebot_status: r.angebot_status ?? null,
       bestand: r.bestand == null ? null : nz(r.bestand),
+      nachschub_unterwegs: r.nachschub_unterwegs == null ? null : nz(r.nachschub_unterwegs),
+      bestand_bekannt: Boolean(r.bestand_bekannt),
       ist_fba: Boolean(r.ist_fba),
       status: b.status,
       schwere: b.schwere,
