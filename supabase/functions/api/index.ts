@@ -42,6 +42,7 @@ import { ablehnenKonto, freigebenKonto, ladeEin, legeFirmaAn, listeKunden, liste
 import { importiereFeeSchedule, listeFeeKlassifizierung, listeFeeSchedule, setzeFeeKlassifizierung } from "../_shared/fee_stammdaten.ts";
 import { setzeSteuerprofil, setzeUstFaktor, ustStatus } from "../_shared/ust_lauf.ts";
 import { groessenklassenKorridor } from "../_shared/korridor_lauf.ts";
+import { masseAbgleich } from "../_shared/abgleich_lauf.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
 const CORS = {
@@ -548,6 +549,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "groessenklassen") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await groessenklassenKorridor(service, tenantId, args as any) });
+    }
+    if (resource === "masse_abgleich") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await masseAbgleich(service, tenantId, args as any) });
     }
     const ergebnis = await rufeToolAuf(resource, args, ctx);
     return json({ ok: true, resource, tenant_id: tenantId, data: ergebnis });

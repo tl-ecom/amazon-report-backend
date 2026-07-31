@@ -132,6 +132,42 @@ export function gebuehrFuer(k: Klasse, versandgewicht_g: number): number | null 
   return Math.round((grund + schritte * zuschlag) * 100) / 100;
 }
 
+/**
+ * Welche Klasse gälte für diese Maße und dieses Gewicht, und was kostet sie?
+ *
+ * Für Modul 3: Was würde Amazon abrechnen, wenn die KATALOG-Maße stimmten?
+ * Genommen wird die günstigste Klasse, in die der Karton hineinpasst — nur
+ * innerhalb derselben Tarifart wie die tatsächlich zugewiesene Klasse, denn
+ * welches Gebührenmodell gilt, hängt an der Produktkategorie.
+ *
+ * null, wenn keine Klasse passt: dann wird nichts behauptet.
+ */
+export function klasseFuerMasse(
+  kanten: [number, number, number],
+  stueckgewicht_g: number,
+  klassen: Klasse[],
+  wieKlasse?: Klasse,
+): { klasse: Klasse; gebuehr: number } | null {
+  const [l, b, h] = [...kanten].sort((x, y) => y - x);
+  const versand = Math.max(stueckgewicht_g, volumengewicht(l, b, h));
+  const kategorietarif = (k: Klasse) => k.stufen.length === 0 && k.grundgebuehr_eur !== null;
+  const zielArt = wieKlasse ? kategorietarif(wieKlasse) : null;
+
+  const passend = klassen
+    .filter((k) => zielArt === null || kategorietarif(k) === zielArt)
+    .filter((k) => {
+      const grenzen = [nz(k.max_longest_side_cm), nz(k.max_median_side_cm), nz(k.max_shortest_side_cm)];
+      if (grenzen.some((g) => g === null)) return false;
+      const gs = (grenzen as number[]).slice().sort((x, y) => y - x);
+      return l <= gs[0] && b <= gs[1] && h <= gs[2];
+    })
+    .map((k) => ({ klasse: k, gebuehr: gebuehrFuer(k, versand) }))
+    .filter((x): x is { klasse: Klasse; gebuehr: number } => x.gebuehr !== null)
+    .sort((a, b2) => a.gebuehr - b2.gebuehr);
+
+  return passend[0] ?? null;
+}
+
 /** Passt das Produkt (Maße) in die Klasse? Kanten werden sortiert verglichen. */
 function passtInBox(p: Produkt, k: Klasse): boolean {
   const kanten = [nz(p.laengste_seite_cm), nz(p.mittlere_seite_cm), nz(p.kuerzeste_seite_cm)];

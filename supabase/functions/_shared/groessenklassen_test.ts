@@ -1,6 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
-  gebuehrFuer, korridorReport, pruefeKorridor, volumengewicht,
+  gebuehrFuer, klasseFuerMasse, korridorReport, pruefeKorridor, volumengewicht,
   type Klasse, type Produkt,
 } from "./groessenklassen.ts";
 
@@ -209,6 +209,32 @@ Deno.test("pruefeKorridor: Kategorietarif und Standardtarif werden nicht vermisc
   }), alle);
   assertEquals(kat.ziel_klasse, "SmallParcel1");
   assertEquals(kat.blocker.map((x) => x.kante), ["kuerzeste"]);
+});
+
+Deno.test("klasseFuerMasse: guenstigste passende Klasse, sonst null", () => {
+  // Passt in Kleines Paket (35x25x12), Versandgewicht 30*20*10/5 = 1200 g.
+  const k = klasseFuerMasse([30, 20, 10], 800, KLASSEN)!;
+  assertEquals(k.klasse.size_tier, "SmallParcel");
+  assertEquals(k.gebuehr, 3.41); // Stufe <= 1400 g
+
+  // Reihenfolge der Kanten darf nichts aendern.
+  assertEquals(klasseFuerMasse([10, 30, 20], 800, KLASSEN)!.klasse.size_tier, "SmallParcel");
+
+  // Passt nirgends hinein -> null statt Notloesung.
+  assertEquals(klasseFuerMasse([200, 100, 90], 800, KLASSEN), null);
+});
+
+Deno.test("klasseFuerMasse: bleibt in der Tarifart der zugewiesenen Klasse", () => {
+  const kp3: Klasse = {
+    size_tier: "SmallParcel3", label: "Kleines Paket 3",
+    max_longest_side_cm: 35, max_median_side_cm: 25, max_shortest_side_cm: 12,
+    stufen: [], grundgebuehr_eur: 3.38, zuschlag_je_100g_eur: 0.07, max_weight_g: 3900,
+  };
+  const alle = [...KLASSEN, kp3];
+  // Ohne Vorgabe gewinnt die absolut guenstigste.
+  assertEquals(klasseFuerMasse([30, 20, 10], 800, alle)!.klasse.size_tier, "SmallParcel");
+  // Mit Kategorietarif als Vorgabe bleibt es in der Kategorietabelle.
+  assertEquals(klasseFuerMasse([30, 20, 10], 800, alle, kp3)!.klasse.size_tier, "SmallParcel3");
 });
 
 Deno.test("korridorReport: sortiert nach Euro und summiert nur echte Chancen", () => {
