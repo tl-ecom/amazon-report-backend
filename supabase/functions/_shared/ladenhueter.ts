@@ -20,7 +20,10 @@ export const LUECKE_TAGE = 14;    // Null-Strecke, ab der eine VERSORGUNGSlücke
 // eine lange Verkaufslücke erklärt UND das Produkt verkauft inzwischen wieder.
 // Ohne diese Unterscheidung wurde ein Stockout als Ladenhüter gemeldet — mit der
 // genau falschen Empfehlung („auslisten" statt „nachbestellen").
-export type LhStatus = "tot" | "wiederanlauf" | "abkuehlend" | "ok";
+// „ausgelistet": Es gibt gar kein Angebot mehr. Dann ist „Relaunch oder
+// auslisten" sinnlos — die Entscheidung ist längst gefallen. Solche ASINs
+// tauchen nur noch als Historie auf und werden nachrangig gezeigt.
+export type LhStatus = "tot" | "wiederanlauf" | "abkuehlend" | "ausgelistet" | "ok";
 
 export interface LhInput {
   lifetime_units: number;
@@ -33,6 +36,8 @@ export interface LhInput {
   max_luecke_tage?: number;
   /** Verkauft sich jetzt unter einer SKU, die es vorher nicht gab (neue Charge). */
   neue_sku?: boolean;
+  /** Steht die ASIN noch im Angebots-Snapshot? false = ausgelistet. */
+  hat_angebot?: boolean;
 }
 export interface LhBewertung {
   status: LhStatus;
@@ -60,7 +65,12 @@ export function bewerteLadenhueter(i: LhInput): LhBewertung {
   if (lifetime < MIN_LIFETIME) return { status: "ok", schwere: 0, ...basis };
 
   const tageOhne = nz(i.tage_ohne_verkauf);
-  if (tageOhne >= TOT_TAGE) return { status: "tot", schwere: 2, ...basis };
+  if (tageOhne >= TOT_TAGE) {
+    // Kein Angebot mehr -> bereits ausgelistet, keine offene Entscheidung.
+    // `hat_angebot === undefined` heißt „unbekannt" und bleibt bewusst „tot".
+    if (i.hat_angebot === false) return { status: "ausgelistet", schwere: 0, ...basis };
+    return { status: "tot", schwere: 2, ...basis };
+  }
 
   const eingebrochen = veloAlt >= ALT_MIN_VELO && veloNeu <= KUEHL_FAKTOR * veloAlt;
   if (eingebrochen) {
@@ -96,6 +106,7 @@ export async function ladenhueterRadar(supabase: any, tenant_id: string): Promis
       tage_ohne_verkauf: nz(r.tage_ohne_verkauf),
       max_luecke_tage: nz(r.max_luecke_tage),
       neue_sku: Boolean(r.neue_sku),
+      hat_angebot: r.hat_angebot === null || r.hat_angebot === undefined ? undefined : Boolean(r.hat_angebot),
     });
     const preisAlt = r.preis_alt_cents == null ? null : nz(r.preis_alt_cents);
     const preisNeu = r.preis_neu_cents == null ? null : nz(r.preis_neu_cents);
@@ -113,6 +124,12 @@ export async function ladenhueterRadar(supabase: any, tenant_id: string): Promis
       preis_alt_cents: preisAlt,
       preis_neu_cents: preisNeu,
       preis_geaendert: preisAlt != null && preisNeu != null && Math.abs(preisNeu - preisAlt) >= 100,
+      // Angebot/Bestand: FBA-Mengen liefert der Report NICHT -> bestand bleibt null
+      // (unbekannt), niemals 0. `hat_angebot=false` = ausgelistet.
+      hat_angebot: Boolean(r.hat_angebot),
+      angebot_status: r.angebot_status ?? null,
+      bestand: r.bestand == null ? null : nz(r.bestand),
+      ist_fba: Boolean(r.ist_fba),
       status: b.status,
       schwere: b.schwere,
       einbruch_cents: b.einbruch_cents,
@@ -136,6 +153,7 @@ export async function ladenhueterRadar(supabase: any, tenant_id: string): Promis
     anzahl_tot: zaehle("tot"),
     anzahl_abkuehlend: zaehle("abkuehlend"),
     anzahl_wiederanlauf: zaehle("wiederanlauf"),
+    anzahl_ausgelistet: zaehle("ausgelistet"),
     anzahl_asins_geprueft: basis.length,
   };
 }
