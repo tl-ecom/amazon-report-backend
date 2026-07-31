@@ -1,7 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
   baueFbaBestandRows, baueFbaReturnsRows, baueGebuehrenvorschauRows,
-  baueLedgerAdjustmentsRows, baueReimbursementsRows, baueSettlementRows,
+  baueLagergebuehrenRows, baueLedgerAdjustmentsRows, baueReimbursementsRows, baueSettlementRows,
   datumOderNull, gewichtG, laengeCm,
 } from "./history.ts";
 
@@ -84,6 +84,39 @@ Deno.test("datumOderNull: TT.MM.JJJJ wird NICHT als US-Datum gelesen", () => {
   assertEquals(datumOderNull("05.13.2026"), null);         // Monat 13 gibt es nicht
   assertEquals(datumOderNull(""), null);
   assertEquals(datumOderNull("keine Ahnung"), null);
+});
+
+Deno.test("baueLagergebuehrenRows: trennt Basisgebuehr und Nutzungszuschlag", () => {
+  const rows = baueLagergebuehrenRows("t1", {
+    rows: [{
+      "asin": "B0ABC", "fnsku": "X001", "product_name": "Obst Etagere",
+      "fulfillment_center": "DTM2", "country_code": "DE",
+      "product_size_tier": "Standard-Size", "month_of_charge": "2026-06",
+      "average_quantity_on_hand": "412.5", "average_quantity_pending_removal": "0",
+      "estimated_total_item_volume": "1.234", "volume_units": "cubic feet",
+      "storage_utilization_ratio": "31.2", "storage_utilization_ratio_units": "weeks",
+      "base_rate": "26.25", "utilization_surcharge_rate": "0.5",
+      "est_base_msf": "32.40", "est_sus": "7.15",
+      "estimated_monthly_storage_fee": "39.55", "currency": "EUR",
+    }],
+  }) as any[];
+  assertEquals(rows.length, 1);
+  assertEquals(rows[0].monat, "2026-06");
+  assertEquals(rows[0].basis_cents, 3240);
+  assertEquals(rows[0].zuschlag_cents, 715);   // der steuerbare Teil
+  assertEquals(rows[0].gesamt_cents, 3955);
+  assertEquals(rows[0].lagernutzungsgrad, 31.2);
+  assertEquals(rows[0].bestand_schnitt, 412.5);
+});
+
+Deno.test("baueLagergebuehrenRows: leere Betraege bleiben unbekannt, nicht 0", () => {
+  const rows = baueLagergebuehrenRows("t1", {
+    rows: [{ "asin": "B0ABC", "month_of_charge": "2026-06", "est_sus": "", "est_base_msf": "5.00" }],
+  }) as any[];
+  assertEquals(rows[0].zuschlag_cents, null);
+  assertEquals(rows[0].basis_cents, 500);
+  // Leerzeilen ohne ASIN und ohne Monat fliegen raus.
+  assertEquals(baueLagergebuehrenRows("t1", { rows: [{ currency: "EUR" }] }).length, 0);
 });
 
 Deno.test("baueSettlementRows: normalisiert ohne zu interpretieren", () => {

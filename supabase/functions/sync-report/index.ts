@@ -164,6 +164,14 @@ const REPORT_KONFIG: Record<string, ReportKonfig> = {
     stableLagDays: 0,
     maxDays: 0,
   },
+  GET_FBA_STORAGE_FEE_CHARGES_DATA: {
+    format: "tsv",
+    // MONATLICHER Report. Ein Fenster im laufenden Monat liefert nichts und
+    // Amazon storniert ihn (beobachtet 2026-07-31: CANCELLED). Abgefragt werden
+    // muss ein ABGESCHLOSSENER Monat, also mit end_date auf den Monatsersten.
+    stableLagDays: 0,
+    maxDays: 30,
+  },
   GET_V2_SETTLEMENT_REPORT_DATA_FLAT_FILE_V2: {
     format: "tsv",
     // Abrechnungsbericht: die autoritative Geldquelle. Amazon erzeugt ihn je
