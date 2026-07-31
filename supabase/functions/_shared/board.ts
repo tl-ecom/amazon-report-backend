@@ -46,9 +46,23 @@ export function baueBoardReport(overview: any, erstattung: any, nachschub: any, 
     }
   }
   for (const z of (ladenhueter?.zeilen ?? []) as any[]) {
-    if (nz(z.einbruch_cents) > 0) {
-      prio.push({ quelle: "ladenhueter", asin: String(z.asin), titel: String(z.produktname ?? z.asin), betrag_cents: nz(z.einbruch_cents), betrag_art: "monatlich", aktion: "Relaunch prüfen (Bild/Preis/PPC) oder auslisten" });
-    }
+    if (nz(z.einbruch_cents) <= 0) continue;
+    // Aktion folgt dem ECHTEN Status, nicht dem Radar-Namen: ein Ausverkauf
+    // („wiederanlauf") braucht Nachschub, NICHT „auslisten".
+    const status = String(z.status ?? "");
+    const istAusverkauf = status === "wiederanlauf";
+    prio.push({
+      quelle: istAusverkauf ? "nachschub" : "ladenhueter",
+      asin: String(z.asin),
+      titel: String(z.produktname ?? z.asin),
+      betrag_cents: nz(z.einbruch_cents),
+      betrag_art: "monatlich",
+      aktion: istAusverkauf
+        ? "Bestand sichern — war ausverkauft, läuft wieder an"
+        : status === "tot"
+        ? "Auslisten prüfen — seit über 60 Tagen kein Verkauf"
+        : "Relaunch prüfen (Bild/Preis/PPC) oder auslisten",
+    });
   }
   prio.sort((a, b) => b.betrag_cents - a.betrag_cents);
 

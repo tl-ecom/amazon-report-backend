@@ -38,6 +38,25 @@ Deno.test("leere Bausteine -> Nullen, keine Prioritäten, kein Absturz", () => {
   assertEquals(r.kpis.waehrung, "EUR");
 });
 
+Deno.test("Ausverkauf (wiederanlauf) empfiehlt Nachschub, NICHT auslisten", () => {
+  const lh = { zeilen: [{ asin: "B0FKNN9CCJ", produktname: "Obst-Etagere grün", status: "wiederanlauf", einbruch_cents: 503070 }] };
+  const r = baueBoardReport(overview, { kandidaten: [] }, { zeilen: [] }, lh) as any;
+  const p = r.prioritaeten[0];
+  assertEquals(p.quelle, "nachschub");
+  assertEquals(p.aktion.includes("Bestand sichern"), true);
+  assertEquals(p.aktion.includes("auslisten"), false);
+});
+
+Deno.test("Aktion folgt dem Status: tot -> auslisten, abkuehlend -> Relaunch", () => {
+  const lh = { zeilen: [
+    { asin: "T", produktname: "Totes", status: "tot", einbruch_cents: 200 },
+    { asin: "K", produktname: "Kuehlt", status: "abkuehlend", einbruch_cents: 100 },
+  ] };
+  const r = baueBoardReport(overview, { kandidaten: [] }, { zeilen: [] }, lh) as any;
+  assertEquals(r.prioritaeten.find((p: any) => p.asin === "T").aktion.includes("Auslisten"), true);
+  assertEquals(r.prioritaeten.find((p: any) => p.asin === "K").aktion.includes("Relaunch"), true);
+});
+
 Deno.test("Positionen ohne Betrag werden nicht als Priorität geführt", () => {
   const nur0 = { zeilen: [{ asin: "X", produktname: "P", status: "leer", verlust_cents: 0 }] };
   const r = baueBoardReport(overview, { kandidaten: [] }, nur0, { zeilen: [] }) as any;

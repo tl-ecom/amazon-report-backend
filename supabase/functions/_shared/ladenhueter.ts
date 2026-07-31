@@ -14,8 +14,13 @@ export const MIN_LIFETIME = 20;   // < 20 je ASIN verkauft: nie richtig gelaufen
 export const TOT_TAGE = 60;       // >= 60 Tage kein Verkauf -> tot
 export const ALT_MIN_VELO = 0.2;  // Vorquartal-Velocity (Stk/Tag), ab der „abkühlend" überhaupt zählt
 export const KUEHL_FAKTOR = 0.3;  // jetzt <= 30 % der alten Velocity -> abkühlend
+export const LUECKE_TAGE = 14;    // Null-Strecke, ab der eine VERSORGUNGSlücke (Ausverkauf) unterstellt wird
 
-export type LhStatus = "tot" | "abkuehlend" | "ok";
+// „wiederanlauf" trennt „keine Ware" von „keine Nachfrage": Der Einbruch wird durch
+// eine lange Verkaufslücke erklärt UND das Produkt verkauft inzwischen wieder.
+// Ohne diese Unterscheidung wurde ein Stockout als Ladenhüter gemeldet — mit der
+// genau falschen Empfehlung („auslisten" statt „nachbestellen").
+export type LhStatus = "tot" | "wiederanlauf" | "abkuehlend" | "ok";
 
 export interface LhInput {
   lifetime_units: number;
@@ -24,10 +29,14 @@ export interface LhInput {
   units_30_120: number;
   umsatz_30_120_cents: number;
   tage_ohne_verkauf: number;
+  /** Längste Strecke ohne Verkauf in den letzten 120 Tagen. */
+  max_luecke_tage?: number;
+  /** Verkauft sich jetzt unter einer SKU, die es vorher nicht gab (neue Charge). */
+  neue_sku?: boolean;
 }
 export interface LhBewertung {
   status: LhStatus;
-  schwere: number;                // 2 tot, 1 abkühlend, 0 ok
+  schwere: number;                // 2 tot/wiederanlauf, 1 abkühlend, 0 ok
   einbruch_cents: number;         // Monatsumsatz Vorquartal − jetzt (>= 0), soweit Preisdaten da sind
   umsatz_alt_monat_cents: number; // Ø Monatsumsatz im Vorquartal (30–120 Tage)
   velo_alt: number;               // Stk/Tag Vorquartal
@@ -49,8 +58,18 @@ export function bewerteLadenhueter(i: LhInput): LhBewertung {
   const basis = { einbruch_cents: einbruch, umsatz_alt_monat_cents: umsatzAltMonat, velo_alt: veloAlt, velo_neu: veloNeu };
 
   if (lifetime < MIN_LIFETIME) return { status: "ok", schwere: 0, ...basis };
-  if (nz(i.tage_ohne_verkauf) >= TOT_TAGE) return { status: "tot", schwere: 2, ...basis };
-  if (veloAlt >= ALT_MIN_VELO && veloNeu <= KUEHL_FAKTOR * veloAlt) {
+
+  const tageOhne = nz(i.tage_ohne_verkauf);
+  if (tageOhne >= TOT_TAGE) return { status: "tot", schwere: 2, ...basis };
+
+  const eingebrochen = veloAlt >= ALT_MIN_VELO && veloNeu <= KUEHL_FAKTOR * veloAlt;
+  if (eingebrochen) {
+    // Erklärt eine Versorgungslücke den Einbruch — und läuft der Verkauf wieder an?
+    // Dann ist es ein Ausverkauf, kein Ladenhüter.
+    const luecke = nz(i.max_luecke_tage);
+    if (luecke >= LUECKE_TAGE && tageOhne < LUECKE_TAGE) {
+      return { status: "wiederanlauf", schwere: 2, ...basis };
+    }
     return { status: "abkuehlend", schwere: 1, ...basis };
   }
   return { status: "ok", schwere: 0, ...basis };
@@ -75,7 +94,11 @@ export async function ladenhueterRadar(supabase: any, tenant_id: string): Promis
       units_30_120: nz(r.units_30_120),
       umsatz_30_120_cents: nz(r.umsatz_30_120_cents),
       tage_ohne_verkauf: nz(r.tage_ohne_verkauf),
+      max_luecke_tage: nz(r.max_luecke_tage),
+      neue_sku: Boolean(r.neue_sku),
     });
+    const preisAlt = r.preis_alt_cents == null ? null : nz(r.preis_alt_cents);
+    const preisNeu = r.preis_neu_cents == null ? null : nz(r.preis_neu_cents);
     return {
       asin: String(r.asin),
       produktname: titel.get(String(r.asin)) ?? String(r.asin),
@@ -84,6 +107,12 @@ export async function ladenhueterRadar(supabase: any, tenant_id: string): Promis
       units_30_120: nz(r.units_30_120),
       letzter_verkauf: r.letzter_verkauf ?? null,
       tage_ohne_verkauf: nz(r.tage_ohne_verkauf),
+      // Belege für das Urteil — sichtbar, damit die Einstufung nachprüfbar ist.
+      max_luecke_tage: nz(r.max_luecke_tage),
+      neue_sku: Boolean(r.neue_sku),
+      preis_alt_cents: preisAlt,
+      preis_neu_cents: preisNeu,
+      preis_geaendert: preisAlt != null && preisNeu != null && Math.abs(preisNeu - preisAlt) >= 100,
       status: b.status,
       schwere: b.schwere,
       einbruch_cents: b.einbruch_cents,
@@ -100,9 +129,13 @@ export async function ladenhueterRadar(supabase: any, tenant_id: string): Promis
     waehrung: "EUR",
     zeilen,
     // Nur der Umsatz-Einbruch der abkühlenden Produkte (verlässliche, jüngste Preisdaten).
+    // Wiederanlauf zählt NICHT hierein — das ist Ausverkauf, kein Nachfrageverlust.
     summe_einbruch_cents: zeilen.filter((z) => z.status === "abkuehlend").reduce((s, z) => s + z.einbruch_cents, 0),
+    // Entgangener Umsatz durch Ausverkauf — getrennt ausgewiesen, andere Ursache/Handlung.
+    summe_ausverkauf_cents: zeilen.filter((z) => z.status === "wiederanlauf").reduce((s, z) => s + z.einbruch_cents, 0),
     anzahl_tot: zaehle("tot"),
     anzahl_abkuehlend: zaehle("abkuehlend"),
+    anzahl_wiederanlauf: zaehle("wiederanlauf"),
     anzahl_asins_geprueft: basis.length,
   };
 }
