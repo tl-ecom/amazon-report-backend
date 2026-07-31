@@ -40,7 +40,7 @@ import { ladeEinstellungen, setzeEinstellungen } from "../_shared/einstellungen.
 import { importiereEkCsv, importiereEkVonUrl, speichereEkUrl } from "../_shared/sellerboard_import.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, legeFirmaAn, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
 import { importiereFeeSchedule, listeFeeKlassifizierung, listeFeeSchedule, setzeFeeKlassifizierung } from "../_shared/fee_stammdaten.ts";
-import { setzeUstFaktor, ustStatus } from "../_shared/ust_lauf.ts";
+import { setzeSteuerprofil, setzeUstFaktor, ustStatus } from "../_shared/ust_lauf.ts";
 import { groessenklassenKorridor } from "../_shared/korridor_lauf.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
@@ -342,6 +342,14 @@ Deno.serve(async (req) => {
       }
       if (action === "einstellungen_setzen") {
         const r = await setzeEinstellungen(service, tenantId, args as any);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      // Steuerprofil der Firma: Sitzland + Vorsteuerabzug. Daraus leitet sich
+      // ab, ob Gebühren netto gerechnet werden — ohne dass jemand rechnen muss.
+      if (action === "steuerprofil_setzen") {
+        const r = await setzeSteuerprofil(
+          service, tenantId, (args as any)?.land, (args as any)?.vorsteuerabzug,
+        );
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
       // Steuerfaktor der Gebühren bestätigen. `faktor: null` setzt zurück,

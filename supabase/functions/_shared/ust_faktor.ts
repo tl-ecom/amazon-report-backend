@@ -182,6 +182,56 @@ export function messeUstFaktor(paare: Paar[]): FaktorErgebnis {
   };
 }
 
+/** USt.-Satz, den Amazon dem Verkäufer im jeweiligen Sitzland berechnet. */
+const SATZ_IM_LAND: Record<string, number> = { DE: 1.19 };
+
+export interface Steuerprofil {
+  land: string;
+  vorsteuerabzug: boolean;
+}
+
+export interface AbleitungErgebnis {
+  faktor: number;
+  begruendung: string;
+}
+
+/**
+ * Leitet den Faktor aus dem Steuerprofil ab — die Regel, nicht die Messung.
+ *
+ * Drei Fälle:
+ *  * Sitz Deutschland + vorsteuerabzugsberechtigt → Amazon fakturiert mit 19 %
+ *    deutscher USt., die als Vorsteuer zurückkommt. Sie ist ein durchlaufender
+ *    Posten und gehört nicht in die Marge → netto rechnen.
+ *  * Nicht vorsteuerabzugsberechtigt (Kleinunternehmer) → die USt. wird gezahlt
+ *    und NICHT erstattet. Sie ist echte Kosten → NICHT herausrechnen.
+ *  * Sitz ausserhalb Deutschlands → Amazon rechnet im Reverse-Charge-Verfahren
+ *    ohne USt. ab. Es ist keine drin, die man herausrechnen könnte.
+ */
+export function faktorAusProfil(p: Steuerprofil): AbleitungErgebnis {
+  const land = String(p.land ?? "").trim().toUpperCase();
+  if (!p.vorsteuerabzug) {
+    return {
+      faktor: 1,
+      begruendung: "Nicht vorsteuerabzugsberechtigt: die enthaltene Umsatzsteuer wird nicht erstattet " +
+        "und ist damit echte Kosten. Die Gebühren bleiben, wie sie gebucht sind.",
+    };
+  }
+  const satz = SATZ_IM_LAND[land];
+  if (!satz) {
+    return {
+      faktor: 1,
+      begruendung: `Firmensitz ${land || "unbekannt"}: Amazon rechnet ausserhalb Deutschlands im ` +
+        "Reverse-Charge-Verfahren ohne Umsatzsteuer ab — es ist keine enthalten, die herausgerechnet werden könnte.",
+    };
+  }
+  return {
+    faktor: satz,
+    begruendung: `Firmensitz ${land}, vorsteuerabzugsberechtigt: Amazon fakturiert mit ` +
+      `${Math.round((satz - 1) * 100)} % Umsatzsteuer. Sie kommt als Vorsteuer zurück und wird ` +
+      "deshalb aus der Marge herausgerechnet.",
+  };
+}
+
 /**
  * Rechnet einen gebuchten Bruttobetrag auf netto. Ohne bestätigten Faktor bleibt
  * der Betrag UNVERÄNDERT — nie stillschweigend umrechnen.

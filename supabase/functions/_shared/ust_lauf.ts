@@ -6,24 +6,40 @@
 // wäre bequem und falsch: bei Reverse Charge oder Kleinunternehmern rechnet er
 // Gebühren klein und zeigt eine Marge, die es nicht gibt.
 
-import { FAKTOR_MAX, FAKTOR_MIN, messeUstFaktor, type FaktorErgebnis, type Paar } from "./ust_faktor.ts";
+import {
+  FAKTOR_MAX, FAKTOR_MIN, faktorAusProfil, messeUstFaktor,
+  type FaktorErgebnis, type Paar,
+} from "./ust_faktor.ts";
+
+const STANDARD_LAND = "DE";
+const STANDARD_VORSTEUER = true;
 
 export interface UstStatus {
+  /** Was die Firma über sich angegeben hat. */
+  profil: { land: string; vorsteuerabzug: boolean; bestaetigt_am: string | null };
+  /** Der aus dem Profil abgeleitete Faktor — das ist die Regel. */
+  abgeleitet: number;
+  abgeleitet_grund: string;
+  /** Manuelle Überschreibung, falls gesetzt. null = es gilt der abgeleitete Wert. */
+  ueberschrieben: number | null;
+  /** Was tatsächlich gerechnet wird. */
+  aktiv: number;
+  /** Die Messung an echten Buchungen — Gegenprobe, nicht Grundlage. */
   messung: FaktorErgebnis;
-  /** Bestätigter Faktor, der aktuell gerechnet wird. null = es wird nicht umgerechnet. */
-  bestaetigt: number | null;
-  quelle: string | null;
-  bestaetigt_am: string | null;
-  /** Weicht die Messung vom Bestätigten ab? Dann hat sich etwas geändert. */
-  abweichung: boolean;
+  /** Widerspricht die Messung dem, was gerechnet wird? */
+  widerspruch: boolean;
 }
 
-/** Misst den Faktor und stellt ihn dem bestätigten gegenüber. */
+/**
+ * Steuerprofil lesen und den Faktor daraus ableiten. Die Messung dient als
+ * GEGENPROBE, nicht als Grundlage: Sie braucht Abrechnungsdaten, die eine junge
+ * Firma noch nicht hat — das Profil kennt jeder Verkäufer sofort.
+ */
 export async function ustStatus(supabase: any, tenant_id: string): Promise<UstStatus> {
   const [paareRes, einstellung] = await Promise.all([
     supabase.rpc("ust_faktor_paare", { p_tenant: tenant_id }),
     supabase.from("tenant_einstellungen")
-      .select("gebuehren_ust_faktor, gebuehren_ust_quelle, gebuehren_ust_bestaetigt_am")
+      .select("firmensitz_land, vorsteuerabzug, steuerprofil_bestaetigt_am, gebuehren_ust_faktor")
       .eq("tenant_id", tenant_id).maybeSingle(),
   ]);
   if (paareRes.error) throw new Error(`Vergleichspaare: ${paareRes.error.message}`);
@@ -34,17 +50,44 @@ export async function ustStatus(supabase: any, tenant_id: string): Promise<UstSt
     netto_cents: Number(r.netto_cents),
   }));
   const messung = messeUstFaktor(paare);
-  const bestaetigt = einstellung.data?.gebuehren_ust_faktor ?? null;
+
+  const land = einstellung.data?.firmensitz_land ?? STANDARD_LAND;
+  const vorsteuer = einstellung.data?.vorsteuerabzug ?? STANDARD_VORSTEUER;
+  const ableitung = faktorAusProfil({ land, vorsteuerabzug: vorsteuer });
+  const ueberschrieben = einstellung.data?.gebuehren_ust_faktor ?? null;
+  const aktiv = ueberschrieben === null ? ableitung.faktor : Number(ueberschrieben);
 
   return {
+    profil: {
+      land, vorsteuerabzug: vorsteuer,
+      bestaetigt_am: einstellung.data?.steuerprofil_bestaetigt_am ?? null,
+    },
+    abgeleitet: ableitung.faktor,
+    abgeleitet_grund: ableitung.begruendung,
+    ueberschrieben: ueberschrieben === null ? null : Number(ueberschrieben),
+    aktiv,
     messung,
-    bestaetigt: bestaetigt === null ? null : Number(bestaetigt),
-    quelle: einstellung.data?.gebuehren_ust_quelle ?? null,
-    bestaetigt_am: einstellung.data?.gebuehren_ust_bestaetigt_am ?? null,
-    // Nur melden, wenn beide da sind und sich um mehr als eine Rundung unterscheiden.
-    abweichung: bestaetigt !== null && messung.vorschlag !== null &&
-      Math.abs(Number(bestaetigt) - messung.vorschlag) > 0.005,
+    // Nur wenn die Messung belastbar ist UND deutlich abweicht. Ein Widerspruch
+    // heisst: entweder stimmt das Profil nicht oder Amazon rechnet anders ab.
+    widerspruch: messung.brauchbar && messung.vorschlag !== null &&
+      Math.abs(messung.vorschlag - aktiv) > 0.005,
   };
+}
+
+/** Steuerprofil setzen. Das ist die Angabe der Firma über sich selbst. */
+export async function setzeSteuerprofil(
+  supabase: any, tenant_id: string, land: unknown, vorsteuerabzug: unknown,
+): Promise<{ ok: true; faktor: number }> {
+  const l = String(land ?? "").trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(l)) throw new Error("Bitte ein Land als Zwei-Buchstaben-Kürzel angeben (z. B. DE).");
+  const v = Boolean(vorsteuerabzug);
+  const { error } = await supabase.from("tenant_einstellungen").upsert({
+    tenant_id, firmensitz_land: l, vorsteuerabzug: v,
+    steuerprofil_bestaetigt_am: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "tenant_id" });
+  if (error) throw new Error(`Steuerprofil speichern: ${error.message}`);
+  return { ok: true, faktor: faktorAusProfil({ land: l, vorsteuerabzug: v }).faktor };
 }
 
 /**
@@ -73,12 +116,23 @@ export async function setzeUstFaktor(
   return { ok: true, faktor: wert };
 }
 
-/** Bestätigten Faktor laden — für die Margenrechnung. null = nicht umrechnen. */
+/**
+ * Faktor für die Margenrechnung. Reihenfolge: manuelle Überschreibung, sonst
+ * aus dem Steuerprofil abgeleitet. Das Profil hat immer eine Antwort — deshalb
+ * gibt es hier kein „unbekannt" mehr.
+ */
 export async function ladeUstFaktor(supabase: any, tenant_id: string): Promise<number | null> {
   const { data } = await supabase.from("tenant_einstellungen")
-    .select("gebuehren_ust_faktor").eq("tenant_id", tenant_id).maybeSingle();
+    .select("gebuehren_ust_faktor, firmensitz_land, vorsteuerabzug")
+    .eq("tenant_id", tenant_id).maybeSingle();
+
   const f = data?.gebuehren_ust_faktor;
-  if (f === null || f === undefined) return null;
-  const n = Number(f);
-  return Number.isFinite(n) && n >= FAKTOR_MIN && n <= FAKTOR_MAX ? n : null;
+  if (f !== null && f !== undefined) {
+    const n = Number(f);
+    if (Number.isFinite(n) && n >= FAKTOR_MIN && n <= FAKTOR_MAX) return n;
+  }
+  return faktorAusProfil({
+    land: data?.firmensitz_land ?? STANDARD_LAND,
+    vorsteuerabzug: data?.vorsteuerabzug ?? STANDARD_VORSTEUER,
+  }).faktor;
 }

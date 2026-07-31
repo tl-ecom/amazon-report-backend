@@ -1,5 +1,28 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { messeUstFaktor, nettoGebuehr, type Paar } from "./ust_faktor.ts";
+import { faktorAusProfil, messeUstFaktor, nettoGebuehr, type Paar } from "./ust_faktor.ts";
+
+Deno.test("faktorAusProfil: DE + vorsteuerabzugsberechtigt -> netto rechnen", () => {
+  const r = faktorAusProfil({ land: "DE", vorsteuerabzug: true });
+  assertEquals(r.faktor, 1.19);
+  assertEquals(r.begruendung.includes("Vorsteuer"), true);
+  // Gross-/Kleinschreibung und Leerzeichen duerfen nicht entscheiden.
+  assertEquals(faktorAusProfil({ land: " de ", vorsteuerabzug: true }).faktor, 1.19);
+});
+
+Deno.test("faktorAusProfil: Kleinunternehmer zahlt die USt. wirklich", () => {
+  // Nicht vorsteuerabzugsberechtigt: die Steuer kommt NICHT zurueck, sie ist
+  // echte Kosten. Sie herauszurechnen wuerde die Marge schoenrechnen.
+  const r = faktorAusProfil({ land: "DE", vorsteuerabzug: false });
+  assertEquals(r.faktor, 1);
+  assertEquals(r.begruendung.includes("echte Kosten"), true);
+});
+
+Deno.test("faktorAusProfil: Sitz ausserhalb Deutschlands -> Reverse Charge", () => {
+  const r = faktorAusProfil({ land: "AT", vorsteuerabzug: true });
+  assertEquals(r.faktor, 1);
+  assertEquals(r.begruendung.includes("Reverse-Charge"), true);
+  assertEquals(faktorAusProfil({ land: "", vorsteuerabzug: true }).faktor, 1);
+});
 
 /** Baut Paare mit einem Zielfaktor und optionalem Rauschen je Position. */
 function paare(netto: number[], faktoren: number[]): Paar[] {

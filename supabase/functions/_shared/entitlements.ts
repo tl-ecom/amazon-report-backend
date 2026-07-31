@@ -25,6 +25,7 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   // Steuerfaktor der Gebühren: gehört zur Ertragsrechnung, hängt am EK-Bereich.
   ust_faktor: "ek",
   ust_faktor_setzen: "ek",
+  steuerprofil_setzen: "ek",
   asin_ek: "ek",
   ek_setzen: "ek",
   ek_loeschen: "ek",
