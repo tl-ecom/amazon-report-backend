@@ -1,12 +1,24 @@
-// produkte.ts — Per-Produkt-Übersicht (Umsatz/Einheiten/Retouren je ASIN, +
-// Rohertrag/Rohmarge sobald EK je ASIN hinterlegt ist). Nettogewinn/ACOS folgen
-// mit Gebühren (SP-API Finances) bzw. Ads — hier bewusst NICHT gefaked.
+// produkte.ts — Per-Produkt-Übersicht je ASIN.
 //
-// Umsatzsteuer in den Gebühren: Amazon bucht Gebühren als EINEN Betrag, ohne die
-// Steuer auszuweisen (nachgewiesen im Abrechnungsbericht). Für einen
-// vorsteuerabzugsberechtigten Verkäufer ist die enthaltene USt. aber ein
-// durchlaufender Posten und KEIN Kosten. Deshalb wird mit dem bestätigten
-// Faktor auf netto gerechnet — und ohne Bestätigung gar nicht.
+// Die Rechnung:
+//   Nettoumsatz  = Umsatz − Umsatzsteuer
+//   Rohertrag    = Nettoumsatz − Einkaufspreis
+//   Nettogewinn  = Rohertrag − Amazon-Gebühren (netto) − Werbekosten
+//
+// Zwei Steuerbeträge, die nichts miteinander zu tun haben und beide raus müssen:
+//
+//   1. Umsatzsteuer auf den UMSATZ. Der Verkäufer vereinnahmt sie und führt sie
+//      ab — sie war nie sein Geld. 9.356 € brutto sind bei 19 % nur 7.862 €.
+//   2. Vorsteuer in den GEBÜHREN. Amazon bucht sie ohne Ausweis mit; bei
+//      Vorsteuerabzug kommt sie zurück und ist kein Kosten.
+//
+// Beides folgt aus dem Steuerprofil der Firma. Die Marge auf den Bruttoumsatz zu
+// rechnen, während die Gebühren netto stehen, macht jede Zahl systematisch zu
+// schön — genau in der Größenordnung des Steuersatzes.
+//
+// Werbekosten sind noch nicht angebunden (Ads-API bei Amazon nicht freigegeben).
+// Sie werden deshalb als UNBEKANNT ausgewiesen, nicht als 0 — sonst stünde da
+// ein Gewinn, den es so nicht gibt.
 
 import { nettoGebuehr } from "./ust_faktor.ts";
 import { ladeUstFaktor } from "./ust_lauf.ts";
@@ -41,14 +53,27 @@ export async function produktUebersicht(
     von = new Date(Date.now() - fenster * 86400000).toISOString().slice(0, 10);
     bis = new Date().toISOString().slice(0, 10);
   }
-  const [{ data, error }, ustFaktor] = await Promise.all([
+  const [{ data, error }, ustFaktor, einstellung] = await Promise.all([
     supabase.rpc("produkt_uebersicht", { p_tenant: tenant_id, p_von: von, p_bis: bis }),
     ladeUstFaktor(supabase, tenant_id),
+    supabase.from("tenant_einstellungen").select("umsatzsteuer_prozent")
+      .eq("tenant_id", tenant_id).maybeSingle(),
   ]);
   if (error) throw new Error(`produkt_uebersicht: ${error.message}`);
 
+  // Umsatzsteuersatz auf den eigenen Umsatz. 19 % ist der Regelfall in
+  // Deutschland; 0 bei Kleinunternehmern, deren Umsatz bereits netto ist.
+  const ustSatz = Number(einstellung?.data?.umsatzsteuer_prozent ?? 19);
+  const umsatzTeiler = Number.isFinite(ustSatz) && ustSatz >= 0 && ustSatz < 100
+    ? 1 + ustSatz / 100
+    : 1;
+
   const produkte = ((data ?? []) as Row[]).map((r) => {
-    const umsatz = (Number(r.umsatz_cents) || 0) / 100;
+    const umsatzBrutto = (Number(r.umsatz_cents) || 0) / 100;
+    // Alles Weitere rechnet auf dem NETTOUMSATZ. Die vereinnahmte Umsatzsteuer
+    // gehört dem Finanzamt; sie in Marge oder Gewinn zu führen wäre erfunden.
+    const umsatz = runde(umsatzBrutto / umsatzTeiler);
+    const umsatzsteuer = runde(umsatzBrutto - umsatz);
     const wareneinsatz = (Number(r.wareneinsatz_cents) || 0) / 100;
     const einheiten = Number(r.einheiten) || 0;
     const hatEk = (Number(r.einheiten_mit_ek) || 0) > 0;
@@ -59,15 +84,19 @@ export async function produktUebersicht(
     // Ohne bestätigten Faktor lässt nettoGebuehr den Betrag unverändert.
     const hatGeb = Boolean(r.gebuehren_bekannt);
     const gebuehren = hatGeb ? nettoGebuehr(Number(r.gebuehren_cents) || 0, ustFaktor) / 100 : null;
-    // Nettogewinn = Umsatz − Wareneinsatz + Gebühren(negativ). Nur mit BEIDEM.
-    const nettogewinn = hatEk && hatGeb && rohertrag != null ? runde(rohertrag + gebuehren!) : null;
+
+    // Nettogewinn OHNE Werbekosten — die fehlen noch. Der Name sagt das, damit
+    // niemand ihn für das Endergebnis hält.
+    const vorWerbung = hatEk && hatGeb && rohertrag != null ? runde(rohertrag + gebuehren!) : null;
     // Zwischenstufe ohne EK: was nach Amazon übrig bleibt.
     const umsatzNachGebuehren = hatGeb ? runde(umsatz + gebuehren!) : null;
 
     return {
       asin: r.asin,
       produktname: r.produktname,
-      umsatz: runde(umsatz),
+      umsatz,                 // netto — die Basis aller Quoten
+      umsatz_brutto: runde(umsatzBrutto),
+      umsatzsteuer,
       einheiten,
       retouren,
       rohertrag,
@@ -77,8 +106,12 @@ export async function produktUebersicht(
       gebuehrenquote: hatGeb && umsatz > 0 ? runde((-gebuehren! / umsatz) * 100, 1) : null,
       gebuehren_anteilig: Boolean(r.gebuehren_anteilig),
       umsatz_nach_gebuehren: umsatzNachGebuehren,
-      nettogewinn,
-      nettomarge: nettogewinn != null && umsatz > 0 ? runde((nettogewinn / umsatz) * 100, 1) : null,
+      // Werbekosten fehlen -> das Endergebnis ist NICHT berechenbar.
+      werbekosten: null,
+      nettogewinn_vor_werbung: vorWerbung,
+      marge_vor_werbung: vorWerbung != null && umsatz > 0 ? runde((vorWerbung / umsatz) * 100, 1) : null,
+      nettogewinn: null,
+      nettomarge: null,
     };
   });
 
@@ -96,5 +129,13 @@ export async function produktUebersicht(
     // Damit die Anzeige sagen kann, WORAUF die Marge steht.
     gebuehren_ust_faktor: ustFaktor,
     gebuehren_basis: ustFaktor === null ? "wie_gebucht" : (ustFaktor <= 1.005 ? "netto_ohne_ust" : "netto"),
+    umsatzsteuer_prozent: ustSatz,
+    summe_umsatz_netto: runde(produkte.reduce((s, p) => s + p.umsatz, 0)),
+    summe_umsatzsteuer: runde(produkte.reduce((s, p) => s + p.umsatzsteuer, 0)),
+    // Werbekosten fehlen -> der Nettogewinn ist unvollstaendig, und das steht hier.
+    hat_werbekosten: false,
+    rechenweg: "Nettoumsatz = Umsatz − Umsatzsteuer. Rohertrag = Nettoumsatz − Einkaufspreis. " +
+      "Nettogewinn = Rohertrag − Amazon-Gebühren (netto) − Werbekosten.",
+    fehlt: ["Werbekosten (PPC) — die Ads-API ist für dieses Konto noch nicht freigegeben"],
   };
 }
