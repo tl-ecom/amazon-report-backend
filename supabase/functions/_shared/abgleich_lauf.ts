@@ -69,10 +69,31 @@ export async function masseAbgleich(
       hoehe_cm: zahl(k?.hoehe_cm), gewicht_g: zahl(k?.gewicht_g),
     };
 
-    // Soll-Gebühr nur, wenn Katalogmaße UND Klassentabelle vorliegen.
-    let sollCents: number | null = null;
+    // BEIDE Seiten aus derselben Tabelle rechnen.
+    //
+    // Naheliegend wäre, Amazons gemessene Gebühr gegen eine aus der Tabelle
+    // gerechnete Soll-Gebühr zu stellen. Das mischt aber zwei Quellen: Amazons
+    // Wert enthält den Treibstoffaufschlag von 1,5 % und folgt beim
+    // Niedrigpreisversand einem ganz anderen Tarif. Die Differenz wäre dann
+    // teils Steuerung, teils Messfehler — und niemand könnte sie trennen.
+    //
+    // Tabelle gegen Tabelle ist sauber: Der Unterschied kommt ausschliesslich
+    // aus den Massen. Die tatsächlich erwartete Gebühr steht daneben.
     const aktuelleKlasse = klassen.find((x) => x.size_tier === r.groessenklasse);
-    if (kat.laenge_cm !== null && kat.breite_cm !== null && kat.hoehe_cm !== null && klassen.length > 0) {
+    let istCents: number | null = null;
+    let sollCents: number | null = null;
+
+    if (klassen.length > 0 && aktuelleKlasse
+      && gemessen.laengste_cm !== null && gemessen.mittlere_cm !== null
+      && gemessen.kuerzeste_cm !== null && gemessen.gewicht_g !== null) {
+      const ist = klasseFuerMasse(
+        [gemessen.laengste_cm, gemessen.mittlere_cm, gemessen.kuerzeste_cm],
+        gemessen.gewicht_g, [aktuelleKlasse], aktuelleKlasse,
+      );
+      if (ist) istCents = Math.round(ist.gebuehr * 100);
+    }
+
+    if (istCents !== null && kat.laenge_cm !== null && kat.breite_cm !== null && kat.hoehe_cm !== null) {
       // Ohne Katalog-Gewicht das gemessene nehmen: Es geht hier um die Maße,
       // und ein fehlendes Gewicht darf den Massvergleich nicht unmöglich machen.
       const gewicht = kat.gewicht_g ?? gemessen.gewicht_g ?? 0;
@@ -88,7 +109,7 @@ export async function masseAbgleich(
       produktname: r.produktname ?? null,
       katalog: kat,
       gemessen,
-      gebuehr_cents: zahl(r.fulfilment_cents),
+      gebuehr_cents: istCents,
       gebuehr_soll_cents: sollCents,
       einheiten: Number(r.einheiten) || 0,
     });
