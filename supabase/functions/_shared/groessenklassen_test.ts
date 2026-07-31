@@ -96,6 +96,35 @@ Deno.test("pruefeKorridor: unrealistische Verkleinerung wird nicht als Massnahme
   assertEquals(b.text.includes("anderes Produkt"), true);
 });
 
+Deno.test("pruefeKorridor: halber Zentimeter aus flacher Verpackung bleibt machbar", () => {
+  // Echter Fall Vaneja (Kinder-Warnweste 2er): 3,0 -> 2,5 cm sind 16,7 % und
+  // damit ueber der Prozentschwelle — aber nur 0,5 cm. Das ist weniger Luft in
+  // der Verpackung, kein anderes Produkt.
+  const grossUmschlag: Klasse = {
+    size_tier: "LargeEnvelope", label: "Großer Umschlag",
+    max_longest_side_cm: 33, max_median_side_cm: 23, max_shortest_side_cm: 4,
+    stufen: [{ max_weight_g: 960, fee_eur: 3.04 }],
+    grundgebuehr_eur: null, zuschlag_je_100g_eur: null, max_weight_g: 960,
+  };
+  const standardUmschlag: Klasse = {
+    size_tier: "StandardEnvelope", label: "Standardumschlag",
+    max_longest_side_cm: 33, max_median_side_cm: 23, max_shortest_side_cm: 2.5,
+    stufen: [{ max_weight_g: 210, fee_eur: 2.57 }, { max_weight_g: 460, fee_eur: 2.68 }],
+    grundgebuehr_eur: null, zuschlag_je_100g_eur: null, max_weight_g: 460,
+  };
+  const b = pruefeKorridor(produkt({
+    sku: "E9-2MFL-TXNN", groessenklasse: "LargeEnvelope",
+    laengste_seite_cm: 26.34, mittlere_seite_cm: 21.69, kuerzeste_seite_cm: 3,
+    gewicht_g: 170, einheiten: 1738, fulfilment_cents: 266,
+  }), [grossUmschlag, standardUmschlag]);
+  assertEquals(b.status, "chance");
+  assertEquals(b.blocker[0].kante, "kuerzeste");
+  assertEquals(b.blocker[0].weg, 0.5);
+  assertEquals(b.blocker[0].prozent, 16.7); // ueber 15 %, aber unter 1 cm
+  assertEquals(b.ersparnis_je_stueck, 0.36);
+  assertEquals(b.ersparnis_jahr, 626);
+});
+
 Deno.test("pruefeKorridor: Volumengewicht der kleineren Box wird mitgerechnet", () => {
   // Schweres Volumen: ohne Nachrechnen des Volumengewichts fiele die Ersparnis
   // zu niedrig aus, weil die Zielklasse mit dem ALTEN Gewicht bepreist wuerde.

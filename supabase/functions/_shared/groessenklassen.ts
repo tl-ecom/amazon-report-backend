@@ -18,6 +18,17 @@
 
 /** Höchstens so viel Prozent darf eine Kante schrumpfen, damit es umsetzbar bleibt. */
 export const MAX_REDUKTION = 0.15;
+/**
+ * ...ODER höchstens so viele Zentimeter absolut.
+ *
+ * Warum beides: Eine reine Prozentregel bestraft dünne Maße unverhältnismäßig.
+ * Bei Vanejas Kinder-Warnweste müssten 0,5 cm aus einer 3 cm flachen Verpackung
+ * weg — physisch ein bisschen weniger Luft, rechnerisch aber 16,7 % und damit
+ * über der Schwelle. Bei 1.738 Stück im Jahr wären 626 € stillschweigend unter
+ * den Tisch gefallen. Ein Zentimeter Verpackung ist bei jeder Größe ein
+ * Verpackungsthema, kein Produktredesign.
+ */
+export const MAX_ABSOLUT_CM = 1.0;
 /** Unter dieser Ersparnis p.a. lohnt der Aufwand nicht — kein Befund. */
 export const MIN_ERSPARNIS_JAHR = 100;
 /** Rundungsrauschen in den gemeldeten Maßen. */
@@ -283,7 +294,9 @@ export function pruefeKorridor(p: Produkt, klassen: Klasse[]): KorridorBefund {
 
   // Realistisch? Nur Kanten pruefen — Gewicht laesst sich nicht prozentual bewerten.
   const kantenBlocker = blocker.filter((x) => x.kante !== "gewicht");
-  const unrealistisch = kantenBlocker.filter((x) => x.prozent > MAX_REDUKTION * 100);
+  const unrealistisch = kantenBlocker.filter(
+    (x) => x.prozent > MAX_REDUKTION * 100 && x.weg > MAX_ABSOLUT_CM,
+  );
   if (unrealistisch.length > 0) {
     return {
       ...gemeinsam, status: "zu_gross",
