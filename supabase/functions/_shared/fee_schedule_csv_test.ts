@@ -84,6 +84,33 @@ Deno.test("parseGebuehrenCsv: ohne Klassenspalte -> klare Warnung, keine Zeilen"
   assertEquals(r.warnungen.some((w) => w.includes("Größenklasse")), true);
 });
 
+Deno.test("parseGebuehrenCsv: Tarifspalte trennt Niedrigpreisversand vom Standard", () => {
+  const csv = [
+    "Größenklasse;Tarif;Preisgrenze;Max Gewicht;Gebühr",
+    "StandardEnvelope;Standard;;210 g;2,57",
+    "StandardEnvelope;Niedrigpreis;20,00;210 g;2,10",
+    "StandardEnvelope;Low-Price;20,00;460 g;2,26",
+  ].join("\n");
+  const r = parseGebuehrenCsv(csv, "2026-07-01");
+  assertEquals(r.zeilen.map((z) => z.tarif), ["standard", "niedrigpreis", "niedrigpreis"]);
+  assertEquals(r.zeilen.map((z) => z.preis_grenze_cents), [null, 2000, 2000]);
+  assertEquals(r.warnungen.length, 0);
+});
+
+Deno.test("parseGebuehrenCsv: ohne Tarifspalte bleibt alles Standardtarif", () => {
+  const r = parseGebuehrenCsv("Größenklasse;Gebühr\nStandardParcel;3,44", "2026-07-01");
+  assertEquals(r.zeilen[0].tarif, "standard");
+  assertEquals(r.zeilen[0].preis_grenze_cents, null);
+});
+
+Deno.test("parseGebuehrenCsv: Niedrigpreis ohne Preisgrenze wird gemeldet, nicht verschwiegen", () => {
+  const r = parseGebuehrenCsv(
+    "Größenklasse;Tarif;Gebühr\nStandardEnvelope;Niedrigpreis;2,10", "2026-07-01",
+  );
+  assertEquals(r.zeilen[0].preis_grenze_cents, null);
+  assertEquals(r.warnungen.some((w) => w.includes("Preisgrenze")), true);
+});
+
 Deno.test("parseGebuehrenCsv: leere Datei und Datei ohne Datenzeilen", () => {
   assertEquals(parseGebuehrenCsv("", "2026-01-01").warnungen.length, 1);
   assertEquals(parseGebuehrenCsv("Größenklasse;Gebühr", "2026-01-01").zeilen.length, 0);

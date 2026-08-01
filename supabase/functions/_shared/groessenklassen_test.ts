@@ -1,12 +1,14 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
-  gebuehrFuer, klasseFuerMasse, korridorReport, pruefeKorridor, volumengewicht,
+  abrechnungsgewicht, gebuehrFuer, klasseFuerMasse, korridorReport,
+  NIEDRIGPREIS_GRENZE_CENTS, niedrigpreisGrenze, pruefeKorridor, volumengewicht,
   type Klasse, type Produkt,
 } from "./groessenklassen.ts";
 
 // Echte Werte aus der FBA Rate Card DE, gültig ab 01.07.2026, Spalte "Nur DE".
 const KLEINES_PAKET: Klasse = {
   size_tier: "SmallParcel", label: "Kleines Paket",
+  tarif: "standard", preis_grenze_cents: null,
   max_longest_side_cm: 35, max_median_side_cm: 25, max_shortest_side_cm: 12,
   stufen: [
     { max_weight_g: 150, fee_eur: 3.38 }, { max_weight_g: 400, fee_eur: 3.39 },
@@ -17,6 +19,7 @@ const KLEINES_PAKET: Klasse = {
 };
 const STANDARDPAKET: Klasse = {
   size_tier: "StandardParcel", label: "Standardpaket",
+  tarif: "standard", preis_grenze_cents: null,
   max_longest_side_cm: 45, max_median_side_cm: 34, max_shortest_side_cm: 26,
   stufen: [
     { max_weight_g: 150, fee_eur: 3.39 }, { max_weight_g: 400, fee_eur: 3.42 },
@@ -34,7 +37,7 @@ function produkt(over: Partial<Produkt> = {}): Produkt {
     sku: "TEST-1", asin: "B0TEST", produktname: "Testprodukt",
     laengste_seite_cm: 40, mittlere_seite_cm: 24, kuerzeste_seite_cm: 11,
     gewicht_g: 800, groessenklasse: "StandardParcel",
-    fulfilment_cents: 344, einheiten: 1000, fenster_tage: 365,
+    preis_cents: 2997, fulfilment_cents: 344, einheiten: 1000, fenster_tage: 365,
     ...over,
   };
 }
@@ -55,6 +58,7 @@ Deno.test("gebuehrFuer: trifft die richtige Gewichtsstufe", () => {
 Deno.test("gebuehrFuer: Kategorietabelle rechnet Grundgebuehr + Zuschlag", () => {
   const kp3: Klasse = {
     size_tier: "SmallParcel3", label: "Kleines Paket 3",
+    tarif: "standard", preis_grenze_cents: null,
     max_longest_side_cm: 35, max_median_side_cm: 25, max_shortest_side_cm: 12,
     stufen: [], grundgebuehr_eur: 3.38, zuschlag_je_100g_eur: 0.07, max_weight_g: 3900,
   };
@@ -101,14 +105,20 @@ Deno.test("pruefeKorridor: halber Zentimeter aus flacher Verpackung bleibt machb
   // Echter Fall Vaneja (Kinder-Warnweste 2er): 3,0 -> 2,5 cm sind 16,7 % und
   // damit ueber der Prozentschwelle — aber nur 0,5 cm. Das ist weniger Luft in
   // der Verpackung, kein anderes Produkt.
+  //
+  // Der Preis steht hier bewusst ueber der Niedrigpreisgrenze: Geprueft wird die
+  // Machbarkeitsregel, nicht die Tarifwahl. Denselben Artikel zu seinem echten
+  // Preis (9,97 €) prueft der Test darunter.
   const grossUmschlag: Klasse = {
     size_tier: "LargeEnvelope", label: "Großer Umschlag",
+    tarif: "standard", preis_grenze_cents: null,
     max_longest_side_cm: 33, max_median_side_cm: 23, max_shortest_side_cm: 4,
     stufen: [{ max_weight_g: 960, fee_eur: 3.04 }],
     grundgebuehr_eur: null, zuschlag_je_100g_eur: null, max_weight_g: 960,
   };
   const standardUmschlag: Klasse = {
     size_tier: "StandardEnvelope", label: "Standardumschlag",
+    tarif: "standard", preis_grenze_cents: null,
     max_longest_side_cm: 33, max_median_side_cm: 23, max_shortest_side_cm: 2.5,
     stufen: [{ max_weight_g: 210, fee_eur: 2.57 }, { max_weight_g: 460, fee_eur: 2.68 }],
     grundgebuehr_eur: null, zuschlag_je_100g_eur: null, max_weight_g: 460,
@@ -116,7 +126,7 @@ Deno.test("pruefeKorridor: halber Zentimeter aus flacher Verpackung bleibt machb
   const b = pruefeKorridor(produkt({
     sku: "E9-2MFL-TXNN", groessenklasse: "LargeEnvelope",
     laengste_seite_cm: 26.34, mittlere_seite_cm: 21.69, kuerzeste_seite_cm: 3,
-    gewicht_g: 170, einheiten: 1738, fulfilment_cents: 266,
+    gewicht_g: 170, einheiten: 1738, preis_cents: 2997, fulfilment_cents: 266,
   }), [grossUmschlag, standardUmschlag]);
   assertEquals(b.status, "chance");
   assertEquals(b.blocker[0].kante, "kuerzeste");
@@ -186,11 +196,13 @@ Deno.test("pruefeKorridor: Kategorietarif und Standardtarif werden nicht vermisc
   // Verpackung. Ein Wechsel zwischen den Modellen ist keine Massnahme.
   const kp1: Klasse = {
     size_tier: "SmallParcel1", label: "Kleines Paket 1",
+    tarif: "standard", preis_grenze_cents: null,
     max_longest_side_cm: 35, max_median_side_cm: 25, max_shortest_side_cm: 7,
     stufen: [], grundgebuehr_eur: 3.30, zuschlag_je_100g_eur: 0.05, max_weight_g: 3900,
   };
   const kp3: Klasse = {
     size_tier: "SmallParcel3", label: "Kleines Paket 3",
+    tarif: "standard", preis_grenze_cents: null,
     max_longest_side_cm: 35, max_median_side_cm: 25, max_shortest_side_cm: 12,
     stufen: [], grundgebuehr_eur: 3.38, zuschlag_je_100g_eur: 0.07, max_weight_g: 3900,
   };
@@ -212,6 +224,113 @@ Deno.test("pruefeKorridor: Kategorietarif und Standardtarif werden nicht vermisc
   assertEquals(kat.blocker.map((x) => x.kante), ["kuerzeste"]);
 });
 
+// --- Niedrigpreisversand (Rate Card S. 5) ---------------------------------
+//
+// Artikel unter der Preisgrenze rechnet Amazon nach einer EIGENEN Tabelle ab.
+// Auf der Standardtabelle gerechnet kommen Ersparnisse heraus, die es nicht gibt
+// — nachgewiesen an Vaneja: die Warnwesten unter 20 € liegen 0,43 bis 0,59 €
+// unter dem, was die Standardtabelle sagt.
+
+/** Umschlagsklassen im Standardtarif — echte Werte, Rate Card DE ab 01.07.2026. */
+const GROSSER_UMSCHLAG: Klasse = {
+  size_tier: "LargeEnvelope", label: "Großer Umschlag",
+  tarif: "standard", preis_grenze_cents: null,
+  max_longest_side_cm: 33, max_median_side_cm: 23, max_shortest_side_cm: 4,
+  stufen: [{ max_weight_g: 960, fee_eur: 3.04 }],
+  grundgebuehr_eur: null, zuschlag_je_100g_eur: null, max_weight_g: 960,
+};
+const STANDARD_UMSCHLAG: Klasse = {
+  size_tier: "StandardEnvelope", label: "Standardumschlag",
+  tarif: "standard", preis_grenze_cents: null,
+  max_longest_side_cm: 33, max_median_side_cm: 23, max_shortest_side_cm: 2.5,
+  stufen: [{ max_weight_g: 210, fee_eur: 2.57 }, { max_weight_g: 460, fee_eur: 2.68 }],
+  grundgebuehr_eur: null, zuschlag_je_100g_eur: null, max_weight_g: 460,
+};
+
+/**
+ * Erfundene Beträge — die echte S.5-Tabelle pflegt TL per CSV. Geprüft wird hier
+ * NICHT, ob die Zahlen stimmen, sondern DASS auf dieser Tabelle gerechnet wird.
+ */
+const NP_GROSSER_UMSCHLAG: Klasse = {
+  ...GROSSER_UMSCHLAG, tarif: "niedrigpreis", preis_grenze_cents: 2000,
+  stufen: [{ max_weight_g: 960, fee_eur: 2.62 }],
+};
+const NP_STANDARD_UMSCHLAG: Klasse = {
+  ...STANDARD_UMSCHLAG, tarif: "niedrigpreis", preis_grenze_cents: 2000,
+  stufen: [{ max_weight_g: 210, fee_eur: 2.10 }, { max_weight_g: 460, fee_eur: 2.26 }],
+};
+
+/** Vanejas Kinder-Warnweste 2er Set zu ihrem echten Preis von 9,97 €. */
+function warnweste(over: Partial<Produkt> = {}): Produkt {
+  return produkt({
+    sku: "E9-2MFL-TXNN", groessenklasse: "LargeEnvelope",
+    laengste_seite_cm: 26.34, mittlere_seite_cm: 21.69, kuerzeste_seite_cm: 3,
+    gewicht_g: 170, einheiten: 1738, preis_cents: 997, fulfilment_cents: 266,
+    ...over,
+  });
+}
+
+Deno.test("Niedrigpreis: ohne hinterlegte S.5-Tabelle wird NICHT auf der Standardtabelle gerechnet", () => {
+  const b = pruefeKorridor(warnweste(), [GROSSER_UMSCHLAG, STANDARD_UMSCHLAG]);
+  assertEquals(b.status, "nicht_bewertbar");
+  assertEquals(b.tarif, "niedrigpreis");
+  assertEquals(b.ersparnis_jahr, null); // lieber keine Zahl als eine falsche
+  assertEquals(b.grund?.includes("Niedrigpreisversand"), true);
+});
+
+Deno.test("Niedrigpreis: mit S.5-Tabelle wird auf DEREN Beträgen gerechnet", () => {
+  const alle = [GROSSER_UMSCHLAG, STANDARD_UMSCHLAG, NP_GROSSER_UMSCHLAG, NP_STANDARD_UMSCHLAG];
+  const b = pruefeKorridor(warnweste(), alle);
+  assertEquals(b.status, "chance");
+  assertEquals(b.tarif, "niedrigpreis");
+  assertEquals(b.ziel_klasse, "StandardEnvelope");
+  // Zwei Unterschiede zur Standardtabelle auf einmal:
+  //   * die Betraege stammen aus S. 5 (2,62 statt 3,04),
+  //   * gerechnet wird mit 170 g Stueckgewicht statt 343 g Volumengewicht — damit
+  //     greift die Stufe bis 210 g (2,10) und nicht die bis 460 g (2,26).
+  // 2,62 -> 2,10 = 0,52, plus Treibstoffaufschlag = 0,53.
+  assertEquals(b.ersparnis_je_stueck, 0.53);
+});
+
+Deno.test("Niedrigpreis: teurer Artikel bleibt im Standardtarif", () => {
+  const alle = [GROSSER_UMSCHLAG, STANDARD_UMSCHLAG, NP_GROSSER_UMSCHLAG, NP_STANDARD_UMSCHLAG];
+  const b = pruefeKorridor(warnweste({ preis_cents: 2997 }), alle);
+  assertEquals(b.tarif, "standard");
+  assertEquals(b.status, "chance");
+  assertEquals(b.ersparnis_je_stueck, 0.37); // 3,04 -> 2,68 + Aufschlag
+});
+
+Deno.test("Niedrigpreis: die Grenze kommt aus der Tabelle, nicht aus dem Code", () => {
+  assertEquals(niedrigpreisGrenze([GROSSER_UMSCHLAG]), NIEDRIGPREIS_GRENZE_CENTS);
+  const eigene = { ...NP_GROSSER_UMSCHLAG, preis_grenze_cents: 1100 };
+  assertEquals(niedrigpreisGrenze([GROSSER_UMSCHLAG, eigene]), 1100);
+  // 15,97 € liegt ueber einer 11-€-Grenze -> Standardtarif.
+  const b = pruefeKorridor(warnweste({ preis_cents: 1597 }), [GROSSER_UMSCHLAG, STANDARD_UMSCHLAG, eigene]);
+  assertEquals(b.tarif, "standard");
+});
+
+Deno.test("Niedrigpreis: die Tarife werden nicht vermischt", () => {
+  // Nur die Standardklassen sind guenstiger — sie duerfen trotzdem nicht als
+  // Ziel dienen, denn ein Tarifwechsel ist keine Verpackungsmassnahme.
+  const b = pruefeKorridor(warnweste(), [NP_GROSSER_UMSCHLAG, STANDARD_UMSCHLAG]);
+  assertEquals(b.tarif, "niedrigpreis");
+  assertEquals(b.status, "kleinste_klasse");
+  assertEquals(b.ziel_klasse, null);
+});
+
+Deno.test("Niedrigpreis: rechnet nur mit dem Stueckgewicht, nicht mit dem Volumen", () => {
+  // 26,34 x 21,69 x 3 = 342,8 g Volumengewicht gegen 170 g Stueckgewicht.
+  assertEquals(Math.round(abrechnungsgewicht("standard", 170, 26.34, 21.69, 3)), 343);
+  assertEquals(abrechnungsgewicht("niedrigpreis", 170, 26.34, 21.69, 3), 170);
+});
+
+Deno.test("Niedrigpreis: ohne Artikelpreis wird nichts behauptet", () => {
+  const b = pruefeKorridor(warnweste({ preis_cents: null }), [GROSSER_UMSCHLAG, STANDARD_UMSCHLAG]);
+  assertEquals(b.status, "nicht_bewertbar");
+  assertEquals(b.tarif, null);
+  assertEquals(b.grund?.includes("Artikelpreis"), true);
+});
+
 Deno.test("klasseFuerMasse: guenstigste passende Klasse, sonst null", () => {
   // Passt in Kleines Paket (35x25x12), Versandgewicht 30*20*10/5 = 1200 g.
   const k = klasseFuerMasse([30, 20, 10], 800, KLASSEN)!;
@@ -228,6 +347,7 @@ Deno.test("klasseFuerMasse: guenstigste passende Klasse, sonst null", () => {
 Deno.test("klasseFuerMasse: bleibt in der Tarifart der zugewiesenen Klasse", () => {
   const kp3: Klasse = {
     size_tier: "SmallParcel3", label: "Kleines Paket 3",
+    tarif: "standard", preis_grenze_cents: null,
     max_longest_side_cm: 35, max_median_side_cm: 25, max_shortest_side_cm: 12,
     stufen: [], grundgebuehr_eur: 3.38, zuschlag_je_100g_eur: 0.07, max_weight_g: 3900,
   };

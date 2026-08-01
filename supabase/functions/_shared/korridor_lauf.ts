@@ -6,7 +6,9 @@
 //   1. Gebührenvorschau-Report (Amazons gemessene Maße je SKU)
 //   2. Gebührentabelle für den Marktplatz (Klassengrenzen aus der Rate Card)
 
-import { korridorReport, type Klasse, type Produkt } from "./groessenklassen.ts";
+import {
+  korridorReport, niedrigpreisGrenze, type Klasse, type Produkt,
+} from "./groessenklassen.ts";
 
 /** Marktplatz-ID -> Land. Spiegelt public.marktplatz_land aus der Migration. */
 const LAND: Record<string, string> = {
@@ -16,16 +18,29 @@ const LAND: Record<string, string> = {
   A28R8C7NBKEWEA: "IE",
 };
 
-/** Zeilen aus fee_schedule zu Klassen bündeln (eine Klasse, mehrere Gewichtsstufen). */
+/**
+ * Zeilen aus fee_schedule zu Klassen bündeln (eine Klasse, mehrere Gewichtsstufen).
+ *
+ * Geschlüsselt wird nach TARIF + Klasse, nicht nach Klasse allein: Standardtarif
+ * und Niedrigpreisversand kennen dieselben Klassennamen mit anderen Beträgen.
+ * Über einen gemeinsamen Schlüssel würden ihre Gewichtsstufen in einen Topf
+ * fallen und die günstigere Stufe gewönne — quer über zwei Tarife hinweg.
+ */
 export function baueKlassen(zeilen: any[]): Klasse[] {
   const proTier = new Map<string, Klasse>();
   for (const z of zeilen) {
     const tier = String(z.size_tier);
-    let k = proTier.get(tier);
+    const tarif = z.tarif === "niedrigpreis" ? "niedrigpreis" : "standard";
+    const schluessel = `${tarif}|${tier}`;
+    let k = proTier.get(schluessel);
     if (!k) {
       k = {
         size_tier: tier,
         label: z.amazon_klasse_de ?? null,
+        tarif,
+        preis_grenze_cents: z.preis_grenze_cents === null || z.preis_grenze_cents === undefined
+          ? null
+          : Number(z.preis_grenze_cents),
         max_longest_side_cm: z.max_longest_side_cm === null ? null : Number(z.max_longest_side_cm),
         max_median_side_cm: z.max_median_side_cm === null ? null : Number(z.max_median_side_cm),
         max_shortest_side_cm: z.max_shortest_side_cm === null ? null : Number(z.max_shortest_side_cm),
@@ -34,7 +49,7 @@ export function baueKlassen(zeilen: any[]): Klasse[] {
         zuschlag_je_100g_eur: z.zuschlag_je_100g_eur === null ? null : Number(z.zuschlag_je_100g_eur),
         max_weight_g: null,
       };
-      proTier.set(tier, k);
+      proTier.set(schluessel, k);
     }
     const g = z.max_weight_g === null ? null : Number(z.max_weight_g);
     if (z.fee_eur !== null && z.fee_eur !== undefined) {
@@ -87,6 +102,7 @@ export async function groessenklassenKorridor(
     kuerzeste_seite_cm: r.kuerzeste_seite_cm === null ? null : Number(r.kuerzeste_seite_cm),
     gewicht_g: r.gewicht_g === null ? null : Number(r.gewicht_g),
     groessenklasse: r.groessenklasse ?? null,
+    preis_cents: r.preis_cents === null || r.preis_cents === undefined ? null : Number(r.preis_cents),
     fulfilment_cents: r.fulfilment_cents === null ? null : Number(r.fulfilment_cents),
     einheiten: Number(r.einheiten) || 0,
     fenster_tage: Number(r.fenster_tage) || tage,
@@ -97,6 +113,16 @@ export async function groessenklassenKorridor(
   }
 
   const report = korridorReport(produkte, klassen);
+
+  // Fehlt die Niedrigpreistabelle, verschwinden die guenstigen Artikel aus den
+  // Chancen — richtig, aber erklaerungsbeduerftig. Deshalb wird hier beziffert,
+  // WIE VIELE Produkte daran haengen, statt es dem Leser zu ueberlassen.
+  const grenze = niedrigpreisGrenze(klassen);
+  const niedrigpreisTabelle = klassen.some((k) => k.tarif === "niedrigpreis");
+  const betroffen = produkte.filter(
+    (p) => p.preis_cents !== null && p.preis_cents < grenze,
+  ).length;
+
   return {
     marktplatz: markt,
     gueltig_ab: neuesteAb,
@@ -104,9 +130,18 @@ export async function groessenklassenKorridor(
     klassen_hinterlegt: klassen.length,
     produkte_geprueft: produkte.length,
     ...report,
+    niedrigpreis_grenze_eur: grenze / 100,
+    niedrigpreis_tabelle_hinterlegt: niedrigpreisTabelle,
+    niedrigpreis_produkte: betroffen,
     // Der Hebel kommt aus dem Coaching-Modell und ist fuer diesen Befundtyp fest.
     hebel: "produkt_market_fit",
     hinweis: "Die Ersparnis enthält den Treibstoffaufschlag von 1,5 %, den Amazon seit dem 17.04.2026 auf die Versandgebühr erhebt.",
+    hinweis_niedrigpreis: !niedrigpreisTabelle && betroffen > 0
+      ? `${betroffen} Produkt(e) kosten unter ${(grenze / 100).toFixed(2)} € und werden nach dem ` +
+        "Niedrigpreisversand abgerechnet (Rate Card S. 5). Diese Tabelle ist noch nicht hinterlegt — " +
+        "sie stehen deshalb als „nicht bewertbar“ da. Auf der Standardtabelle gerechnet wären ihre " +
+        "Ersparnisse frei erfunden."
+      : null,
   };
 }
 
@@ -115,8 +150,10 @@ function leerAntwort(grund: string) {
     marktplatz: null, gueltig_ab: null, fenster_tage: null,
     klassen_hinterlegt: 0, produkte_geprueft: 0,
     befunde: [], chancen: [], summe_ersparnis_jahr: null,
-    nicht_bewertbar: 0, unsicher: 0,
-    hebel: "produkt_market_fit", hinweis: null,
+    nicht_bewertbar: 0, unsicher: 0, niedrigpreis: 0,
+    niedrigpreis_grenze_eur: null, niedrigpreis_tabelle_hinterlegt: false,
+    niedrigpreis_produkte: 0,
+    hebel: "produkt_market_fit", hinweis: null, hinweis_niedrigpreis: null,
     nicht_bewertbar_grund: grund,
   };
 }

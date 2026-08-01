@@ -23,6 +23,10 @@ import { csvZeilen, ekCents, erkenneTrenner, datumIso } from "./sellerboard.ts";
 export interface GebuehrZeile {
   marketplace: string;
   size_tier: string;
+  /** Standardtarif (S. 6/8) oder Niedrigpreisversand (S. 5). */
+  tarif: "standard" | "niedrigpreis";
+  /** Nur beim Niedrigpreisversand: ab diesem Artikelpreis gilt er nicht mehr. */
+  preis_grenze_cents: number | null;
   max_longest_side_cm: number | null;
   max_median_side_cm: number | null;
   max_shortest_side_cm: number | null;
@@ -56,7 +60,19 @@ const SPALTEN: Record<string, string[]> = {
   gueltig_ab: ["gueltigab", "validfrom", "ab", "startdate"],
   gueltig_bis: ["gueltigbis", "validto", "bis", "enddate"],
   marketplace: ["marktplatz", "marketplace", "land", "country"],
+  tarif: ["tarif", "tariff", "versandart", "programm"],
+  preis_grenze_cents: ["preisgrenze", "maxartikelpreis", "artikelpreis", "pricelimit", "maxprice"],
 };
+
+/**
+ * Tarifspalte -> Schlüssel. Alles, was nach Niedrigpreis klingt, zählt; der Rest
+ * ist Standard. Bewusst tolerant: Ob in der CSV „Niedrigpreis", „Low-Price" oder
+ * „Niedrigpreisversand" steht, ist Schreibweise, keine Bedeutung.
+ */
+export function tarifSchluessel(roh: unknown): "standard" | "niedrigpreis" {
+  const t = norm(String(roh ?? ""));
+  return /niedrigpreis|lowprice|niedrig/.test(t) ? "niedrigpreis" : "standard";
+}
 
 function findeSpalte(kopf: string[], kandidaten: string[]): number {
   const normiert = kopf.map(norm);
@@ -137,13 +153,19 @@ export function parseGebuehrenCsv(text: string, standardAb: string): GebuehrPars
   const hole = (z: string[], feld: string): string =>
     idx[feld] >= 0 ? (z[idx[feld]] ?? "").trim() : "";
 
+  let niedrigpreisOhneGrenze = 0;
   for (const z of zeilen.slice(1)) {
     const tier = hole(z, "size_tier");
     if (tier === "") { erg.uebersprungen++; continue; }
     const fee = ekCents(hole(z, "fee_eur"));
+    const tarif = tarifSchluessel(hole(z, "tarif"));
+    const grenze = tarif === "niedrigpreis" ? ekCents(hole(z, "preis_grenze_cents")) : null;
+    if (tarif === "niedrigpreis" && grenze === null) niedrigpreisOhneGrenze++;
     erg.zeilen.push({
       marketplace: (hole(z, "marketplace") || "DE").toUpperCase().slice(0, 8),
       size_tier: tier,
+      tarif,
+      preis_grenze_cents: grenze,
       max_longest_side_cm: massCm(hole(z, "max_longest_side_cm")),
       max_median_side_cm: massCm(hole(z, "max_median_side_cm")),
       max_shortest_side_cm: massCm(hole(z, "max_shortest_side_cm")),
@@ -155,6 +177,13 @@ export function parseGebuehrenCsv(text: string, standardAb: string): GebuehrPars
   }
   if (erg.uebersprungen > 0) {
     erg.warnungen.push(`${erg.uebersprungen} Zeile(n) ohne Größenklasse übersprungen.`);
+  }
+  if (niedrigpreisOhneGrenze > 0) {
+    erg.warnungen.push(
+      `${niedrigpreisOhneGrenze} Niedrigpreis-Zeile(n) ohne Preisgrenze. Es gilt der hinterlegte ` +
+      "Standardwert (unter 20,00 €). Steht in der Rate Card eine andere Grenze, gehört sie als " +
+      "Spalte „Preisgrenze“ in die CSV — sonst rechnet Pulse an ihr vorbei.",
+    );
   }
   return erg;
 }

@@ -40,7 +40,10 @@ export async function importiereFeeSchedule(
 
   const { error } = await supabase.from("fee_schedule").upsert(
     p.zeilen.map((z) => ({ ...z, quelle: "csv-import", updated_at: new Date().toISOString() })),
-    { onConflict: "marketplace,size_tier,gueltig_ab,max_weight_g" },
+    // Der Tarif gehoert in den Schluessel: Standardtarif und Niedrigpreisversand
+    // haben dieselben Klassennamen und Gewichtsstufen. Ohne ihn wuerde der Import
+    // der einen Tabelle die andere ueberschreiben.
+    { onConflict: "marketplace,tarif,size_tier,gueltig_ab,max_weight_g" },
   );
   if (error) throw new Error(`fee_schedule schreiben: ${error.message}`);
   erg.geschrieben = p.zeilen.length;

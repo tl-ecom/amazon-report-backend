@@ -7,7 +7,7 @@
 // tatsächlich zugewiesene Klasse. Lässt sich das nicht bestimmen, bleibt die
 // Soll-Gebühr null und der Befund ist Datenpflege, kein Kostenfall.
 
-import { klasseFuerMasse, type Klasse } from "./groessenklassen.ts";
+import { klasseFuerMasse, tarifFuer, type Klasse } from "./groessenklassen.ts";
 import { abgleichReport, type Paar } from "./masse_abgleich.ts";
 import { baueKlassen } from "./korridor_lauf.ts";
 
@@ -79,11 +79,18 @@ export async function masseAbgleich(
     //
     // Tabelle gegen Tabelle ist sauber: Der Unterschied kommt ausschliesslich
     // aus den Massen. Die tatsächlich erwartete Gebühr steht daneben.
-    const aktuelleKlasse = klassen.find((x) => x.size_tier === r.groessenklasse);
+    //
+    // Welche Tabelle „dieselbe" ist, entscheidet der Artikelpreis: Unter der
+    // Preisgrenze gilt der Niedrigpreisversand (Rate Card S. 5) mit eigenen
+    // Betraegen. Ohne Preis ist das nicht entscheidbar — dann bleibt die
+    // Soll-Gebuehr leer und der Befund ist Datenpflege, kein Kostenfall.
+    const tarif = tarifFuer(zahl(r.preis_cents), klassen);
+    const tarifKlassen = tarif === null ? [] : klassen.filter((x) => x.tarif === tarif);
+    const aktuelleKlasse = tarifKlassen.find((x) => x.size_tier === r.groessenklasse);
     let istCents: number | null = null;
     let sollCents: number | null = null;
 
-    if (klassen.length > 0 && aktuelleKlasse
+    if (tarifKlassen.length > 0 && aktuelleKlasse
       && gemessen.laengste_cm !== null && gemessen.mittlere_cm !== null
       && gemessen.kuerzeste_cm !== null && gemessen.gewicht_g !== null) {
       const ist = klasseFuerMasse(
@@ -98,7 +105,7 @@ export async function masseAbgleich(
       // und ein fehlendes Gewicht darf den Massvergleich nicht unmöglich machen.
       const gewicht = kat.gewicht_g ?? gemessen.gewicht_g ?? 0;
       const treffer = klasseFuerMasse(
-        [kat.laenge_cm, kat.breite_cm, kat.hoehe_cm], gewicht, klassen, aktuelleKlasse,
+        [kat.laenge_cm, kat.breite_cm, kat.hoehe_cm], gewicht, tarifKlassen, aktuelleKlasse,
       );
       if (treffer) sollCents = Math.round(treffer.gebuehr * 100);
     }
