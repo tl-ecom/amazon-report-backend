@@ -44,6 +44,7 @@ import { setzeSteuerprofil, setzeUstFaktor, ustStatus } from "../_shared/ust_lau
 import { groessenklassenKorridor } from "../_shared/korridor_lauf.ts";
 import { masseAbgleich } from "../_shared/abgleich_lauf.ts";
 import { steuerbarkeitReport } from "../_shared/steuerbarkeit_lauf.ts";
+import { lagerKosten } from "../_shared/lager_lauf.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
 const CORS = {
@@ -550,6 +551,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "groessenklassen") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await groessenklassenKorridor(service, tenantId, args as any) });
+    }
+    if (resource === "lager_kosten") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await lagerKosten(service, tenantId) });
     }
     if (resource === "steuerbarkeit") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await steuerbarkeitReport(service, tenantId, args as any) });
