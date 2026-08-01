@@ -186,6 +186,14 @@ export const FRISCHE_TAGE = 3;
 export interface HistorieZeile extends ProduktHistorie {
   asin: string;
   produktname: string;
+  /**
+   * Wie viele Tage der letzte eigene Messwert hinter dem Kontostand liegt.
+   * 0 = so aktuell wie das Konto. Grösser 0 heisst: Amazon meldet für dieses
+   * Produkt seither nichts mehr — typisch, wenn nichts mehr im Lager liegt und
+   * sich nichts bewegt. `aktuell_leer` bezieht sich dann auf DIESEN Tag, nicht
+   * auf heute.
+   */
+  stand_alt_tage: number;
 }
 
 /**
@@ -228,8 +236,16 @@ export async function bestandshistorie(
   for (const [asin, staende] of proAsin) {
     const h = findeLeerphasen(staende, { mindest_tage: mindest });
     if (!h) continue;
-    zeilen.push({ asin, produktname: titel.get(asin) ?? asin, ...h });
+    zeilen.push({ asin, produktname: titel.get(asin) ?? asin, stand_alt_tage: 0, ...h });
   }
+
+  // Kontostand = der jüngste Tag, für den überhaupt gemessen wurde. Produkte, die
+  // früher enden, sind nicht „unauffällig", sondern seither ungemeldet.
+  const stand = zeilen.reduce<string | null>(
+    (m, z) => (m == null || z.abdeckung_bis > m ? z.abdeckung_bis : m),
+    null,
+  );
+  if (stand) for (const z of zeilen) z.stand_alt_tage = tageZwischen(z.abdeckung_bis, stand) - 1;
 
   zeilen.sort((a, b) =>
     Number(b.aktuell_leer) - Number(a.aktuell_leer) ||
@@ -237,10 +253,6 @@ export async function bestandshistorie(
     a.produktname.localeCompare(b.produktname)
   );
 
-  const stand = zeilen.reduce<string | null>(
-    (m, z) => (m == null || z.abdeckung_bis > m ? z.abdeckung_bis : m),
-    null,
-  );
   const heute = new Date().toISOString().slice(0, 10);
 
   return {
