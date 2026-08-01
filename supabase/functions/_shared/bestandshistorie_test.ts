@@ -1,5 +1,10 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { findeLeerphasen, tageZwischen, type TagesStand } from "./bestandshistorie.ts";
+import {
+  bestandshistorie,
+  findeLeerphasen,
+  tageZwischen,
+  type TagesStand,
+} from "./bestandshistorie.ts";
 
 /** Tagesreihe ab `start`: eine Zahl je Tag; `null` = an dem Tag KEINE Report-Zeile. */
 function reihe(start: string, mengen: (number | null)[], verkauft: number[] = []): TagesStand[] {
@@ -108,6 +113,63 @@ Deno.test("mehrere Phasen: laengste und Gesamtdauer stimmen", () => {
   assertEquals(h.phasen.map((p) => p.tage), [1, 2, 3]);
   assertEquals(h.laengste_phase_tage, 3);
   assertEquals(h.tage_leer, 6);
+});
+
+// --- DB-Wrapper: Reihenfolge und Zaehlung ---
+
+/** Fake-Client mit genau den zwei Aufrufen, die bestandshistorie() macht. */
+function fakeClient(zeilen: { asin: string; datum: string; menge: number; verkauft?: number }[]) {
+  return {
+    rpc: () => Promise.resolve({ data: zeilen, error: null }),
+    from: () => ({ select: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }) }),
+  };
+}
+
+/** Tagesreihe fuer den Wrapper: ab `start`, ein Wert je Tag. */
+function db(asin: string, start: string, mengen: number[]) {
+  return mengen.map((menge, i) => ({
+    asin,
+    datum: new Date(Date.parse(start + "T00:00:00Z") + i * 86_400_000).toISOString().slice(0, 10),
+    menge,
+    verkauft: 0,
+  }));
+}
+
+Deno.test("Wrapper: nur AKTUELL leere Produkte stehen oben, alte Messungen nicht", async () => {
+  const heute = new Date().toISOString().slice(0, 10);
+  const gestern = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+  const d = await bestandshistorie(
+    fakeClient([
+      // Verlauf endet heute und ist leer -> akuter Fall, gehoert nach oben.
+      ...db("JETZT-LEER", gestern, [1, 0]),
+      // Amazon meldet dieses Produkt seit Monaten nicht mehr; letzter Wert war 0.
+      // Historie, KEIN aktueller Handlungsbedarf -> darf nicht oben stehen ...
+      ...db("ALT-LEER", "2026-01-01", [1, 0]),
+      // ... auch dann nicht, wenn dieses Produkt viel laenger leer war.
+      ...db("LANGER-AUSFALL", "2026-02-01", [5, 0, 0, 0, 0, 0, 7]),
+    ]),
+    "t",
+    { tage: 540 },
+  ) as any;
+
+  assertEquals(d.zeilen.map((z: any) => z.asin), ["JETZT-LEER", "LANGER-AUSFALL", "ALT-LEER"]);
+  assertEquals(d.anzahl_jetzt_leer, 1);
+  assertEquals(d.anzahl_leer_stand_alt, 1);
+  assertEquals(d.anzahl_mit_phasen, 3);
+  assertEquals(d.tage_leer_gesamt, 7); // 1 + 5 + 1
+  assertEquals(d.stand, heute);
+  assertEquals(d.veraltet, false);
+  // Der Abstand zum Kontostand steht je Produkt drin, damit „leer" datierbar ist.
+  assertEquals(d.zeilen[0].stand_alt_tage, 0);
+  assertEquals(d.zeilen[2].stand_alt_tage > 30, true);
+});
+
+Deno.test("Wrapper: ohne jeden Lagerverlauf wird nichts behauptet", async () => {
+  const d = await bestandshistorie(fakeClient([]), "t") as any;
+  assertEquals(d.hat_daten, false);
+  assertEquals(d.stand, null);
+  assertEquals(d.veraltet, true);
+  assertEquals(d.zeilen.length, 0);
 });
 
 Deno.test("Phasen ueber die Monatsgrenze behalten die richtigen Daten", () => {

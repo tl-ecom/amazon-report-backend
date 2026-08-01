@@ -247,8 +247,13 @@ export async function bestandshistorie(
   );
   if (stand) for (const z of zeilen) z.stand_alt_tage = tageZwischen(z.abdeckung_bis, stand) - 1;
 
+  // „Jetzt leer" heisst: am letzten Messtag leer UND dieser Messtag ist aktuell.
+  // Ein Produkt, dessen Verlauf vor Monaten endet, ist Historie — es darf nicht
+  // ueber einem echten 47-Tage-Ausfall stehen, nur weil sein letzter Wert 0 war.
+  const jetztLeer = (z: HistorieZeile) => z.aktuell_leer && z.stand_alt_tage <= FRISCHE_TAGE;
+
   zeilen.sort((a, b) =>
-    Number(b.aktuell_leer) - Number(a.aktuell_leer) ||
+    Number(jetztLeer(b)) - Number(jetztLeer(a)) ||
     b.tage_leer - a.tage_leer ||
     a.produktname.localeCompare(b.produktname)
   );
@@ -262,7 +267,13 @@ export async function bestandshistorie(
     veraltet: stand == null ? true : tageZwischen(stand, heute) - 1 > FRISCHE_TAGE,
     hat_daten: zeilen.length > 0,
     anzahl_produkte: zeilen.length,
-    anzahl_aktuell_leer: zeilen.filter((z) => z.aktuell_leer).length,
+    /** Am letzten AKTUELLEN Messtag leer — das ist die Zahl, die heute zählt. */
+    anzahl_jetzt_leer: zeilen.filter(jetztLeer).length,
+    /**
+     * Zuletzt leer, aber die Messung ist alt (Amazon meldet das Produkt nicht
+     * mehr). Bewusst getrennt: das ist Historie, kein aktueller Handlungsbedarf.
+     */
+    anzahl_leer_stand_alt: zeilen.filter((z) => z.aktuell_leer && !jetztLeer(z)).length,
     anzahl_mit_phasen: zeilen.filter((z) => z.phasen.length > 0).length,
     tage_leer_gesamt: zeilen.reduce((s, z) => s + z.tage_leer, 0),
     entgangene_einheiten_gesamt: zeilen.reduce(
