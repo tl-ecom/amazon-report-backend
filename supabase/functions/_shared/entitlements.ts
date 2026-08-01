@@ -52,11 +52,11 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   board_report: "board",
   // Fee Decoder: Modul 2 (Größenklassen-Korridor) und Modul 3 (Soll-Ist-Maße).
   groessenklassen: "gebuehren",
-  masse_abgleich: "gebuehren",
+  masse_abgleich: "masse",
   steuerbarkeit: "gebuehren",
-  lager_kosten: "gebuehren",
-  masse_uebersicht: "gebuehren",
-  abrechnungen: "verlauf",
+  lager_kosten: "lager",
+  masse_uebersicht: "masse",
+  abrechnungen: "auszahlungen",
   // MCP-Zugang (KI-Anbindung) — schaltbar, damit das Häkchen in der Tarif-Matrix
   // auch wirklich greift und nicht nur den Tab versteckt.
   mcp_tokens: "mcp",
