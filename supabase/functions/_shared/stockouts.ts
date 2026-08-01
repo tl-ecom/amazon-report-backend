@@ -26,6 +26,10 @@ export const REICHWEITE_KNAPP_TAGE = 21;
 // trennbar war: „leer und nichts bestellt" (dringend) von „leer, Ware kommt"
 // (erledigt) und „läuft bald leer" (jetzt handeln). Ohne Lagerdaten bleibt es
 // beim alten Velocity-Schluss — dann ist der Bestand ehrlich unbekannt.
+// Fuer den Deckungsbeitrag: dieselbe Rechnung wie in der Produktuebersicht,
+// damit nicht zwei Ansichten verschiedene Gewinne behaupten.
+import { produktUebersicht } from "./produkte.ts";
+
 export type Status =
   | "leer_ohne_nachschub"
   | "leer"              // aus der Verkaufslücke geschlossen, Bestand unbekannt
@@ -48,12 +52,38 @@ export interface AsinInput {
   bestand_bekannt?: boolean;
   /** Tage bis leer (bestand / Velocity). null = unbekannt. */
   reichweite_tage?: number | null;
+  /**
+   * Deckungsbeitrag je Stück in Cent: Nettopreis − EK − Amazon-Gebühren.
+   * null/fehlend = nicht berechenbar (kein EK oder keine Gebühren hinterlegt).
+   * Dann wird auf den Umsatz zurückgefallen — und das wird ausgewiesen.
+   */
+  deckungsbeitrag_cents?: number | null;
 }
 export interface Bewertung {
   status: Status;
   schwere: number;               // 5 leer ohne Nachschub … 0 ok — für die Sortierung
-  verlust_cents: number;         // leer: laufend entgangen (velo × Tage × Preis); buybox: Monatsrate
+  verlust_cents: number;         // leer: laufend entgangen; buybox: Monatsrate
   verlust_art: "laufend" | "monatsrate" | null;
+  /**
+   * Worauf der Verlust gerechnet ist. "gewinn" = entgangener Deckungsbeitrag,
+   * die ehrliche Zahl. "umsatz" = Notbehelf, weil EK oder Gebühren fehlen —
+   * dann ist der Betrag deutlich zu hoch und darf nicht als Gewinn gelesen
+   * werden. null = kein Verlust ausgewiesen.
+   */
+  verlust_basis: "gewinn" | "umsatz" | null;
+}
+
+/**
+ * Wert einer nicht verkauften Einheit. Bevorzugt der Deckungsbeitrag — eine
+ * entgangene Bestellung kostet den Gewinn, nicht den Umsatz. Fehlt er, wird der
+ * Preis genommen UND das als Notbehelf gekennzeichnet.
+ */
+function stueckwert(i: AsinInput): { cents: number; basis: "gewinn" | "umsatz" } {
+  const db = i.deckungsbeitrag_cents;
+  if (typeof db === "number" && Number.isFinite(db) && db > 0) {
+    return { cents: db, basis: "gewinn" };
+  }
+  return { cents: nz(i.avg_preis_cents), basis: "umsatz" };
 }
 
 function nz(x: unknown): number {
@@ -71,11 +101,11 @@ function nz(x: unknown): number {
  */
 export function bewerteAsin(i: AsinInput): Bewertung {
   const velo = nz(i.velo_tag);
-  if (velo < MIN_VELO) return { status: "ok", schwere: 0, verlust_cents: 0, verlust_art: null };
+  if (velo < MIN_VELO) return { status: "ok", schwere: 0, verlust_cents: 0, verlust_art: null, verlust_basis: null };
 
   const tageOhne = nz(i.tage_ohne_verkauf);
   const preis = nz(i.avg_preis_cents);
-  const ok = { status: "ok" as const, schwere: 0, verlust_cents: 0, verlust_art: null };
+  const ok = { status: "ok" as const, schwere: 0, verlust_cents: 0, verlust_art: null, verlust_basis: null };
 
   // --- Mit echten Lagerdaten ---
   if (i.bestand_bekannt) {
@@ -86,23 +116,25 @@ export function bewerteAsin(i: AsinInput): Bewertung {
       // Entgangener Umsatz seit dem letzten Verkauf; mindestens ein Tag, denn
       // leeres Lager kostet ab sofort.
       const tage = Math.max(1, Math.min(tageOhne, LEER_MAX_TAGE));
-      const verlust = Math.round(velo * tage * preis);
+      const wert = stueckwert(i);
+      const verlust = Math.round(velo * tage * wert.cents);
       return unterwegs > 0
-        ? { status: "leer_mit_nachschub", schwere: 3, verlust_cents: verlust, verlust_art: "laufend" }
-        : { status: "leer_ohne_nachschub", schwere: 5, verlust_cents: verlust, verlust_art: "laufend" };
+        ? { status: "leer_mit_nachschub", schwere: 3, verlust_cents: verlust, verlust_art: "laufend", verlust_basis: wert.basis }
+        : { status: "leer_ohne_nachschub", schwere: 5, verlust_cents: verlust, verlust_art: "laufend", verlust_basis: wert.basis };
     }
 
     const reichweite = i.reichweite_tage == null ? null : nz(i.reichweite_tage);
     if (reichweite != null && reichweite <= REICHWEITE_KNAPP_TAGE && unterwegs === 0) {
       // Noch kein Verlust — eine Warnung mit Frist. Deshalb 0 € und kein „laufend".
-      return { status: "reichweite_knapp", schwere: 3, verlust_cents: 0, verlust_art: null };
+      return { status: "reichweite_knapp", schwere: 3, verlust_cents: 0, verlust_art: null, verlust_basis: null };
     }
     // Bestand vorhanden und ausreichend -> Buy-Box/Abbruch trotzdem prüfen (unten).
   } else {
     // --- Ohne Lagerdaten: wie bisher aus der Verkaufslücke schließen ---
     if (tageOhne >= LEER_TAGE && tageOhne <= LEER_MAX_TAGE) {
-      const verlust = Math.round(velo * tageOhne * preis);
-      return { status: "leer", schwere: 4, verlust_cents: verlust, verlust_art: "laufend" };
+      const wert = stueckwert(i);
+      const verlust = Math.round(velo * tageOhne * wert.cents);
+      return { status: "leer", schwere: 4, verlust_cents: verlust, verlust_art: "laufend", verlust_basis: wert.basis };
     }
     // Länger als LEER_MAX_TAGE tot: kein akuter Stockout mehr -> Ladenhüter-Radar (#5).
     if (tageOhne > LEER_MAX_TAGE) return ok;
@@ -112,12 +144,13 @@ export function bewerteAsin(i: AsinInput): Bewertung {
     // Anteil entgangener Verkäufe ≈ (100 − BB) / BB, gedeckelt bei 1.
     const bb = Math.max(1, i.buybox_pct);
     const anteil = Math.min(1, (100 - bb) / bb);
-    const verlust = Math.round(velo * 30 * anteil * preis); // Monatsrate
-    return { status: "buybox", schwere: 2, verlust_cents: verlust, verlust_art: "monatsrate" };
+    const wert = stueckwert(i);
+    const verlust = Math.round(velo * 30 * anteil * wert.cents); // Monatsrate
+    return { status: "buybox", schwere: 2, verlust_cents: verlust, verlust_art: "monatsrate", verlust_basis: wert.basis };
   }
 
   if (tageOhne >= KRITISCH_TAGE && tageOhne <= LEER_MAX_TAGE) {
-    return { status: "kritisch", schwere: 1, verlust_cents: 0, verlust_art: null };
+    return { status: "kritisch", schwere: 1, verlust_cents: 0, verlust_art: null, verlust_basis: null };
   }
 
   return ok;
@@ -129,11 +162,14 @@ export function bewerteAsin(i: AsinInput): Bewertung {
  * zurückgeben. Reichert Produktnamen an und liefert das S&T-Fenster mit.
  */
 export async function stockoutRadar(supabase: any, tenant_id: string): Promise<unknown> {
-  const [basisRes, stRes, asinRes] = await Promise.all([
+  const [basisRes, stRes, asinRes, ertragRes] = await Promise.all([
     supabase.rpc("stockout_basis", { p_tenant: tenant_id, p_tage: FENSTER_TAGE }),
     supabase.from("report_data").select("payload")
       .eq("tenant_id", tenant_id).eq("report_type", "GET_SALES_AND_TRAFFIC_REPORT").eq("is_latest", true).maybeSingle(),
     supabase.from("asins").select("asin, produktname").eq("tenant_id", tenant_id),
+    // Deckungsbeitrag je Stueck: dieselbe Rechnung wie in der Produktuebersicht,
+    // damit beide Ansichten nicht verschiedene Gewinne behaupten.
+    produktUebersicht(supabase, tenant_id, { tage: FENSTER_TAGE }).catch(() => null),
   ]);
 
   const basis = (basisRes.data ?? []) as any[];
@@ -163,6 +199,17 @@ export async function stockoutRadar(supabase: any, tenant_id: string): Promise<u
     }
   }
 
+  // Deckungsbeitrag je Stueck aus der Produktuebersicht. Sie rechnet bereits
+  // netto und mit Gebuehren; hier wird nur durch die Einheiten geteilt.
+  const dbJeAsin = new Map<string, number>();
+  for (const p of ((ertragRes as any)?.produkte ?? []) as any[]) {
+    const einheiten = Number(p.einheiten) || 0;
+    const ergebnis = p.nettogewinn_vor_werbung;
+    if (einheiten > 0 && typeof ergebnis === "number") {
+      dbJeAsin.set(String(p.asin), Math.round((ergebnis / einheiten) * 100));
+    }
+  }
+
   const zeilen = basis.map((r) => {
     const bb = bbMap.get(String(r.asin));
     const eingabe: AsinInput = {
@@ -170,6 +217,7 @@ export async function stockoutRadar(supabase: any, tenant_id: string): Promise<u
       tage_ohne_verkauf: nz(r.tage_ohne_verkauf),
       avg_preis_cents: nz(r.avg_preis_cents),
       buybox_pct: bb?.buybox ?? null,
+      deckungsbeitrag_cents: dbJeAsin.get(String(r.asin)) ?? null,
       sessions: bb?.sessions ?? null,
       bestand: r.bestand == null ? null : nz(r.bestand),
       nachschub_unterwegs: r.nachschub_unterwegs == null ? null : nz(r.nachschub_unterwegs),

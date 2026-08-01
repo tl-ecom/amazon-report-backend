@@ -112,3 +112,65 @@ Deno.test("Buy-Box-Anteil ist bei 1 gedeckelt", () => {
   const b = bewerteAsin(inp({ velo_tag: 2, tage_ohne_verkauf: 1, avg_preis_cents: 500, buybox_pct: 10, sessions: 50 }));
   assertEquals(b.verlust_cents, 30000);
 });
+
+// --- Entgangener GEWINN statt Umsatz ---
+
+Deno.test("mit Deckungsbeitrag: entgangener Gewinn, nicht Umsatz", () => {
+  // Preis 40 EUR, aber nur 12 EUR bleiben haengen. Ein entgangener Verkauf
+  // kostet den Gewinn — den Umsatz zu nennen ueberzeichnet den Schaden um das
+  // Dreifache und macht jede Priorisierung falsch.
+  const b = bewerteAsin(inp({
+    velo_tag: 2, tage_ohne_verkauf: 5, avg_preis_cents: 4000,
+    deckungsbeitrag_cents: 1200,
+    bestand: 0, nachschub_unterwegs: 0, bestand_bekannt: true,
+  }));
+  assertEquals(b.status, "leer_ohne_nachschub");
+  assertEquals(b.verlust_cents, 2 * 5 * 1200);
+  assertEquals(b.verlust_basis, "gewinn");
+});
+
+Deno.test("ohne Deckungsbeitrag: Notbehelf Umsatz, aber gekennzeichnet", () => {
+  const b = bewerteAsin(inp({
+    velo_tag: 2, tage_ohne_verkauf: 5, avg_preis_cents: 4000,
+    bestand: 0, nachschub_unterwegs: 0, bestand_bekannt: true,
+  }));
+  assertEquals(b.verlust_cents, 2 * 5 * 4000);
+  // Die Kennzeichnung ist der Punkt: sonst liest jemand Umsatz als Gewinn.
+  assertEquals(b.verlust_basis, "umsatz");
+});
+
+Deno.test("negativer oder fehlender Deckungsbeitrag faellt auf Umsatz zurueck", () => {
+  // Ein Verlustprodukt: dass ein Stockout dort 'Gewinn spart', ist keine
+  // Aussage, die diese Ansicht treffen soll. Lieber der neutrale Notbehelf.
+  for (const db of [0, -500, null, undefined]) {
+    const b = bewerteAsin(inp({
+      velo_tag: 1, tage_ohne_verkauf: 10, avg_preis_cents: 1000,
+      deckungsbeitrag_cents: db as number | null,
+      bestand: 0, bestand_bekannt: true,
+    }));
+    assertEquals(b.verlust_basis, "umsatz");
+    assertEquals(b.verlust_cents, 10 * 1000);
+  }
+});
+
+Deno.test("Buy-Box-Verlust nutzt ebenfalls den Deckungsbeitrag", () => {
+  const b = bewerteAsin(inp({
+    velo_tag: 1, tage_ohne_verkauf: 0, avg_preis_cents: 5000,
+    deckungsbeitrag_cents: 1000, buybox_pct: 50, sessions: 100,
+    bestand: 50, bestand_bekannt: true, reichweite_tage: 50,
+  }));
+  assertEquals(b.status, "buybox");
+  assertEquals(b.verlust_art, "monatsrate");
+  assertEquals(b.verlust_basis, "gewinn");
+  assertEquals(b.verlust_cents, Math.round(1 * 30 * 1 * 1000));
+});
+
+Deno.test("Statuswarnungen ohne Verlust haben keine Basis", () => {
+  const b = bewerteAsin(inp({
+    velo_tag: 1, tage_ohne_verkauf: 0, deckungsbeitrag_cents: 1000,
+    bestand: 5, bestand_bekannt: true, reichweite_tage: 5, nachschub_unterwegs: 0,
+  }));
+  assertEquals(b.status, "reichweite_knapp");
+  assertEquals(b.verlust_cents, 0);
+  assertEquals(b.verlust_basis, null);
+});
