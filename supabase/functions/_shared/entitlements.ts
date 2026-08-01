@@ -55,6 +55,7 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   steuerbarkeit: "gebuehren",
   lager_kosten: "gebuehren",
   masse_uebersicht: "gebuehren",
+  abrechnungen: "verlauf",
   // MCP-Zugang (KI-Anbindung) — schaltbar, damit das Häkchen in der Tarif-Matrix
   // auch wirklich greift und nicht nur den Tab versteckt.
   mcp_tokens: "mcp",

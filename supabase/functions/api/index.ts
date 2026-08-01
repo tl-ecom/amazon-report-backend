@@ -46,6 +46,7 @@ import { masseAbgleich } from "../_shared/abgleich_lauf.ts";
 import { steuerbarkeitReport } from "../_shared/steuerbarkeit_lauf.ts";
 import { lagerKosten } from "../_shared/lager_lauf.ts";
 import { masseUebersicht } from "../_shared/masse_lauf.ts";
+import { abrechnungen } from "../_shared/abrechnung_lauf.ts";
 
 // CORS: das Frontend läuft auf einer anderen Origin (Lovable/eigene Domain).
 const CORS = {
@@ -552,6 +553,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "groessenklassen") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await groessenklassenKorridor(service, tenantId, args as any) });
+    }
+    if (resource === "abrechnungen") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await abrechnungen(service, tenantId) });
     }
     if (resource === "masse_uebersicht") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await masseUebersicht(service, tenantId) });
