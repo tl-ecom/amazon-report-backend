@@ -32,6 +32,7 @@ interface Row {
   asin: string; produktname: string; umsatz_cents: number; einheiten: number;
   wareneinsatz_cents: number; einheiten_mit_ek: number; retouren: number;
   gebuehren_cents: number; gebuehren_bekannt: boolean; gebuehren_anteilig: boolean;
+  fba_cents: number; verkaufsgebuehr_cents: number; sonstige_gebuehren_cents: number;
 }
 
 function istDatum(s: unknown): s is string {
@@ -84,6 +85,12 @@ export async function produktUebersicht(
     // Ohne bestätigten Faktor lässt nettoGebuehr den Betrag unverändert.
     const hatGeb = Boolean(r.gebuehren_bekannt);
     const gebuehren = hatGeb ? nettoGebuehr(Number(r.gebuehren_cents) || 0, ustFaktor) / 100 : null;
+    // Die zwei grossen Bloecke einzeln — sie haben verschiedene Hebel: die
+    // Verkaufsgebuehr haengt am Preis, die FBA-Gebuehr an Groesse und Gewicht.
+    const je = (cents: unknown) => hatGeb ? nettoGebuehr(Number(cents) || 0, ustFaktor) / 100 : null;
+    const fba = je(r.fba_cents);
+    const verkaufsgebuehr = je(r.verkaufsgebuehr_cents);
+    const sonstige = je(r.sonstige_gebuehren_cents);
 
     // Nettogewinn OHNE Werbekosten — die fehlen noch. Der Name sagt das, damit
     // niemand ihn für das Endergebnis hält.
@@ -106,6 +113,9 @@ export async function produktUebersicht(
       rohmarge: hatEk && umsatz > 0 && rohertrag != null ? runde((rohertrag / umsatz) * 100, 1) : null,
       retourenquote: einheiten > 0 ? runde((retouren / einheiten) * 100, 1) : null,
       gebuehren: gebuehren == null ? null : runde(gebuehren),
+      fba_gebuehr: fba == null ? null : runde(fba),
+      verkaufsgebuehr: verkaufsgebuehr == null ? null : runde(verkaufsgebuehr),
+      sonstige_gebuehren: sonstige == null ? null : runde(sonstige),
       gebuehrenquote: hatGeb && umsatz > 0 ? runde((-gebuehren! / umsatz) * 100, 1) : null,
       gebuehren_anteilig: Boolean(r.gebuehren_anteilig),
       umsatz_nach_gebuehren: umsatzNachGebuehren,
