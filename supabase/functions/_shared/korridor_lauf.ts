@@ -106,7 +106,7 @@ export async function groessenklassenKorridor(
     ...report,
     // Der Hebel kommt aus dem Coaching-Modell und ist fuer diesen Befundtyp fest.
     hebel: "produkt_market_fit",
-    hinweis: "Die Ersparnis rechnet ohne den Treibstoffaufschlag von 1,5 % — sie ist also eher zu niedrig als zu hoch.",
+    hinweis: "Die Ersparnis enthält den Treibstoffaufschlag von 1,5 %, den Amazon seit dem 17.04.2026 auf die Versandgebühr erhebt.",
   };
 }
 

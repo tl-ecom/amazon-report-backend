@@ -75,8 +75,9 @@ Deno.test("pruefeKorridor: findet den Blocker und rechnet die Ersparnis", () => 
   assertEquals(b.blocker[0].grenze, 35);
   // Versandgewicht jetzt: max(800, 40*24*11/5=2112) = 2112 -> Standardpaket 4,55.
   // Nach Verkleinerung: max(800, 35*24*11/5=1848) = 1848 -> Kleines Paket 3,43.
-  assertEquals(b.ersparnis_je_stueck, 1.12);
-  assertEquals(b.ersparnis_jahr, 1120);
+  // Differenz 1,12 plus 1,5 % Treibstoffaufschlag = 1,14.
+  assertEquals(b.ersparnis_je_stueck, 1.14);
+  assertEquals(b.ersparnis_jahr, 1140);
   assertEquals(b.hochgerechnet, false);
   assertEquals(b.text.includes("längste Seite 5 cm"), true);
   assertEquals(b.text.includes("≤ 35 cm"), true);
@@ -121,8 +122,8 @@ Deno.test("pruefeKorridor: halber Zentimeter aus flacher Verpackung bleibt machb
   assertEquals(b.blocker[0].kante, "kuerzeste");
   assertEquals(b.blocker[0].weg, 0.5);
   assertEquals(b.blocker[0].prozent, 16.7); // ueber 15 %, aber unter 1 cm
-  assertEquals(b.ersparnis_je_stueck, 0.36);
-  assertEquals(b.ersparnis_jahr, 626);
+  assertEquals(b.ersparnis_je_stueck, 0.37); // 0,36 + Treibstoffaufschlag
+  assertEquals(b.ersparnis_jahr, 643);
 });
 
 Deno.test("pruefeKorridor: Volumengewicht der kleineren Box wird mitgerechnet", () => {
@@ -146,7 +147,7 @@ Deno.test("pruefeKorridor: zu kleine Jahresersparnis erzeugt keinen Befund", () 
 Deno.test("pruefeKorridor: kurzes Fenster wird hochgerechnet UND gekennzeichnet", () => {
   const b = pruefeKorridor(produkt({ einheiten: 250, fenster_tage: 90 }), KLASSEN);
   assertEquals(b.hochgerechnet, true);
-  assertEquals(b.ersparnis_jahr, Math.round(1.12 * (250 / 90) * 365));
+  assertEquals(b.ersparnis_jahr, Math.round(1.14 * (250 / 90) * 365));
   assertEquals(b.text.includes("hochgerechnet"), true);
 });
 
@@ -244,6 +245,6 @@ Deno.test("korridorReport: sortiert nach Euro und summiert nur echte Chancen", (
     produkt({ sku: "C", groessenklasse: "MediumParcel2" }), // nicht bewertbar
   ], KLASSEN);
   assertEquals(r.chancen.map((c) => c.sku), ["B", "A"]);
-  assertEquals(r.summe_ersparnis_jahr, 1120 + 3360);
+  assertEquals(r.summe_ersparnis_jahr, 1140 + 3420);
   assertEquals(r.nicht_bewertbar, 1);
 });

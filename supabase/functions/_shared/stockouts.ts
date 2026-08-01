@@ -19,8 +19,18 @@ export const KRITISCH_TAGE = 4;          // 4–6 Tage -> Verkäufe brechen ab (
 export const BUYBOX_MIN = 90;            // Buy-Box unter 90 % -> Verfügbarkeitsproblem
 export const BUYBOX_MIN_SESSIONS = 20;   // nur relevant, wenn überhaupt Traffic da ist
 
-/** Reichweite, ab der nachbestellt werden muss (Herstellung + Transit + Puffer). */
-export const REICHWEITE_KNAPP_TAGE = 21;
+/**
+ * Reichweite, ab der nachbestellt werden muss.
+ *
+ * War 21 Tage — eine geschaetzte Groesse aus Herstellung + Transit + Puffer.
+ * Amazon nennt inzwischen eine harte Zahl: Die Gebuehr fuer die Deckung
+ * niedriger Lagerbestaende greift unter 28 Tagen historischer Reichweite
+ * (Rate Card DE S. 10, gestaffelt 0,27 / 0,18 / 0,16 EUR je Stueck).
+ *
+ * Bei 21 Tagen zu warnen hiesse, erst zu warnen, wenn die Gebuehr seit einer
+ * Woche laeuft. Die Schwelle ist deshalb Amazons eigene.
+ */
+export const REICHWEITE_KNAPP_TAGE = 28;
 
 // Mit echten Lagerdaten (fba_bestand) unterscheiden wir jetzt, was vorher nicht
 // trennbar war: „leer und nichts bestellt" (dringend) von „leer, Ware kommt"

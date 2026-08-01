@@ -31,6 +31,14 @@ export const MAX_REDUKTION = 0.15;
 export const MAX_ABSOLUT_CM = 1.0;
 /** Unter dieser Ersparnis p.a. lohnt der Aufwand nicht — kein Befund. */
 export const MIN_ERSPARNIS_JAHR = 100;
+/**
+ * Treibstoff- und Logistikaufschlag auf die Versandgebühr, seit 17.04.2026.
+ * Die Rate Card nennt die Beträge OHNE ihn — eine Ersparnis, die auf der
+ * Tabelle rechnet, fällt also um diesen Anteil zu niedrig aus. Nachgewiesen an
+ * Vanejas Daten: gemessene Gebühr = Tabellenwert × 1,015, auf den Cent.
+ */
+export const TREIBSTOFF_AUFSCHLAG = 1.015;
+
 /** Rundungsrauschen in den gemeldeten Maßen. */
 export const CM_RAUSCHEN = 0.05;
 /** Ab dieser Abweichung passt die Tabelle nicht zur gebuchten Gebühr. */
@@ -319,7 +327,9 @@ export function pruefeKorridor(p: Produkt, klassen: Klasse[]): KorridorBefund {
 
   // Gebuehr in der Zielklasse: mit dem NACH der Verkleinerung geltenden Gewicht.
   const zielGebuehrDanach = gebuehrFuer(ziel, versandDanach) ?? zielGebuehr;
-  const jeStueck = runde(gebuehrJetzt - zielGebuehrDanach);
+  // Beide Seiten mit dem Aufschlag, sonst ist die Ersparnis systematisch zu
+  // niedrig — er faellt auf die Gebuehr an, nicht auf die Differenz.
+  const jeStueck = runde((gebuehrJetzt - zielGebuehrDanach) * TREIBSTOFF_AUFSCHLAG);
   const proTag = p.fenster_tage > 0 ? p.einheiten / p.fenster_tage : 0;
   const einheitenJahr = proTag * 365;
   const jahr = runde(jeStueck * einheitenJahr, 0);
