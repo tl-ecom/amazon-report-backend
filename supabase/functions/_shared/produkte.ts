@@ -97,6 +97,9 @@ export async function produktUebersicht(
       umsatz,                 // netto — die Basis aller Quoten
       umsatz_brutto: runde(umsatzBrutto),
       umsatzsteuer,
+      // Wareneinsatz sichtbar machen: ohne ihn ist der Rohertrag eine Behauptung.
+      // null statt 0, solange kein EK hinterlegt ist — 0 hiesse "kostenlos".
+      wareneinsatz: hatEk ? runde(wareneinsatz) : null,
       einheiten,
       retouren,
       rohertrag,
