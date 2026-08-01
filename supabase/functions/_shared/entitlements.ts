@@ -48,6 +48,7 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   reimbursements_radar: "erstattungen",
   stockout_radar: "nachschub",
   ladenhueter_radar: "ladenhueter",
+  bestandshistorie: "bestandshistorie",
   board_report: "board",
   // Fee Decoder: Modul 2 (Größenklassen-Korridor) und Modul 3 (Soll-Ist-Maße).
   groessenklassen: "gebuehren",

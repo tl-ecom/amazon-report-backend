@@ -145,6 +145,18 @@ const REPORT_KONFIG: Record<string, ReportKonfig> = {
     stableLagDays: 0,
     maxDays: 60,
   },
+  GET_LEDGER_SUMMARY_VIEW_DATA: {
+    format: "tsv",
+    // Taeglicher Lagerstand je SKU — die Quelle der Bestandshistorie (echte
+    // Out-of-Stock-Zeitraeume mit Anfang/Ende/Dauer).
+    // BEIDE reportOptions sind Pflicht: ohne sie liefert Amazon zwar HTTP 200 und
+    // DONE, aber eine Datei NUR MIT KOPFZEILE (nachgewiesen 2026-08-01, Report
+    // 360894020666: 21 Spalten, 0 Zeilen). aggregatedByTimePeriod=DAILY ist noetig,
+    // weil MONTHLY/WEEKLY keine Tagesgenauigkeit hergibt.
+    reportOptions: { aggregateByLocation: "COUNTRY", aggregatedByTimePeriod: "DAILY" },
+    stableLagDays: 0,
+    maxDays: 60,
+  },
   GET_FBA_MYI_UNSUPPRESSED_INVENTORY_DATA: {
     format: "tsv",
     // Momentaufnahme des FBA-Bestands, KEIN Zeitraum.
