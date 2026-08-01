@@ -8,6 +8,13 @@ on:
     branches: [main]
   pull_request:
 
+# Läuft ein neuer Push, während ein älterer noch deployt, wird der ältere
+# abgebrochen. Ohne das können sich zwei Läufe überholen und der langsamere
+# ältere überschreibt am Ende den neueren Stand.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     name: Typecheck & Tests
@@ -32,8 +39,39 @@ jobs:
       PROJECT_REF: irvnghhxfjjnpodclfuc
     steps:
       - uses: actions/checkout@v4
+
+      # Ein Re-Run ist KEIN Wiederholen, sondern ein Rollback: Er checkt den
+      # Commit von damals aus und deployt ihn. Liegen inzwischen neuere Commits
+      # auf main, verschwinden deren Funktionen wieder.
+      #
+      # Genau das ist am 2026-08-01 passiert: Der Re-Run eines drei Commits
+      # alten Laufs hat drei Ressourcen aus der API entfernt.
+      #
+      # Deshalb hier die Prüfung: Nur deployen, wenn der ausgecheckte Commit
+      # noch die Spitze von main ist. Sonst wird der Deploy übersprungen — der
+      # Lauf bleibt grün, denn nichts zu tun ist hier das richtige Verhalten.
+      - name: Ist dieser Commit noch der aktuelle Stand?
+        id: aktuell
+        run: |
+          git fetch --depth=1 origin main
+          SPITZE="$(git rev-parse origin/main)"
+          if [ "$SPITZE" = "$GITHUB_SHA" ]; then
+            echo "veraltet=false" >> "$GITHUB_OUTPUT"
+            echo "Aktueller Stand — Deploy läuft."
+          else
+            echo "veraltet=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Veralteter Lauf. Ausgecheckt ist $GITHUB_SHA, Spitze von main ist $SPITZE."
+            echo "::warning::Deploy übersprungen — er würde die neueren Funktionen entfernen."
+            echo "Zum erneuten Ausliefern den NEUESTEN Lauf wiederholen, nicht diesen."
+          fi
+
       - uses: supabase/setup-cli@v1
+        if: steps.aktuell.outputs.veraltet == 'false'
         with:
-          version: latest
+          # Bewusst gepinnt: "latest" heißt, dass ein fremder Release unsere
+          # Auslieferung jederzeit stoppen kann. Version am 2026-08-01 geprüft.
+          version: 2.111.0
+
       - name: Deploy all functions
+        if: steps.aktuell.outputs.veraltet == 'false'
         run: supabase functions deploy --project-ref "$PROJECT_REF"
