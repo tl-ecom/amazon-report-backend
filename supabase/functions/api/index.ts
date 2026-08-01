@@ -43,6 +43,7 @@ import { ablehnenKonto, freigebenKonto, ladeEin, legeFirmaAn, listeKunden, liste
 import { importiereFeeSchedule, listeFeeKlassifizierung, listeFeeSchedule, setzeFeeKlassifizierung } from "../_shared/fee_stammdaten.ts";
 import { setzeSteuerprofil, setzeUstFaktor, ustStatus } from "../_shared/ust_lauf.ts";
 import { groessenklassenKorridor } from "../_shared/korridor_lauf.ts";
+import { gebuehrenVorschau } from "../_shared/gebuehrenaenderung_lauf.ts";
 import { masseAbgleich } from "../_shared/abgleich_lauf.ts";
 import { steuerbarkeitReport } from "../_shared/steuerbarkeit_lauf.ts";
 import { lagerKosten } from "../_shared/lager_lauf.ts";
@@ -557,6 +558,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "groessenklassen") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await groessenklassenKorridor(service, tenantId, args as any) });
+    }
+    if (resource === "gebuehren_vorschau") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await gebuehrenVorschau(service, tenantId, args as any) });
     }
     if (resource === "abrechnungen") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await abrechnungen(service, tenantId) });

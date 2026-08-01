@@ -52,6 +52,7 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   board_report: "board",
   // Fee Decoder: Modul 2 (Größenklassen-Korridor) und Modul 3 (Soll-Ist-Maße).
   groessenklassen: "gebuehren",
+  gebuehren_vorschau: "gebuehren",
   masse_abgleich: "masse",
   steuerbarkeit: "gebuehren",
   lager_kosten: "lager",

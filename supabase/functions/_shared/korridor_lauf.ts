@@ -11,7 +11,7 @@ import {
 } from "./groessenklassen.ts";
 
 /** Marktplatz-ID -> Land. Spiegelt public.marktplatz_land aus der Migration. */
-const LAND: Record<string, string> = {
+export const LAND: Record<string, string> = {
   A1PA6795UKMFR9: "DE", A13V1IB3VIYZZH: "FR", APJ6JRA9NG5V4: "IT",
   A1RKKUPIHCS9HS: "ES", A1F83G8C2ARO7P: "UK", A1805IZSGTT6HS: "NL",
   A2NODRKZP88ZB9: "SE", A1C3SOZRARQ6R3: "PL", AMEN7PMS3EDWL: "BE",
@@ -62,14 +62,19 @@ export function baueKlassen(zeilen: any[]): Klasse[] {
   return [...proTier.values()];
 }
 
+/** Land des Marktplatzes, auf den diese Firma verbunden ist. null = unbekannt. */
+export async function marktplatzFuer(supabase: any, tenant_id: string): Promise<string | null> {
+  const { data: ctx } = await supabase.from("auth_contexts")
+    .select("marketplace_id").eq("tenant_id", tenant_id).limit(1).maybeSingle();
+  return LAND[String(ctx?.marketplace_id ?? "")] ?? null;
+}
+
 export async function groessenklassenKorridor(
   supabase: any, tenant_id: string, opts?: { tage?: unknown },
 ): Promise<unknown> {
   const tage = Number(opts?.tage) > 0 ? Math.min(Number(opts?.tage), 730) : 365;
 
-  const { data: ctx } = await supabase.from("auth_contexts")
-    .select("marketplace_id").eq("tenant_id", tenant_id).limit(1).maybeSingle();
-  const markt = LAND[String(ctx?.marketplace_id ?? "")] ?? null;
+  const markt = await marktplatzFuer(supabase, tenant_id);
   if (!markt) {
     return leerAntwort("Der Marktplatz dieser Firma ist nicht bekannt — ohne ihn lässt sich keine Gebührentabelle zuordnen.");
   }
