@@ -47,7 +47,9 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         reportType: REPORT_TYPE,
         marketplaceIds: [ctx.marketplace_id],
-        dataStartTime: `${von}T00:00:00Z`, dataEndTime: `${bis}T23:59:59Z`,
+        // Beide Grenzen um Mitternacht — genau so nimmt Amazon den Zeitraum an.
+        // Mit T23:59:59Z am Ende kommt der Report als FATAL zurück.
+        dataStartTime: `${von}T00:00:00Z`, dataEndTime: `${bis}T00:00:00Z`,
         reportOptions: { reportPeriod: periode, asin },
       }),
     });
