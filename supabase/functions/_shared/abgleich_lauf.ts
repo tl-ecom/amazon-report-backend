@@ -7,7 +7,7 @@
 // tatsächlich zugewiesene Klasse. Lässt sich das nicht bestimmen, bleibt die
 // Soll-Gebühr null und der Befund ist Datenpflege, kein Kostenfall.
 
-import { klasseFuerMasse, tarifFuer, type Klasse } from "./groessenklassen.ts";
+import { klasseFuerMasse, waehleTarif, type Klasse } from "./groessenklassen.ts";
 import { abgleichReport, type Paar } from "./masse_abgleich.ts";
 import { baueKlassen } from "./korridor_lauf.ts";
 
@@ -84,8 +84,8 @@ export async function masseAbgleich(
     // Preisgrenze gilt der Niedrigpreisversand (Rate Card S. 5) mit eigenen
     // Betraegen. Ohne Preis ist das nicht entscheidbar — dann bleibt die
     // Soll-Gebuehr leer und der Befund ist Datenpflege, kein Kostenfall.
-    const tarif = tarifFuer(zahl(r.preis_cents), klassen);
-    const tarifKlassen = tarif === null ? [] : klassen.filter((x) => x.tarif === tarif);
+    const wahl = waehleTarif(zahl(r.preis_cents), r.groessenklasse ?? null, klassen);
+    const tarifKlassen = wahl.klassen ?? [];
     const aktuelleKlasse = tarifKlassen.find((x) => x.size_tier === r.groessenklasse);
     let istCents: number | null = null;
     let sollCents: number | null = null;

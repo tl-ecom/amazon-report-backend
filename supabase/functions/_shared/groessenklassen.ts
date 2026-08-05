@@ -42,8 +42,19 @@ export const MIN_ERSPARNIS_JAHR = 100;
  * Die Rate Card nennt die Beträge OHNE ihn — eine Ersparnis, die auf der
  * Tabelle rechnet, fällt also um diesen Anteil zu niedrig aus. Nachgewiesen an
  * Vanejas Daten: gemessene Gebühr = Tabellenwert × 1,015, auf den Cent.
+ *
+ * NUR im Standardtarif. Bei den Niedrigpreiszeilen trifft der blanke
+ * Tabellenwert, ebenfalls an Vanejas Daten geprüft (S.5-Wert / gemessen):
+ * Großer Umschlag 2,65 / 2,66 · Standardumschlag 2,12 / 2,13 und 2,28 / 2,29 ·
+ * Extra großer Umschlag 3,04 / 3,03. Mit Aufschlag lägen die Werte 4 Cent
+ * daneben — der Abstand ist groß genug, um ihn nicht anzuwenden.
  */
 export const TREIBSTOFF_AUFSCHLAG = 1.015;
+
+/** Der Aufschlag gilt je Tarif — beim Niedrigpreisversand nicht. */
+export function aufschlagFuer(tarif: Tarif): number {
+  return tarif === "standard" ? TREIBSTOFF_AUFSCHLAG : 1;
+}
 
 /** Rundungsrauschen in den gemeldeten Maßen. */
 export const CM_RAUSCHEN = 0.05;
@@ -59,9 +70,18 @@ export type Tarif = "standard" | "niedrigpreis";
 
 /**
  * Ab diesem Artikelpreis gilt der Standardtarif; darunter der Niedrigpreisversand
- * (Rate Card S. 5). Nur der Rückfall: Bringt die Tabelle eine eigene Grenze mit
+ * (Rate Card S. 5: „höchstens 20 € (DE, NL, FR, IT, ES, BE, IE) einschließlich
+ * MwSt."). Nur der Rückfall: Bringt die Tabelle eine eigene Grenze mit
  * (`preis_grenze_cents`), gilt die — die Grenze gehört zur Rate Card und ändert
  * sich mit ihr, nicht mit dem Code.
+ *
+ * OFFEN: Für Schönheit/Gesundheit/Körperpflege, Geschäfts-/Industrie-/
+ * Wissenschaftsbedarf, Bürobedarf, Lebensmittel, Bücher, Amazon-Gerätezubehör
+ * und Küche liegt die Grenze bei 12 € statt 20 €. Das ist hier NICHT abgebildet:
+ * Es bräuchte eine belastbare Zuordnung von Amazons Produktgruppen auf diese
+ * Kategorienamen, und die zu raten wäre derselbe Fehler in klein. Betroffen wären
+ * nur Artikel zwischen 12 und 20 € in genau diesen Kategorien — für die fällt die
+ * Gebühr dann zu niedrig aus.
  */
 export const NIEDRIGPREIS_GRENZE_CENTS = 2000;
 
@@ -176,11 +196,73 @@ export function tarifFuer(preis_cents: number | null, klassen: Klasse[]): Tarif 
   return preis < niedrigpreisGrenze(klassen) ? "niedrigpreis" : "standard";
 }
 
+/** Ergebnis der Tarifwahl: entweder ein Tarif samt seinen Klassen, oder ein Grund. */
+export type TarifWahl =
+  | { tarif: Tarif; klassen: Klasse[]; grund?: undefined }
+  | { tarif: null; klassen?: undefined; grund: string };
+
+/**
+ * Welcher Tarif gilt für dieses Produkt, und welche Klassen gehören dazu?
+ *
+ * Zwei Bedingungen, beide nötig — der Preis allein genügt nicht:
+ *   1. Der Artikel liegt unter der Preisgrenze.
+ *   2. Seine Größenklasse kommt im Niedrigpreisversand überhaupt vor. Das
+ *      Programm deckt nur die kleinen Klassen ab (Umschläge, Kleines Paket bis
+ *      400 g — S. 5). Ein günstiger Artikel im Standardpaket ist nicht
+ *      qualifiziert und läuft über den Standardtarif. Nachgewiesen an Vaneja:
+ *      Geschenktüten (14,97 €) und Kratzbrett (17,97 €) treffen die
+ *      Standardtabelle auf den Cent.
+ *
+ * Der Unterschied zwischen „Klasse nicht dabei" und „Tabelle nicht gepflegt" ist
+ * der Kern: Ersteres ist eine Aussage, Letzteres eine Wissenslücke. Nur bei
+ * Letzterem wird nichts behauptet.
+ *
+ * Diese Funktion ist die EINZIGE Stelle, an der die Tarifwahl getroffen wird —
+ * Modul 2, Modul 3 und die Gebührenänderungs-Vorschau rufen sie alle auf.
+ */
+export function waehleTarif(
+  preis_cents: number | null, groessenklasse: string | null, klassen: Klasse[],
+): TarifWahl {
+  const grenze = niedrigpreisGrenze(klassen);
+  const nachPreis = tarifFuer(preis_cents, klassen);
+  if (nachPreis === null) {
+    return {
+      tarif: null,
+      grund: "Amazon meldet für dieses Produkt keinen Artikelpreis. Ohne ihn ist nicht " +
+        `entscheidbar, ob der Niedrigpreisversand gilt (unter ${(grenze / 100).toFixed(2)} €) ` +
+        "oder der Standardtarif — und auf der falschen Tabelle zu rechnen ergäbe eine " +
+        "Ersparnis, die es nicht gibt.",
+    };
+  }
+
+  let tarif: Tarif = nachPreis;
+  if (nachPreis === "niedrigpreis") {
+    const niedrigpreis = klassen.filter((k) => k.tarif === "niedrigpreis");
+    if (niedrigpreis.length === 0) {
+      return {
+        tarif: null,
+        grund: `Der Artikel kostet unter ${(grenze / 100).toFixed(2)} € und fällt damit ` +
+          "möglicherweise unter den Niedrigpreisversand (Rate Card S. 5) — eine eigene " +
+          "Tabelle, nicht die Standardtabelle. Für diesen Marktplatz ist sie nicht hinterlegt.",
+      };
+    }
+    if (!niedrigpreis.some((k) => k.size_tier === groessenklasse)) tarif = "standard";
+  }
+
+  const passend = klassen.filter((k) => k.tarif === tarif);
+  if (passend.length === 0) {
+    return { tarif: null, grund: "Für den Standardtarif ist keine Gebührentabelle hinterlegt." };
+  }
+  return { tarif, klassen: passend };
+}
+
 /**
  * Wonach wird abgerechnet? Für Pakete der größere Wert aus Stück- und
- * Volumengewicht — beim Niedrigpreisversand dagegen NUR das Stückgewicht
- * (Rate Card S. 6, Fußnote 4). Eine flachere Verpackung senkt dort also die
- * Gebühr nicht; nur die Klassengrenzen zählen.
+ * Volumengewicht — beim Niedrigpreisversand dagegen NUR das Stückgewicht:
+ * „Bei der Bestimmung des Versandgewichts von Artikeln, die über den
+ * Niedrigpreisversand versendet werden, berücksichtigen wir das Volumengewicht
+ * nicht." (Rate Card S. 5, Fußnote 1). Eine flachere Verpackung senkt dort also
+ * die Gebühr nicht; nur die Klassengrenzen zählen.
  */
 export function abrechnungsgewicht(
   tarif: Tarif, stueckgewicht_g: number, l: number, b: number, h: number,
@@ -306,22 +388,9 @@ export function pruefeKorridor(p: Produkt, klassen: Klasse[]): KorridorBefund {
   // ERST der Tarif, dann alles andere: Standardtabelle und Niedrigpreisversand
   // haben dieselben Klassennamen, aber andere Beträge. Wer die Klasse zuerst
   // sucht, findet sie auch in der falschen Tabelle — und rechnet ab da falsch.
-  const grenze = niedrigpreisGrenze(klassen);
-  const tarif = tarifFuer(p.preis_cents, klassen);
-  if (tarif === null) {
-    return leer(p,
-      "Amazon meldet für dieses Produkt keinen Artikelpreis. Ohne ihn ist nicht entscheidbar, " +
-      `ob der Niedrigpreisversand gilt (unter ${(grenze / 100).toFixed(2)} €) oder der Standardtarif — ` +
-      "und auf der falschen Tabelle zu rechnen ergäbe eine Ersparnis, die es nicht gibt.");
-  }
-  const tarifKlassen = klassen.filter((k) => k.tarif === tarif);
-  if (tarifKlassen.length === 0) {
-    return leer(p, tarif === "niedrigpreis"
-      ? `Der Artikel kostet unter ${(grenze / 100).toFixed(2)} € und wird nach dem ` +
-        "Niedrigpreisversand abgerechnet (Rate Card S. 5) — eine eigene Tabelle, nicht die " +
-        "Standardtabelle. Für diesen Marktplatz ist sie noch nicht hinterlegt."
-      : "Für den Standardtarif ist keine Gebührentabelle hinterlegt.", tarif);
-  }
+  const wahl = waehleTarif(p.preis_cents, p.groessenklasse, klassen);
+  if (wahl.tarif === null) return leer(p, wahl.grund);
+  const { tarif, klassen: tarifKlassen } = wahl;
 
   const aktuell = tarifKlassen.find((k) => k.size_tier === p.groessenklasse);
   if (!aktuell) {
@@ -427,7 +496,7 @@ export function pruefeKorridor(p: Produkt, klassen: Klasse[]): KorridorBefund {
   const zielGebuehrDanach = gebuehrFuer(ziel, versandDanach) ?? zielGebuehr;
   // Beide Seiten mit dem Aufschlag, sonst ist die Ersparnis systematisch zu
   // niedrig — er faellt auf die Gebuehr an, nicht auf die Differenz.
-  const jeStueck = runde((gebuehrJetzt - zielGebuehrDanach) * TREIBSTOFF_AUFSCHLAG);
+  const jeStueck = runde((gebuehrJetzt - zielGebuehrDanach) * aufschlagFuer(tarif));
   const proTag = p.fenster_tage > 0 ? p.einheiten / p.fenster_tage : 0;
   const einheitenJahr = proTag * 365;
   const jahr = runde(jeStueck * einheitenJahr, 0);

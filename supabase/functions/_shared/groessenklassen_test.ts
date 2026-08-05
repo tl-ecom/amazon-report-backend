@@ -1,7 +1,8 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
-  abrechnungsgewicht, gebuehrFuer, klasseFuerMasse, korridorReport,
-  NIEDRIGPREIS_GRENZE_CENTS, niedrigpreisGrenze, pruefeKorridor, volumengewicht,
+  abrechnungsgewicht, aufschlagFuer, gebuehrFuer, klasseFuerMasse, korridorReport,
+  NIEDRIGPREIS_GRENZE_CENTS, niedrigpreisGrenze, pruefeKorridor,
+  TREIBSTOFF_AUFSCHLAG, volumengewicht,
   type Klasse, type Produkt,
 } from "./groessenklassen.ts";
 
@@ -247,17 +248,14 @@ const STANDARD_UMSCHLAG: Klasse = {
   grundgebuehr_eur: null, zuschlag_je_100g_eur: null, max_weight_g: 460,
 };
 
-/**
- * Erfundene Beträge — die echte S.5-Tabelle pflegt TL per CSV. Geprüft wird hier
- * NICHT, ob die Zahlen stimmen, sondern DASS auf dieser Tabelle gerechnet wird.
- */
+/** Echte Werte, Rate Card S. 5, Spalte „Nur DE", gültig ab 01.07.2026. */
 const NP_GROSSER_UMSCHLAG: Klasse = {
   ...GROSSER_UMSCHLAG, tarif: "niedrigpreis", preis_grenze_cents: 2000,
-  stufen: [{ max_weight_g: 960, fee_eur: 2.62 }],
+  stufen: [{ max_weight_g: 960, fee_eur: 2.65 }],
 };
 const NP_STANDARD_UMSCHLAG: Klasse = {
   ...STANDARD_UMSCHLAG, tarif: "niedrigpreis", preis_grenze_cents: 2000,
-  stufen: [{ max_weight_g: 210, fee_eur: 2.10 }, { max_weight_g: 460, fee_eur: 2.26 }],
+  stufen: [{ max_weight_g: 210, fee_eur: 2.12 }, { max_weight_g: 460, fee_eur: 2.28 }],
 };
 
 /** Vanejas Kinder-Warnweste 2er Set zu ihrem echten Preis von 9,97 €. */
@@ -273,7 +271,9 @@ function warnweste(over: Partial<Produkt> = {}): Produkt {
 Deno.test("Niedrigpreis: ohne hinterlegte S.5-Tabelle wird NICHT auf der Standardtabelle gerechnet", () => {
   const b = pruefeKorridor(warnweste(), [GROSSER_UMSCHLAG, STANDARD_UMSCHLAG]);
   assertEquals(b.status, "nicht_bewertbar");
-  assertEquals(b.tarif, "niedrigpreis");
+  // Ohne die Tabelle ist nicht einmal der Tarif sicher: Ob die Klasse ueberhaupt
+  // zum Programm gehoert, steht in genau der Tabelle, die fehlt.
+  assertEquals(b.tarif, null);
   assertEquals(b.ersparnis_jahr, null); // lieber keine Zahl als eine falsche
   assertEquals(b.grund?.includes("Niedrigpreisversand"), true);
 });
@@ -284,12 +284,24 @@ Deno.test("Niedrigpreis: mit S.5-Tabelle wird auf DEREN Beträgen gerechnet", ()
   assertEquals(b.status, "chance");
   assertEquals(b.tarif, "niedrigpreis");
   assertEquals(b.ziel_klasse, "StandardEnvelope");
-  // Zwei Unterschiede zur Standardtabelle auf einmal:
-  //   * die Betraege stammen aus S. 5 (2,62 statt 3,04),
+  // Drei Unterschiede zur Standardtabelle auf einmal:
+  //   * die Betraege stammen aus S. 5 (2,65 statt 3,04),
   //   * gerechnet wird mit 170 g Stueckgewicht statt 343 g Volumengewicht — damit
-  //     greift die Stufe bis 210 g (2,10) und nicht die bis 460 g (2,26).
-  // 2,62 -> 2,10 = 0,52, plus Treibstoffaufschlag = 0,53.
+  //     greift die Stufe bis 210 g (2,12) und nicht die bis 460 g (2,28),
+  //   * kein Treibstoffaufschlag.
+  // 2,65 - 2,12 = 0,53.
   assertEquals(b.ersparnis_je_stueck, 0.53);
+});
+
+Deno.test("Niedrigpreis: guenstiger Artikel in einer nicht abgedeckten Klasse bleibt Standard", () => {
+  // Der Niedrigpreisversand deckt nur die kleinen Klassen ab (S. 5). Echter Fall
+  // Vaneja: Geschenktueten 14,97 € im Standardpaket treffen die STANDARD-Tabelle
+  // auf den Cent — sie sind fuer das Programm nicht qualifiziert.
+  const alle = [...KLASSEN, NP_GROSSER_UMSCHLAG, NP_STANDARD_UMSCHLAG];
+  const b = pruefeKorridor(produkt({ preis_cents: 1497 }), alle);
+  assertEquals(b.tarif, "standard");
+  assertEquals(b.status, "chance");
+  assertEquals(b.ersparnis_je_stueck, 1.14); // mit Treibstoffaufschlag
 });
 
 Deno.test("Niedrigpreis: teurer Artikel bleibt im Standardtarif", () => {
@@ -316,6 +328,11 @@ Deno.test("Niedrigpreis: die Tarife werden nicht vermischt", () => {
   assertEquals(b.tarif, "niedrigpreis");
   assertEquals(b.status, "kleinste_klasse");
   assertEquals(b.ziel_klasse, null);
+});
+
+Deno.test("Niedrigpreis: kein Treibstoffaufschlag, im Standardtarif schon", () => {
+  assertEquals(aufschlagFuer("standard"), TREIBSTOFF_AUFSCHLAG);
+  assertEquals(aufschlagFuer("niedrigpreis"), 1);
 });
 
 Deno.test("Niedrigpreis: rechnet nur mit dem Stueckgewicht, nicht mit dem Volumen", () => {

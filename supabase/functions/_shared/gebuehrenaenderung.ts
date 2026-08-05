@@ -33,7 +33,7 @@ import {
   gebuehrFuer,
   klasseFuerMasse,
   niedrigpreisGrenze,
-  tarifFuer,
+  waehleTarif,
   type Klasse,
   type Produkt,
   type Tarif,
@@ -169,17 +169,12 @@ export function vergleicheGebuehr(p: Produkt, alt: Klasse[], neu: Klasse[]): Geb
   // Der Tarif wird für BEIDE Tabellen einzeln bestimmt: Ändert die neue Rate Card
   // die Preisgrenze des Niedrigpreisversands, wechselt ein Produkt den Tarif,
   // ohne dass sich an ihm selbst etwas geändert hat.
-  const tarifAlt = tarifFuer(p.preis_cents, alt);
-  const tarifNeu = tarifFuer(p.preis_cents, neu);
-  if (tarifAlt === null || tarifNeu === null) {
-    return leeresDelta(p, "Amazon meldet keinen Artikelpreis — ohne ihn ist nicht entscheidbar, welche Gebührentabelle gilt.");
-  }
-  const klassenAlt = alt.filter((k) => k.tarif === tarifAlt);
-  const klassenNeu = neu.filter((k) => k.tarif === tarifNeu);
-  if (klassenAlt.length === 0 || klassenNeu.length === 0) {
-    const fehlt = klassenAlt.length === 0 ? "bisherigen" : "neuen";
-    return leeresDelta(p, `Für den Tarif „${klassenAlt.length === 0 ? tarifAlt : tarifNeu}" ist in der ${fehlt} Gebührentabelle nichts hinterlegt.`);
-  }
+  const wahlAlt = waehleTarif(p.preis_cents, p.groessenklasse, alt);
+  const wahlNeu = waehleTarif(p.preis_cents, p.groessenklasse, neu);
+  if (wahlAlt.tarif === null) return leeresDelta(p, `Bisherige Tabelle: ${wahlAlt.grund}`);
+  if (wahlNeu.tarif === null) return leeresDelta(p, `Neue Tabelle: ${wahlNeu.grund}`);
+  const tarifAlt = wahlAlt.tarif, tarifNeu = wahlNeu.tarif;
+  const klassenAlt = wahlAlt.klassen, klassenNeu = wahlNeu.klassen;
 
   const kAlt = klassenAlt.find((k) => k.size_tier === p.groessenklasse);
   if (!kAlt) {
