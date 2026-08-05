@@ -1,10 +1,81 @@
-// sqp.ts — Parser für den Brand-Analytics Search Query Performance Report
-// (GET_BRAND_ANALYTICS_SEARCH_QUERY_PERFORMANCE_REPORT, ASIN-gefiltert).
+// sqp.ts — Parser + Lesezugriffe für den Brand-Analytics Search Query Performance
+// Report (GET_BRAND_ANALYTICS_SEARCH_QUERY_PERFORMANCE_REPORT, ASIN-gefiltert).
 // Rechnet je Suchanfrage: eigene CTR/CVR vs. Markt-CTR/CVR (+ Index) und den
 // Kaufanteil der ASIN. "duenn" markiert Zeilen mit zu kleiner eigener Datenbasis.
+//
+// Ein Report gilt immer für EINE ASIN und EINEN Zeitraum. Amazon liefert ihn wie
+// in Seller Central wahlweise wochen- oder monatsweise; die Grenzen müssen exakt
+// auf der Periode liegen (Woche = Sonntag–Samstag, Monat = 1. bis Monatsletzter).
+// Die Zeitraum-Helfer unten sind rein und deshalb testbar — sync-sqp benutzt
+// dieselben, damit Anzeige und Abruf nie auseinanderlaufen.
 
 const DUENN_IMPRESSIONS = 100; // eigene Impressions darunter => dünne Datenbasis
 const DUENN_CLICKS = 10;
+
+const TAG_MS = 86400000;
+
+export type Periode = "WEEK" | "MONTH";
+
+/** Nimmt beliebige Eingaben entgegen und fällt auf "WEEK" zurück. */
+export function alsPeriode(v: unknown): Periode {
+  return String(v ?? "").toUpperCase() === "MONTH" ? "MONTH" : "WEEK";
+}
+
+function tag(iso: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso ?? ""));
+  if (!m) throw new Error(`Datum im Format YYYY-MM-DD erwartet, bekam: ${iso}`);
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+}
+
+/** Datum als 'YYYY-MM-DD' (UTC). */
+export function isoTag(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+export interface Zeitraum { von: string; bis: string }
+
+/**
+ * Legt ein beliebiges Datum auf die Grenzen SEINER Periode. Amazon lehnt
+ * Zeiträume ab, die nicht auf der Periode liegen — deshalb normalisieren wir
+ * jede Nutzereingabe hier, statt ihr zu vertrauen.
+ */
+export function zeitraumFuer(periode: Periode, datum: string): Zeitraum {
+  const d = tag(datum);
+  if (periode === "MONTH") {
+    const von = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+    const bis = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
+    return { von: isoTag(von), bis: isoTag(bis) };
+  }
+  const von = new Date(d.getTime() - d.getUTCDay() * TAG_MS); // zurück auf Sonntag
+  return { von: isoTag(von), bis: isoTag(new Date(von.getTime() + 6 * TAG_MS)) };
+}
+
+/** Der letzte VOLLSTÄNDIG abgeschlossene Zeitraum vor `heute`. */
+export function letzterZeitraum(periode: Periode, heute?: string): Zeitraum {
+  const d = tag(heute ?? isoTag(new Date()));
+  if (periode === "MONTH") {
+    // Tag 0 des laufenden Monats = letzter Tag des Vormonats.
+    const letzterVormonat = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 0));
+    return zeitraumFuer("MONTH", isoTag(letzterVormonat));
+  }
+  const letzterSamstag = new Date(d.getTime() - (d.getUTCDay() + 1) * TAG_MS);
+  return zeitraumFuer("WEEK", isoTag(letzterSamstag));
+}
+
+/** Auswahlliste für die Oberfläche: die letzten `anzahl` fertigen Zeiträume, neueste zuerst. */
+export function zeitraumListe(periode: Periode, anzahl: number, heute?: string): Zeitraum[] {
+  const liste: Zeitraum[] = [];
+  let z = letzterZeitraum(periode, heute);
+  for (let i = 0; i < Math.max(0, anzahl); i++) {
+    liste.push(z);
+    const davor = new Date(tag(z.von).getTime() - TAG_MS); // ein Tag vor dem Anfang liegt in der Vorperiode
+    z = zeitraumFuer(periode, isoTag(davor));
+  }
+  return liste;
+}
+
+const WOCHEN_AUSWAHL = 26; // ein halbes Jahr
+const MONATE_AUSWAHL = 12;
 
 function quote(zaehler: number, nenner: number): number | null {
   if (!nenner || nenner <= 0) return null;
@@ -70,19 +141,54 @@ export function parseSqpReport(report: any): SqpZeile[] {
   }).filter((z) => z.search_query !== "");
 }
 
-/** Gespeicherte SQP-Zeilen einer ASIN (Volumen absteigend). */
-export async function listeSqp(supabase: any, tenant_id: string, asin: string): Promise<unknown> {
-  if (!asin) return { rows: [], zeitraum: null };
-  const { data, error } = await supabase.from("sqp_rows")
-    .select("search_query, volume, eigene_ctr, markt_ctr, ctr_index, eigene_cvr, markt_cvr, cvr_index, kaufanteil, duenn, zeitraum_von, zeitraum_bis")
-    .eq("tenant_id", tenant_id).eq("asin", asin).order("volume", { ascending: false });
-  if (error) throw new Error(`sqp read: ${error.message}`);
-  const rows = data ?? [];
-  const zeitraum = rows[0] ? { von: rows[0].zeitraum_von, bis: rows[0].zeitraum_bis } : null;
-  return { rows, zeitraum };
+export interface VorhandenerZeitraum extends Zeitraum {
+  periode: Periode;
+  zeilen: number;
+  aktualisiert: string | null;
 }
 
-/** Verkaufte ASINs (für die Auswahl) + Flag, ob schon SQP-Daten vorliegen. */
+/** Welche Zeiträume liegen für diese ASIN schon lokal vor? (Für die Markierung in der Auswahl.) */
+async function vorhandeneZeitraeume(supabase: any, tenant_id: string, asin: string): Promise<VorhandenerZeitraum[]> {
+  const { data, error } = await supabase.rpc("sqp_zeitraeume", { p_tenant: tenant_id, p_asin: asin });
+  if (error) throw new Error(`sqp zeitraeume: ${error.message}`);
+  return (data ?? []).map((r: any) => ({
+    periode: alsPeriode(r.periode),
+    von: String(r.zeitraum_von),
+    bis: String(r.zeitraum_bis),
+    zeilen: Number(r.zeilen ?? 0),
+    aktualisiert: r.aktualisiert ?? null,
+  }));
+}
+
+/**
+ * Gespeicherte SQP-Zeilen einer ASIN für EINEN Zeitraum (Volumen absteigend).
+ * Ohne `von` wird der zuletzt abgerufene Zeitraum dieser Periode gezeigt.
+ */
+export async function listeSqp(
+  supabase: any,
+  tenant_id: string,
+  asin: string,
+  periodeRoh?: unknown,
+  vonRoh?: unknown,
+): Promise<unknown> {
+  const periode = alsPeriode(periodeRoh);
+  if (!asin) return { rows: [], zeitraum: null, periode, vorhanden: [] };
+
+  const vorhanden = await vorhandeneZeitraeume(supabase, tenant_id, asin);
+  const gewuenscht = vonRoh ? zeitraumFuer(periode, String(vonRoh)) : null;
+  const zuletzt = vorhanden.find((v) => v.periode === periode);
+  const zeitraum: Zeitraum | null = gewuenscht ?? (zuletzt ? { von: zuletzt.von, bis: zuletzt.bis } : null);
+  if (!zeitraum) return { rows: [], zeitraum: null, periode, vorhanden };
+
+  const { data, error } = await supabase.from("sqp_rows")
+    .select("search_query, volume, eigene_ctr, markt_ctr, ctr_index, eigene_cvr, markt_cvr, cvr_index, kaufanteil, duenn")
+    .eq("tenant_id", tenant_id).eq("asin", asin).eq("periode", periode).eq("zeitraum_von", zeitraum.von)
+    .order("volume", { ascending: false });
+  if (error) throw new Error(`sqp read: ${error.message}`);
+  return { rows: data ?? [], zeitraum, periode, vorhanden };
+}
+
+/** Verkaufte ASINs (für die Auswahl) + Flag, ob schon SQP-Daten vorliegen, + wählbare Zeiträume. */
 export async function sqpAsins(supabase: any, tenant_id: string): Promise<unknown> {
   const [ordersRes, sqpRes, asinsRes] = await Promise.all([
     supabase.from("orders_history").select("asin, quantity").eq("tenant_id", tenant_id),
@@ -97,13 +203,33 @@ export async function sqpAsins(supabase: any, tenant_id: string): Promise<unknow
   const asins = [...units.entries()].map(([asin, u]) => ({ asin, titel: titel.get(asin) ?? asin, units: u, hat_daten: mitDaten.has(asin) }));
   for (const a of mitDaten) if (!units.has(a)) asins.push({ asin: a, titel: titel.get(a) ?? a, units: 0, hat_daten: true });
   asins.sort((x, y) => (Number(y.hat_daten) - Number(x.hat_daten)) || (y.units - x.units));
-  return { asins };
+
+  return {
+    asins,
+    zeitraeume: {
+      WEEK: zeitraumListe("WEEK", WOCHEN_AUSWAHL),
+      MONTH: zeitraumListe("MONTH", MONATE_AUSWAHL),
+    },
+  };
 }
 
-/** SQP-Report für eine ASIN asynchron anstoßen (läuft ~1–2 Min im Hintergrund). */
-export async function anstossenSqp(supabase: any, tenant_id: string, asin: string): Promise<{ ok: true }> {
+/**
+ * SQP-Report für eine ASIN und einen Zeitraum asynchron anstoßen (läuft ~1–2 Min
+ * im Hintergrund). Ohne `von` wird der letzte abgeschlossene Zeitraum geholt.
+ */
+export async function anstossenSqp(
+  supabase: any,
+  tenant_id: string,
+  args: Record<string, unknown>,
+): Promise<{ ok: true; asin: string; periode: Periode; zeitraum: Zeitraum }> {
+  const asin = String(args?.asin ?? "").trim();
   if (!asin) throw new Error("asin fehlt");
-  const { error } = await supabase.rpc("sqp_anstossen", { p_tenant: tenant_id, p_asin: asin });
+  const periode = alsPeriode(args?.periode);
+  const zeitraum = args?.von ? zeitraumFuer(periode, String(args.von)) : letzterZeitraum(periode);
+
+  const { error } = await supabase.rpc("sqp_anstossen", {
+    p_tenant: tenant_id, p_asin: asin, p_periode: periode, p_von: zeitraum.von, p_bis: zeitraum.bis,
+  });
   if (error) throw new Error(`sqp_anstossen: ${error.message}`);
-  return { ok: true };
+  return { ok: true, asin, periode, zeitraum };
 }

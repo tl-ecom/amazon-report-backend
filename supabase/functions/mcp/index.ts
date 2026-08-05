@@ -90,7 +90,9 @@ Deno.serve(async (req) => {
         case "ertrag": return await ertragVerlauf(supabase, tenant_id);
         case "sqp": {
           const asin = String((pulseArgs?.asin as string) ?? "").trim();
-          return asin ? await listeSqp(supabase, tenant_id, asin) : await sqpAsins(supabase, tenant_id);
+          return asin
+            ? await listeSqp(supabase, tenant_id, asin, pulseArgs?.periode, pulseArgs?.von)
+            : await sqpAsins(supabase, tenant_id);
         }
         case "diagnosen": return await listeDiagnosen(supabase, tenant_id);
         case "aenderungen": return await changeEvents(supabase, tenant_id, { alle: true, ...pulseArgs });

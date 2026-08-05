@@ -276,10 +276,15 @@ const TOOLS: ToolDef[] = [
     description:
       "Search-Query-Performance (Brand Analytics) je ASIN: eigene vs. Markt-CTR/CVR und " +
       "Kaufanteil pro Suchbegriff. Mit 'asin' → die Suchbegriffe dieser ASIN; ohne 'asin' → " +
-      "Liste der ASINs, für die Daten vorliegen.",
+      "Liste der ASINs, für die Daten vorliegen. READ-ONLY: liefert nur bereits abgerufene " +
+      "Zeiträume ('vorhanden' in der Antwort), stößt selbst keinen Report bei Amazon an.",
     inputSchema: {
       type: "object",
-      properties: { asin: { type: "string", description: "ASIN, deren Suchbegriffe geliefert werden. Weglassen für die Liste verfügbarer ASINs." } },
+      properties: {
+        asin: { type: "string", description: "ASIN, deren Suchbegriffe geliefert werden. Weglassen für die Liste verfügbarer ASINs." },
+        periode: { type: "string", enum: ["WEEK", "MONTH"], description: "Wochen- oder Monatssicht. Standard: WEEK." },
+        von: { type: "string", description: "Erster Tag des Zeitraums (YYYY-MM-DD). Weglassen für den zuletzt abgerufenen Zeitraum." },
+      },
       additionalProperties: false,
     },
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("sqp", args) : pulseNichtVerfuegbar()),

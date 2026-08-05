@@ -1,9 +1,12 @@
-// sync-sqp — Brand-Analytics Search Query Performance Report für EINE ASIN ziehen.
+// sync-sqp — Brand-Analytics Search Query Performance Report für EINE ASIN und
+// EINEN Zeitraum ziehen.
 // createReport -> pollen -> Dokument (GZIP-JSON) laden -> parseSqpReport -> sqp_rows.
-// Aufruf wie die anderen Syncs: POST { tenant_id, asin } mit service_role-Bearer.
+// Aufruf wie die anderen Syncs: POST { tenant_id, asin } mit service_role-Bearer,
+// optional { periode: "WEEK"|"MONTH", von: "YYYY-MM-DD" }. Ohne Zeitraum wird die
+// letzte abgeschlossene Woche geholt (so ruft der tägliche Cron auf).
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { parseSqpReport } from "../_shared/sqp.ts";
+import { alsPeriode, letzterZeitraum, parseSqpReport, type Periode, type Zeitraum, zeitraumFuer } from "../_shared/sqp.ts";
 
 const SP_ENDPOINT = "https://sellingpartnerapi-eu.amazon.com";
 const REPORT_TYPE = "GET_BRAND_ANALYTICS_SEARCH_QUERY_PERFORMANCE_REPORT";
@@ -13,8 +16,16 @@ const DEADLINE_MS = 130000;
 Deno.serve(async (req) => {
   const start = Date.now();
   try {
-    const { tenant_id, asin } = await req.json().catch(() => ({}));
+    const body = await req.json().catch(() => ({}));
+    const { tenant_id, asin } = body;
     if (!tenant_id || !asin) return json({ error: "tenant_id und asin nötig" }, 400);
+
+    // Periode + Zeitraum bestimmen. Die Grenzen kommen IMMER aus zeitraumFuer —
+    // Amazon lehnt Zeiträume ab, die nicht genau auf der Periode liegen.
+    const periode = alsPeriode(body.periode);
+    const zeitraum = body.von ? zeitraumSicher(periode, String(body.von)) : letzterZeitraum(periode);
+    if (!zeitraum) return json({ error: "Zeitraum ungültig — 'von' als YYYY-MM-DD erwartet", von: body.von }, 400);
+    const { von, bis } = zeitraum;
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: ctx, error: ctxErr } = await supabase.from("auth_contexts")
@@ -29,8 +40,6 @@ Deno.serve(async (req) => {
     const accessToken = await holeAccessToken(clientId, clientSecret, refreshToken);
     if (!accessToken) return json({ error: "Access-Token fehlgeschlagen" }, 502);
 
-    const { von, bis } = letzteWoche();
-
     // 1) Report anfordern
     const createResp = await fetch(`${SP_ENDPOINT}/reports/2021-06-30/reports`, {
       method: "POST",
@@ -38,8 +47,8 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         reportType: REPORT_TYPE,
         marketplaceIds: [ctx.marketplace_id],
-        dataStartTime: von, dataEndTime: bis,
-        reportOptions: { reportPeriod: "WEEK", asin },
+        dataStartTime: `${von}T00:00:00Z`, dataEndTime: `${bis}T23:59:59Z`,
+        reportOptions: { reportPeriod: periode, asin },
       }),
     });
     const createData = await createResp.json().catch(() => ({}));
@@ -88,30 +97,30 @@ Deno.serve(async (req) => {
     const report = JSON.parse(new TextDecoder("utf-8").decode(bytes));
     const zeilen = parseSqpReport(report);
 
-    // 4) Speichern: alte Zeilen der ASIN ersetzen
-    await supabase.from("sqp_rows").delete().eq("tenant_id", tenant_id).eq("asin", asin);
+    // 4) Speichern: nur die Zeilen DIESES Zeitraums ersetzen — ältere Wochen und
+    // Monate bleiben stehen, damit man in der App zurückblättern kann.
+    await supabase.from("sqp_rows").delete()
+      .eq("tenant_id", tenant_id).eq("asin", asin).eq("periode", periode).eq("zeitraum_von", von);
     if (zeilen.length > 0) {
       const jetzt = new Date().toISOString();
-      const vonD = von.slice(0, 10), bisD = bis.slice(0, 10);
       const { error: insErr } = await supabase.from("sqp_rows").insert(
-        zeilen.map((z) => ({ tenant_id, asin, ...z, zeitraum_von: vonD, zeitraum_bis: bisD, updated_at: jetzt })),
+        zeilen.map((z) => ({ tenant_id, asin, periode, ...z, zeitraum_von: von, zeitraum_bis: bis, updated_at: jetzt })),
       );
       if (insErr) return json({ error: "Insert fehlgeschlagen", detail: insErr.message }, 500);
     }
-    return json({ ok: true, asin, zeilen: zeilen.length, zeitraum: { von: von.slice(0, 10), bis: bis.slice(0, 10) } });
+    return json({ ok: true, asin, periode, zeilen: zeilen.length, zeitraum: { von, bis } });
   } catch (e) {
     return json({ error: "Ausnahme", detail: String(e) }, 500);
   }
 });
 
-// Letzte vollständige Woche (So–Sa) in ISO.
-function letzteWoche(): { von: string; bis: string } {
-  const now = new Date();
-  const heute = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const dow = heute.getUTCDay(); // 0=So
-  const bis = new Date(heute); bis.setUTCDate(heute.getUTCDate() - dow - 1); // letzter Samstag vor dieser Woche
-  const von = new Date(bis); von.setUTCDate(bis.getUTCDate() - 6); // zugehöriger Sonntag
-  return { von: von.toISOString(), bis: bis.toISOString() };
+/** Wie zeitraumFuer, gibt bei unbrauchbarem Datum aber null statt zu werfen. */
+function zeitraumSicher(periode: Periode, datum: string): Zeitraum | null {
+  try {
+    return zeitraumFuer(periode, datum);
+  } catch {
+    return null;
+  }
 }
 
 async function holeAccessToken(clientId: string, clientSecret: string, refreshToken: string): Promise<string | null> {

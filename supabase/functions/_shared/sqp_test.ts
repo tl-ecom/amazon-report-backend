@@ -1,5 +1,5 @@
-import { assertEquals } from "jsr:@std/assert@1";
-import { parseSqpReport } from "./sqp.ts";
+import { assertEquals, assertThrows } from "jsr:@std/assert@1";
+import { alsPeriode, letzterZeitraum, parseSqpReport, zeitraumFuer, zeitraumListe } from "./sqp.ts";
 
 const beispiel = {
   dataByAsin: [
@@ -56,4 +56,55 @@ Deno.test("keine Division durch 0", () => {
   assertEquals(z[0].eigene_ctr, null);
   assertEquals(z[0].markt_ctr, null);
   assertEquals(z[0].ctr_index, null);
+});
+
+/* --- Zeiträume ------------------------------------------------------------ */
+
+Deno.test("Woche wird auf Sonntag–Samstag gelegt", () => {
+  // 2026-07-22 ist ein Mittwoch.
+  assertEquals(zeitraumFuer("WEEK", "2026-07-22"), { von: "2026-07-19", bis: "2026-07-25" });
+  // Ränder bleiben in ihrer eigenen Woche.
+  assertEquals(zeitraumFuer("WEEK", "2026-07-19"), { von: "2026-07-19", bis: "2026-07-25" });
+  assertEquals(zeitraumFuer("WEEK", "2026-07-25"), { von: "2026-07-19", bis: "2026-07-25" });
+});
+
+Deno.test("Monat wird auf 1. bis Monatsletzten gelegt (auch Februar/Schaltjahr)", () => {
+  assertEquals(zeitraumFuer("MONTH", "2026-07-22"), { von: "2026-07-01", bis: "2026-07-31" });
+  assertEquals(zeitraumFuer("MONTH", "2026-02-14"), { von: "2026-02-01", bis: "2026-02-28" });
+  assertEquals(zeitraumFuer("MONTH", "2028-02-14"), { von: "2028-02-01", bis: "2028-02-29" });
+});
+
+Deno.test("letzter Zeitraum ist immer abgeschlossen", () => {
+  // Mittwoch, 2026-08-05 -> letzte volle Woche endete Samstag, 2026-08-01.
+  assertEquals(letzterZeitraum("WEEK", "2026-08-05"), { von: "2026-07-26", bis: "2026-08-01" });
+  // Sonntag: die gestern zu Ende gegangene Woche, nicht die laufende.
+  assertEquals(letzterZeitraum("WEEK", "2026-08-02"), { von: "2026-07-26", bis: "2026-08-01" });
+  // Samstag: die laufende Woche endet heute und zählt noch nicht.
+  assertEquals(letzterZeitraum("WEEK", "2026-08-01"), { von: "2026-07-19", bis: "2026-07-25" });
+  assertEquals(letzterZeitraum("MONTH", "2026-08-05"), { von: "2026-07-01", bis: "2026-07-31" });
+  assertEquals(letzterZeitraum("MONTH", "2026-01-15"), { von: "2025-12-01", bis: "2025-12-31" });
+});
+
+Deno.test("Auswahlliste zählt lückenlos rückwärts", () => {
+  const wochen = zeitraumListe("WEEK", 3, "2026-08-05");
+  assertEquals(wochen, [
+    { von: "2026-07-26", bis: "2026-08-01" },
+    { von: "2026-07-19", bis: "2026-07-25" },
+    { von: "2026-07-12", bis: "2026-07-18" },
+  ]);
+  const monate = zeitraumListe("MONTH", 3, "2026-03-10");
+  assertEquals(monate, [
+    { von: "2026-02-01", bis: "2026-02-28" },
+    { von: "2026-01-01", bis: "2026-01-31" },
+    { von: "2025-12-01", bis: "2025-12-31" },
+  ]);
+  assertEquals(zeitraumListe("WEEK", 0, "2026-08-05"), []);
+});
+
+Deno.test("Periode fällt auf WEEK zurück, Datum wird geprüft", () => {
+  assertEquals(alsPeriode("MONTH"), "MONTH");
+  assertEquals(alsPeriode("month"), "MONTH");
+  assertEquals(alsPeriode("QUARTER"), "WEEK");
+  assertEquals(alsPeriode(undefined), "WEEK");
+  assertThrows(() => zeitraumFuer("WEEK", "letzte Woche"));
 });

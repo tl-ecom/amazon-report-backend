@@ -319,7 +319,7 @@ Deno.serve(async (req) => {
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
       if (action === "sqp_laden") {
-        const r = await anstossenSqp(service, tenantId, String((args as any)?.asin ?? ""));
+        const r = await anstossenSqp(service, tenantId, (args ?? {}) as Record<string, unknown>);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
       if (action === "diagnosen_aktualisieren") {
@@ -527,7 +527,8 @@ Deno.serve(async (req) => {
       return json({ ok: true, resource, tenant_id: tenantId, data: await sqpAsins(service, tenantId) });
     }
     if (resource === "sqp") {
-      return json({ ok: true, resource, tenant_id: tenantId, data: await listeSqp(service, tenantId, String((args as any)?.asin ?? "")) });
+      const a = (args ?? {}) as Record<string, unknown>;
+      return json({ ok: true, resource, tenant_id: tenantId, data: await listeSqp(service, tenantId, String(a.asin ?? ""), a.periode, a.von) });
     }
     if (resource === "reimbursements_radar") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await radarDaten(service, tenantId) });
