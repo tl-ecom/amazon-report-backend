@@ -125,3 +125,8 @@ select s.tenant_id, s.asin, s.periode, s.zeitraum_von, s.zeitraum_bis,
 from public.sqp_rows s
 group by s.tenant_id, s.asin, s.periode, s.zeitraum_von, s.zeitraum_bis
 on conflict (tenant_id, asin, periode, zeitraum_von) do nothing;
+
+-- PostgREST kennt neue Tabellen erst nach einem Reload seines Schema-Caches.
+-- Ohne das lief sync-sqp ins Leere: der Upsert schlug fehl, der Lauf blieb auf
+-- 'laeuft' stehen — und weil merkeLauf den Fehler bewusst nur loggt, still.
+notify pgrst, 'reload schema';
