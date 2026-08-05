@@ -15,7 +15,7 @@
 // Die Rechen-/Parselogik ist in _shared/ads.ts voll unit-getestet.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { baueSpReportRequest, istVorlaeufig, VOLATIL_TAGE, ymd } from "../_shared/ads.ts";
+import { baueSpReportRequest, istVorlaeufig, schreibeAdsVerlauf, VOLATIL_TAGE, ymd } from "../_shared/ads.ts";
 
 const ADS_ENDPOINT = "https://advertising-api-eu.amazon.com";
 const LWA_TOKEN_URL = "https://api.amazon.com/auth/o2/token";
@@ -214,6 +214,14 @@ Deno.serve(async (req) => {
       return json({ error: "Speichern fehlgeschlagen", detail: insErr.message }, 500);
     }
 
+    // Tagesreihe fortschreiben. Amazon haelt Ads-Daten nur ~95 Tage vor — was
+    // hier nicht landet, ist danach unwiederbringlich weg.
+    //
+    // Bewusst NICHT blockierend: Der Rohreport liegt bereits in report_data, ein
+    // Fehler beim Verdichten darf den Job nicht auf FATAL setzen. Das Sync-Fenster
+    // ueberlappt taeglich, der naechste Lauf holt dieselben Tage ohnehin erneut.
+    const verlauf = await schreibeAdsVerlauf(supabase, tenant_id, rows);
+
     await supabase
       .from("report_jobs")
       .update({ status: "DONE", data_timestamp: dataTimestamp, completed_at: new Date().toISOString() })
@@ -226,6 +234,8 @@ Deno.serve(async (req) => {
       report_id: reportId,
       report_type: REPORT_TYPE,
       zeilen: rows.length,
+      verlauf_zeilen: verlauf.zeilen,
+      ...(verlauf.fehler ? { verlauf_fehler: verlauf.fehler } : {}),
       is_provisional: isProvisional,
       dauer_s: Math.round((Date.now() - startedAt) / 1000),
       hinweis: "Ads-Report abgeholt und gespeichert. Kennzahlen über MCP-Tool get_ads_overview.",
