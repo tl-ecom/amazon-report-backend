@@ -141,23 +141,74 @@ export function parseSqpReport(report: any): SqpZeile[] {
   }).filter((z) => z.search_query !== "");
 }
 
+/**
+ * Stand eines Abrufs. "laeuft" heißt: angestoßen, noch kein Ergebnis. "leer"
+ * heißt: Amazon hat geantwortet, aber ohne Suchanfragen — das ist etwas anderes
+ * als "fehler" und die Oberfläche sagt es auch anders.
+ */
+export type LaufStatus = "laeuft" | "fertig" | "leer" | "fehler";
+
+export interface Lauf {
+  status: LaufStatus;
+  meldung: string | null;
+  gestartet: string | null;
+  beendet: string | null;
+}
+
 export interface VorhandenerZeitraum extends Zeitraum {
   periode: Periode;
   zeilen: number;
   aktualisiert: string | null;
+  lauf: Lauf | null;
 }
 
-/** Welche Zeiträume liegen für diese ASIN schon lokal vor? (Für die Markierung in der Auswahl.) */
+function alsLaufStatus(v: unknown): LaufStatus | null {
+  const s = String(v ?? "");
+  return s === "laeuft" || s === "fertig" || s === "leer" || s === "fehler" ? s : null;
+}
+
+/** Welche Zeiträume wurden für diese ASIN schon geholt oder versucht? */
 async function vorhandeneZeitraeume(supabase: any, tenant_id: string, asin: string): Promise<VorhandenerZeitraum[]> {
   const { data, error } = await supabase.rpc("sqp_zeitraeume", { p_tenant: tenant_id, p_asin: asin });
   if (error) throw new Error(`sqp zeitraeume: ${error.message}`);
-  return (data ?? []).map((r: any) => ({
-    periode: alsPeriode(r.periode),
-    von: String(r.zeitraum_von),
-    bis: String(r.zeitraum_bis),
-    zeilen: Number(r.zeilen ?? 0),
-    aktualisiert: r.aktualisiert ?? null,
-  }));
+  return (data ?? []).map((r: any) => {
+    const status = alsLaufStatus(r.status);
+    return {
+      periode: alsPeriode(r.periode),
+      von: String(r.zeitraum_von),
+      bis: String(r.zeitraum_bis),
+      zeilen: Number(r.zeilen ?? 0),
+      aktualisiert: r.aktualisiert ?? null,
+      lauf: status
+        ? { status, meldung: r.meldung ?? null, gestartet: r.gestartet ?? null, beendet: r.beendet ?? null }
+        : null,
+    };
+  });
+}
+
+/**
+ * Ergebnis eines Abrufs festhalten. sync-sqp ruft das auf JEDEM Ausgang auf —
+ * ein Abruf, der still verschwindet, lässt die Oberfläche ins Leere pollen.
+ */
+export async function merkeLauf(
+  supabase: any,
+  tenant_id: string,
+  asin: string,
+  periode: Periode,
+  zeitraum: Zeitraum,
+  ergebnis: { status: LaufStatus; zeilen?: number; meldung?: string; report_id?: string | null },
+): Promise<void> {
+  const { error } = await supabase.from("sqp_laeufe").upsert({
+    tenant_id, asin, periode,
+    zeitraum_von: zeitraum.von, zeitraum_bis: zeitraum.bis,
+    status: ergebnis.status,
+    zeilen: ergebnis.zeilen ?? null,
+    meldung: ergebnis.meldung ?? null,
+    report_id: ergebnis.report_id ?? null,
+    beendet: ergebnis.status === "laeuft" ? null : new Date().toISOString(),
+  }, { onConflict: "tenant_id,asin,periode,zeitraum_von" });
+  // Bewusst nur geloggt: der Report selbst ist wichtiger als sein Statuseintrag.
+  if (error) console.error("sqp_laeufe schreiben fehlgeschlagen:", error.message);
 }
 
 /**
@@ -172,20 +223,24 @@ export async function listeSqp(
   vonRoh?: unknown,
 ): Promise<unknown> {
   const periode = alsPeriode(periodeRoh);
-  if (!asin) return { rows: [], zeitraum: null, periode, vorhanden: [] };
+  if (!asin) return { rows: [], zeitraum: null, periode, lauf: null, vorhanden: [] };
 
   const vorhanden = await vorhandeneZeitraeume(supabase, tenant_id, asin);
   const gewuenscht = vonRoh ? zeitraumFuer(periode, String(vonRoh)) : null;
-  const zuletzt = vorhanden.find((v) => v.periode === periode);
+  const zuletzt = vorhanden.find((v) => v.periode === periode && v.zeilen > 0);
   const zeitraum: Zeitraum | null = gewuenscht ?? (zuletzt ? { von: zuletzt.von, bis: zuletzt.bis } : null);
-  if (!zeitraum) return { rows: [], zeitraum: null, periode, vorhanden };
+  if (!zeitraum) return { rows: [], zeitraum: null, periode, lauf: null, vorhanden };
+
+  // Stand des gewählten Zeitraums — daran erkennt die Oberfläche sofort, ob noch
+  // gewartet wird oder warum nichts kommt, statt blind weiterzupollen.
+  const lauf = vorhanden.find((v) => v.periode === periode && v.von === zeitraum.von)?.lauf ?? null;
 
   const { data, error } = await supabase.from("sqp_rows")
     .select("search_query, volume, eigene_ctr, markt_ctr, ctr_index, eigene_cvr, markt_cvr, cvr_index, kaufanteil, duenn")
     .eq("tenant_id", tenant_id).eq("asin", asin).eq("periode", periode).eq("zeitraum_von", zeitraum.von)
     .order("volume", { ascending: false });
   if (error) throw new Error(`sqp read: ${error.message}`);
-  return { rows: data ?? [], zeitraum, periode, vorhanden };
+  return { rows: data ?? [], zeitraum, periode, lauf, vorhanden };
 }
 
 /** Verkaufte ASINs (für die Auswahl) + Flag, ob schon SQP-Daten vorliegen, + wählbare Zeiträume. */
