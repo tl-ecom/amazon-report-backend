@@ -4,7 +4,7 @@
 // abgefragt werden. Die Zeilenstruktur entspricht der v3-Spec (spAdvertisedProduct).
 
 import { assertEquals, assertAlmostEquals } from "jsr:@std/assert@1";
-import { baueAdsOverview, baueSpReportRequest, istVorlaeufig, VOLATIL_TAGE, ymd } from "./ads.ts";
+import { baueAdsDailyRows, baueAdsOverview, baueSpReportRequest, istVorlaeufig, VOLATIL_TAGE, ymd } from "./ads.ts";
 
 function zeile(o: {
   date?: string;
@@ -160,4 +160,68 @@ Deno.test("fehlende Felder zaehlen als 0, nicht NaN", () => {
   const o = baueAdsOverview([{ campaignId: "C1", advertisedAsin: "B1" }], ts, false);
   assertEquals(o.gesamt.impressions, 0);
   assertEquals(o.gesamt.spend, 0);
+});
+
+// --- baueAdsDailyRows (Tagesreihe fuer ads_daily) ---
+
+const T = "11111111-1111-1111-1111-111111111111";
+
+Deno.test("ads_daily: eine Zeile je Tag/Kampagne/ASIN, Geld in Cent", () => {
+  const r = baueAdsDailyRows(T, [
+    zeile({ date: "2026-07-01", campaignId: "C1", asin: "B001", impressions: 100, clicks: 5, cost: 1.23, sales: 9.99, orders: 1, units: 2 }),
+    zeile({ date: "2026-07-02", campaignId: "C1", asin: "B001", impressions: 50 }),
+  ]);
+  assertEquals(r.length, 2);
+  const tag1 = r.find((x) => x.datum === "2026-07-01")!;
+  assertEquals(tag1.tenant_id, T);
+  assertEquals(tag1.impressions, 100);
+  assertEquals(tag1.spend_cents, 123);
+  assertEquals(tag1.sales_cents, 999);
+  assertEquals(tag1.orders, 1);
+  assertEquals(tag1.einheiten, 2);
+});
+
+Deno.test("ads_daily: gleicher Schluessel wird summiert, nicht dupliziert", () => {
+  // Der Upsert ersetzt die Zeile — doppelte Schluessel muessen vorher zur
+  // Tagessumme verschmelzen, sonst ginge einer der Betraege verloren.
+  const r = baueAdsDailyRows(T, [
+    zeile({ date: "2026-07-01", campaignId: "C1", asin: "B001", clicks: 3, cost: 1.0 }),
+    zeile({ date: "2026-07-01", campaignId: "C1", asin: "B001", clicks: 4, cost: 2.5 }),
+  ]);
+  assertEquals(r.length, 1);
+  assertEquals(r[0].clicks, 7);
+  assertEquals(r[0].spend_cents, 350);
+});
+
+Deno.test("ads_daily: verschiedene ASINs derselben Kampagne bleiben getrennt", () => {
+  const r = baueAdsDailyRows(T, [
+    zeile({ date: "2026-07-01", campaignId: "C1", asin: "B001", clicks: 1 }),
+    zeile({ date: "2026-07-01", campaignId: "C1", asin: "B002", clicks: 2 }),
+  ]);
+  assertEquals(r.length, 2);
+});
+
+Deno.test("ads_daily: Schluesselspalten sind Leerstring statt null", () => {
+  // null in einer Schluesselspalte wuerde die Eindeutigkeit des Primaerschluessels
+  // aushebeln (null <> null in Postgres).
+  const r = baueAdsDailyRows(T, [{ date: "2026-07-01", campaignId: "C1", clicks: 1 }]);
+  assertEquals(r.length, 1);
+  assertEquals(r[0].ad_group_id, "");
+  assertEquals(r[0].asin, "");
+  assertEquals(r[0].sku, "");
+});
+
+Deno.test("ads_daily: Zeilen ohne Datum oder Kampagne werden verworfen", () => {
+  const r = baueAdsDailyRows(T, [
+    { campaignId: "C1", clicks: 9 }, // kein Datum
+    { date: "2026-07-01", clicks: 9 }, // keine Kampagne
+    { date: "kaputt", campaignId: "C1", clicks: 9 }, // unlesbares Datum
+    zeile({ date: "2026-07-01", campaignId: "C1", clicks: 1 }),
+  ]);
+  assertEquals(r.length, 1);
+  assertEquals(r[0].clicks, 1);
+});
+
+Deno.test("ads_daily: leerer Report ergibt keine Zeilen", () => {
+  assertEquals(baueAdsDailyRows(T, []).length, 0);
 });

@@ -233,3 +233,110 @@ export function baueAdsOverview(
     warnungen,
   };
 }
+
+// --- Tagesverlauf (ads_daily) ---
+//
+// Trennung wie in history.ts: der Row-Builder ist rein (Zeilen -> Zeilen) und
+// damit testbar, nur schreibeAdsVerlauf fasst die DB an.
+
+export interface AdsVerlaufErgebnis {
+  zeilen: number;
+  fehler?: string;
+}
+
+/**
+ * Report-Zeilen → ads_daily-Zeilen.
+ *
+ * Aggregiert je (Datum, Kampagne, Anzeigengruppe, ASIN, SKU), weil derselbe
+ * Schlüssel im Report mehrfach auftreten kann. Wichtig: Der Upsert ERSETZT die
+ * Zeile später, addiert nicht. Was hier herauskommt, muss deshalb die volle
+ * Tagessumme für diesen Schlüssel sein — kein Delta.
+ *
+ * Zeilen ohne Datum oder Kampagne werden verworfen: ohne beides gibt es keinen
+ * tragfähigen Schlüssel, und geraten wird hier nichts.
+ */
+export function baueAdsDailyRows(
+  tenant_id: string,
+  rows: Record<string, any>[]
+): Record<string, unknown>[] {
+  interface Eintrag {
+    datum: string;
+    campaign_id: string;
+    ad_group_id: string;
+    asin: string;
+    sku: string;
+    campaign_name: string | null;
+    akku: AdsAkku;
+  }
+  const proSchluessel = new Map<string, Eintrag>();
+
+  for (const r of rows) {
+    const datum = String(r.date ?? "").trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(datum)) continue;
+
+    const campaign_id = String(r.campaignId ?? "").trim();
+    if (!campaign_id) continue;
+
+    // Leerstring statt null — die Spalten sind Teil des Primärschlüssels.
+    const ad_group_id = String(r.adGroupId ?? "").trim();
+    const asin = String(r.advertisedAsin ?? "").trim();
+    const sku = String(r.advertisedSku ?? "").trim();
+    const name = String(r.campaignName ?? "").trim();
+
+    // Nullbyte als Trenner: SKUs duerfen Leerzeichen und Bindestriche enthalten,
+    // ein harmloseres Trennzeichen koennte zwei Schluessel verschmelzen lassen.
+    const schluessel = [datum, campaign_id, ad_group_id, asin, sku].join("\u0000");
+
+    let e = proSchluessel.get(schluessel);
+    if (!e) {
+      e = { datum, campaign_id, ad_group_id, asin, sku, campaign_name: name || null, akku: new AdsAkku() };
+      proSchluessel.set(schluessel, e);
+    }
+    // Erste nicht-leere Benennung gewinnt; Amazon lässt das Feld gelegentlich leer.
+    if (!e.campaign_name && name) e.campaign_name = name;
+    e.akku.add(r);
+  }
+
+  const jetzt = new Date().toISOString();
+  return [...proSchluessel.values()].map((e) => ({
+    tenant_id,
+    datum: e.datum,
+    campaign_id: e.campaign_id,
+    ad_group_id: e.ad_group_id,
+    asin: e.asin,
+    sku: e.sku,
+    campaign_name: e.campaign_name,
+    impressions: e.akku.impressions,
+    clicks: e.akku.clicks,
+    spend_cents: e.akku.spendCents,
+    sales_cents: e.akku.salesCents,
+    orders: e.akku.orders,
+    einheiten: e.akku.einheiten,
+    updated_at: jetzt,
+  }));
+}
+
+/**
+ * Schreibt die Tagesreihe per UPSERT. Einziger Teil dieses Moduls, der die DB
+ * anfasst. Batchweise, weil ein 30-Tage-Fenster bei vielen ASINs schnell
+ * mehrere tausend Zeilen ergibt.
+ */
+export async function schreibeAdsVerlauf(
+  supabase: any,
+  tenant_id: string,
+  rows: Record<string, any>[]
+): Promise<AdsVerlaufErgebnis> {
+  const zeilen = baueAdsDailyRows(tenant_id, rows);
+  if (zeilen.length === 0) return { zeilen: 0 };
+
+  const BATCH = 500;
+  for (let i = 0; i < zeilen.length; i += BATCH) {
+    const { error } = await supabase
+      .from("ads_daily")
+      .upsert(zeilen.slice(i, i + BATCH), {
+        onConflict: "tenant_id,datum,campaign_id,ad_group_id,asin,sku",
+      });
+    if (error) return { zeilen: 0, fehler: `ads_daily: ${error.message}` };
+  }
+  return { zeilen: zeilen.length };
+}
