@@ -25,14 +25,29 @@ import { listeSqp, sqpAsins } from "../_shared/sqp.ts";
 import { listeDiagnosen } from "../_shared/diagnostics.ts";
 import { changeEvents } from "../_shared/flightrecorder.ts";
 import { strategieUebersicht } from "../_shared/strategie_lauf.ts";
-import { oauthBasis, ressourcenMetadatenUrl } from "../_shared/oauth.ts";
+import { mcpPfadRest, mcpRessource, oauthBasis, ressourcenMetadatenUrlFuer } from "../_shared/oauth.ts";
+
+// Browser-basierte MCP-Clients schicken vor dem POST einen CORS-Preflight. Ohne
+// diese Header bricht die Verbindung ab, bevor überhaupt ein JSON-RPC-Request
+// stattfindet — der Client meldet dann nur „Server nicht erreichbar".
+// WWW-Authenticate muss exponiert werden, sonst sieht der Client den Hinweis auf
+// die Resource-Metadaten nicht und findet den OAuth-Flow nicht.
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, content-type, mcp-protocol-version, mcp-session-id",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Expose-Headers": "WWW-Authenticate, mcp-session-id",
+  "Access-Control-Max-Age": "86400",
+};
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+
   // MCP spricht ausschließlich POST. GET/anderes klar abweisen.
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Nur POST" }), {
       status: 405,
-      headers: { "Content-Type": "application/json", "Allow": "POST" },
+      headers: { ...CORS, "Content-Type": "application/json", "Allow": "POST" },
     });
   }
 
@@ -46,14 +61,19 @@ Deno.serve(async (req) => {
   if (!tenant_id) {
     // 401 mit WWW-Authenticate + resource_metadata (RFC 9728), damit MCP-Clients
     // den OAuth-Flow finden. Der statische Bearer-Token (mcp_tokens) bleibt gültig.
-    const metaUrl = ressourcenMetadatenUrl(oauthBasis().issuer);
+    //
+    // Die Metadaten-URL nennt die TATSÄCHLICH aufgerufene Ressource inklusive
+    // Tenant-Slug. Sonst antwortet der AS mit der blanken Basis-URL, der Client
+    // vergleicht sie mit seiner konfigurierten URL und verwirft sie als fremd.
+    const ressource = mcpRessource(oauthBasis().resource, mcpPfadRest(new URL(req.url).pathname));
     return new Response(
       JSON.stringify(protokollFehler(null, "Ungültiger oder fehlender Bearer-Token")),
       {
         status: 401,
         headers: {
+          ...CORS,
           "Content-Type": "application/json",
-          "WWW-Authenticate": `Bearer resource_metadata="${metaUrl}"`,
+          "WWW-Authenticate": `Bearer resource_metadata="${ressourcenMetadatenUrlFuer(ressource)}"`,
         },
       }
     );
@@ -110,12 +130,12 @@ Deno.serve(async (req) => {
       if (a !== null) antworten.push(a);
     }
     // Nur Notifications im Batch → 202 ohne Body (MCP-konform).
-    if (antworten.length === 0) return new Response(null, { status: 202 });
+    if (antworten.length === 0) return new Response(null, { status: 202, headers: CORS });
     return json(antworten);
   }
 
   const antwort = await dispatch(body as Record<string, unknown>, ctx);
-  if (antwort === null) return new Response(null, { status: 202 }); // reine Notification
+  if (antwort === null) return new Response(null, { status: 202, headers: CORS }); // reine Notification
   return json(antwort);
 });
 
@@ -167,5 +187,5 @@ async function sha256Hex(s: string): Promise<string> {
 }
 
 function json(obj: unknown, status = 200) {
-  return new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json" } });
+  return new Response(JSON.stringify(obj), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 }

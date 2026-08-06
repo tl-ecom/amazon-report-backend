@@ -20,7 +20,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
-  baueAsMetadata, baueResourceMetadata, oauthBasis, pkceStimmt, pruefeAuthorizeParams,
+  baueAsMetadata, baueResourceMetadata, mcpRessource, oauthBasis, pkceStimmt, pruefeAuthorizeParams,
   pruefeRedirectUris, redirectMitCode, sha256Hex, zufallsToken,
 } from "../_shared/oauth.ts";
 
@@ -60,7 +60,18 @@ Deno.serve(async (req) => {
   const { issuer, resource } = oauthBasis();
 
   if (req.method === "GET" && path.endsWith("/.well-known/oauth-authorization-server")) return json(baueAsMetadata(issuer));
-  if (req.method === "GET" && path.endsWith("/.well-known/oauth-protected-resource")) return json(baueResourceMetadata(resource, issuer));
+
+  // Protected-Resource-Metadaten. Kein endsWith: nach dem well-known-Teil kann
+  // der Ressourcen-Pfad folgen (RFC 9728) — daraus kommt der Tenant-Slug, damit
+  // `resource` exakt die aufgerufene MCP-URL nennt statt nur die Basis.
+  const PR = "/.well-known/oauth-protected-resource";
+  const prIdx = path.indexOf(PR);
+  if (req.method === "GET" && prIdx >= 0) {
+    // rest ist "" (Aufruf am Issuer), "/functions/v1/mcp/<slug>" (RFC-9728-Form)
+    // oder bereits "/<slug>" — alle drei führen auf denselben Slug.
+    const rest = path.slice(prIdx + PR.length).replace(/^\/functions\/v1\/mcp/, "");
+    return json(baueResourceMetadata(mcpRessource(resource, rest), issuer));
+  }
   if (req.method === "POST" && path.endsWith("/register")) return dcrRegister(req);
   if (path.endsWith("/authorize")) {
     return req.method === "GET" ? authorizeGet(req) : json({ error: "invalid_request", error_description: "GET erwartet" }, 405);

@@ -1,7 +1,8 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert@1";
 import {
-  baueAsMetadata, baueResourceMetadata, escHtml, pkceS256, pkceStimmt, pruefeAuthorizeParams,
-  pruefeRedirectUris, pruefeTicket, redirectMitCode, ressourcenMetadatenUrl, signeTicket,
+  baueAsMetadata, baueResourceMetadata, escHtml, mcpPfadRest, mcpRessource, pkceS256, pkceStimmt,
+  pruefeAuthorizeParams, pruefeRedirectUris, pruefeTicket, redirectMitCode, ressourcenMetadatenUrl,
+  ressourcenMetadatenUrlFuer, signeTicket,
 } from "./oauth.ts";
 
 Deno.test("AS-Metadaten: Endpunkte relativ zum Issuer, PKCE S256, public client", () => {
@@ -22,6 +23,32 @@ Deno.test("Resource-Metadaten verweisen auf den AS", () => {
 
 Deno.test("Resource-Metadaten-URL", () => {
   assertEquals(ressourcenMetadatenUrl("https://h/o"), "https://h/o/.well-known/oauth-protected-resource");
+});
+
+Deno.test("mcpPfadRest: Slug hinter /functions/v1/mcp", () => {
+  assertEquals(mcpPfadRest("/functions/v1/mcp/vaneja-4c331e"), "/vaneja-4c331e");
+  assertEquals(mcpPfadRest("/functions/v1/mcp"), "");
+  assertEquals(mcpPfadRest("/functions/v1/mcp/"), "/");
+  assertEquals(mcpPfadRest("/functions/v1/api"), "");
+});
+
+Deno.test("mcpRessource: Basis + Slug, ohne Slug bleibt die Basis", () => {
+  const b = "https://h/functions/v1/mcp";
+  assertEquals(mcpRessource(b, "/vaneja-4c331e"), "https://h/functions/v1/mcp/vaneja-4c331e");
+  assertEquals(mcpRessource(b, "vaneja-4c331e"), "https://h/functions/v1/mcp/vaneja-4c331e");
+  assertEquals(mcpRessource(b, "/"), b);
+  assertEquals(mcpRessource(b, ""), b);
+});
+
+Deno.test("Metadaten-URL nach RFC 9728: well-known ZWISCHEN Host und Pfad", () => {
+  assertEquals(
+    ressourcenMetadatenUrlFuer("https://h/functions/v1/mcp/vaneja-4c331e"),
+    "https://h/.well-known/oauth-protected-resource/functions/v1/mcp/vaneja-4c331e",
+  );
+  assertEquals(
+    ressourcenMetadatenUrlFuer("https://h/functions/v1/mcp"),
+    "https://h/.well-known/oauth-protected-resource/functions/v1/mcp",
+  );
 });
 
 Deno.test("redirect_uris: HTTPS ok, localhost-HTTP ok", () => {

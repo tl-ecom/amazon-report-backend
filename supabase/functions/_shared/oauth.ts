@@ -13,9 +13,40 @@ export function oauthBasis(): { issuer: string; resource: string } {
   return { issuer, resource };
 }
 
-/** URL der Protected-Resource-Metadaten (fürs WWW-Authenticate-Header von mcp). */
+/** URL der Protected-Resource-Metadaten am Issuer (zweite, ebenfalls bediente Form). */
 export function ressourcenMetadatenUrl(issuer: string): string {
   return `${issuer}/.well-known/oauth-protected-resource`;
+}
+
+/**
+ * Alles, was hinter `/functions/v1/mcp` steht — der Tenant-Slug der aufgerufenen
+ * MCP-URL (z. B. `/vaneja-4c331e`). Leerstring, wenn ohne Slug aufgerufen.
+ *
+ * Der Slug ist reine Kosmetik für die Anzeige im Client (die Tenant-Auflösung
+ * läuft ausschließlich über den Bearer-Token), muss aber in den Metadaten
+ * auftauchen: RFC 9728 verlangt, dass `resource` der KANONISCHE URI des Servers
+ * ist. Meldet der Server `…/mcp` während der Client `…/mcp/<slug>` aufruft,
+ * wertet ein strenger Client das als fremde Ressource und bricht ab.
+ */
+export function mcpPfadRest(pfad: string): string {
+  const m = pfad.match(/\/functions\/v1\/mcp(\/.*)?$/);
+  return m?.[1] ?? "";
+}
+
+/** Konkrete MCP-Ressourcen-URL: Basis + Slug (ohne Slug = Basis). */
+export function mcpRessource(basis: string, pfadRest: string): string {
+  const rest = pfadRest.replace(/^\/+/, "").replace(/\/+$/, "");
+  return rest ? `${basis}/${rest}` : basis;
+}
+
+/**
+ * RFC-9728-URL der Metadaten FÜR eine konkrete Ressource: der well-known-Teil
+ * steht zwischen Host und Pfad, nicht am Ende.
+ *   https://host/.well-known/oauth-protected-resource/functions/v1/mcp/<slug>
+ */
+export function ressourcenMetadatenUrlFuer(resource: string): string {
+  const u = new URL(resource);
+  return `${u.origin}/.well-known/oauth-protected-resource${u.pathname}`;
 }
 
 /** Authorization-Server-Metadaten (RFC 8414). */
