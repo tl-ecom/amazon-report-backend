@@ -28,9 +28,14 @@ export function ressourcenMetadatenUrl(issuer: string): string {
  * ist. Meldet der Server `…/mcp` während der Client `…/mcp/<slug>` aufruft,
  * wertet ein strenger Client das als fremde Ressource und bricht ab.
  */
+// Robust gegen die Pfad-Form, in der die Funktion aufgerufen wird: Supabase
+// reicht je nach Route mal den vollen Pfad (/functions/v1/mcp/<slug>), mal nur
+// den Rest hinter dem Funktionsnamen durch. Beides — und der blanke Slug —
+// muss denselben Wert ergeben.
 export function mcpPfadRest(pfad: string): string {
-  const m = pfad.match(/\/functions\/v1\/mcp(\/.*)?$/);
-  return m?.[1] ?? "";
+  const m = pfad.match(/(?:^|\/)mcp(\/.*)?$/);
+  if (m) return m[1] ?? "";
+  return pfad === "/" ? "" : pfad;
 }
 
 /** Konkrete MCP-Ressourcen-URL: Basis + Slug (ohne Slug = Basis). */

@@ -20,8 +20,8 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
-  baueAsMetadata, baueResourceMetadata, mcpRessource, oauthBasis, pkceStimmt, pruefeAuthorizeParams,
-  pruefeRedirectUris, redirectMitCode, sha256Hex, zufallsToken,
+  baueAsMetadata, baueResourceMetadata, mcpPfadRest, mcpRessource, oauthBasis, pkceStimmt,
+  pruefeAuthorizeParams, pruefeRedirectUris, redirectMitCode, sha256Hex, zufallsToken,
 } from "../_shared/oauth.ts";
 
 const CORS = {
@@ -68,8 +68,8 @@ Deno.serve(async (req) => {
   const prIdx = path.indexOf(PR);
   if (req.method === "GET" && prIdx >= 0) {
     // rest ist "" (Aufruf am Issuer), "/functions/v1/mcp/<slug>" (RFC-9728-Form)
-    // oder bereits "/<slug>" — alle drei führen auf denselben Slug.
-    const rest = path.slice(prIdx + PR.length).replace(/^\/functions\/v1\/mcp/, "");
+    // oder bereits "/<slug>" — mcpPfadRest fuehrt alle drei auf denselben Slug.
+    const rest = mcpPfadRest(path.slice(prIdx + PR.length));
     return json(baueResourceMetadata(mcpRessource(resource, rest), issuer));
   }
   if (req.method === "POST" && path.endsWith("/register")) return dcrRegister(req);

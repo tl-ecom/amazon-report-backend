@@ -25,11 +25,15 @@ Deno.test("Resource-Metadaten-URL", () => {
   assertEquals(ressourcenMetadatenUrl("https://h/o"), "https://h/o/.well-known/oauth-protected-resource");
 });
 
-Deno.test("mcpPfadRest: Slug hinter /functions/v1/mcp", () => {
+Deno.test("mcpPfadRest: Slug unabhaengig von der Pfad-Form", () => {
+  // voller Pfad, Pfad ohne Funktionspraefix, blanker Slug -> selbes Ergebnis
   assertEquals(mcpPfadRest("/functions/v1/mcp/vaneja-4c331e"), "/vaneja-4c331e");
+  assertEquals(mcpPfadRest("/mcp/vaneja-4c331e"), "/vaneja-4c331e");
+  assertEquals(mcpPfadRest("/vaneja-4c331e"), "/vaneja-4c331e");
+  // ohne Slug bleibt es leer
   assertEquals(mcpPfadRest("/functions/v1/mcp"), "");
-  assertEquals(mcpPfadRest("/functions/v1/mcp/"), "/");
-  assertEquals(mcpPfadRest("/functions/v1/api"), "");
+  assertEquals(mcpPfadRest("/mcp"), "");
+  assertEquals(mcpPfadRest("/"), "");
 });
 
 Deno.test("mcpRessource: Basis + Slug, ohne Slug bleibt die Basis", () => {
