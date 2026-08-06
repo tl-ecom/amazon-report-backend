@@ -13,6 +13,14 @@ function ctxMit(daten: Record<string, any>): McpContext {
 
 const leererCtx: McpContext = { ladeReport: () => Promise.resolve(null) };
 
+/**
+ * Tool-Daten aus einem tools/call-Ergebnis. Sie stehen als JSON im Text-Content —
+ * absichtlich NICHT in structuredContent (siehe Kommentar in mcp.ts).
+ */
+function toolDaten(r: any): any {
+  return JSON.parse(r.result.content[0].text);
+}
+
 const salesPayload = {
   reportSpecification: { dataStartTime: "2026-07-01", dataEndTime: "2026-07-15" },
   salesAndTrafficByDate: [
@@ -115,7 +123,7 @@ Deno.test("get_ads_overview liest source='ads' und rechnet ACOS", async () => {
     { jsonrpc: "2.0", id: 13, method: "tools/call", params: { name: "get_ads_overview", arguments: {} } },
     ctx
   );
-  const sc = (r!.result as any).structuredContent;
+  const sc = toolDaten(r);
   assertEquals(sc.gesamt.spend, 25);
   assertEquals(sc.gesamt.sales, 100);
   assertEquals(sc.gesamt.acos, 25); // 25/100
@@ -131,7 +139,7 @@ Deno.test("get_ads_overview meldet keine_daten, wenn source='sp' statt 'ads' gel
     { jsonrpc: "2.0", id: 14, method: "tools/call", params: { name: "get_ads_overview", arguments: {} } },
     ctx
   );
-  const sc = (r!.result as any).structuredContent;
+  const sc = toolDaten(r);
   assertEquals(sc.keine_daten, true);
 });
 
@@ -155,7 +163,7 @@ Deno.test("get_product_performance fuehrt die drei Quellen zusammen, getrennt", 
     { jsonrpc: "2.0", id: 12, method: "tools/call", params: { name: "get_product_performance", arguments: { asin: "B0DNT2FDN9" } } },
     ctx
   );
-  const sc = (r!.result as any).structuredContent;
+  const sc = toolDaten(r);
   assertEquals(sc.produkte.length, 1);
   assertEquals(sc.produkte[0].sales_traffic.unitsOrdered, 6);
   assertEquals(sc.produkte[0].orders.bestellungen, 1);
@@ -171,8 +179,8 @@ Deno.test("get_sales_overview liefert gerechnete Kennzahlen", async () => {
   const res = r!.result as any;
   assertEquals(res.isError, false);
   // strukturiert UND als Text.
-  assertEquals(res.structuredContent.gesamt.sessions, 100);
-  assertEquals(res.structuredContent.gesamt.cvrUnitSession, 2); // 2/100
+  assertEquals(toolDaten(r).gesamt.sessions, 100);
+  assertEquals(toolDaten(r).gesamt.cvrUnitSession, 2); // 2/100
   const ausText = JSON.parse(res.content[0].text);
   assertEquals(ausText.gesamt.umsatzOrdered, 20);
 });
@@ -184,8 +192,8 @@ Deno.test("get_orders_overview liefert Bestell-Kennzahlen", async () => {
   );
   const res = r!.result as any;
   assertEquals(res.isError, false);
-  assertEquals(res.structuredContent.gesamt.bestellungen, 1);
-  assertEquals(res.structuredContent.gesamt.umsatz, 10);
+  assertEquals(toolDaten(r).gesamt.bestellungen, 1);
+  assertEquals(toolDaten(r).gesamt.umsatz, 10);
 });
 
 Deno.test("get_listings_overview liefert Bestands-Kennzahlen", async () => {
@@ -201,7 +209,7 @@ Deno.test("get_listings_overview liefert Bestands-Kennzahlen", async () => {
     { jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: "get_listings_overview", arguments: {} } },
     ctxMit({ GET_MERCHANT_LISTINGS_ALL_DATA: listingsPayload })
   );
-  const sc = (r!.result as any).structuredContent;
+  const sc = toolDaten(r);
   assertEquals(sc.gesamt.aktiv, 2);
   assertEquals(sc.bestand_merchant.ausverkauft, 1); // nur das Merchant-Angebot mit qty 0
   assertEquals(sc.bestand_fba.aktive_angebote, 1);
@@ -215,7 +223,22 @@ Deno.test("fehlende Daten sind kein Protokollfehler, sondern ein Hinweis", async
   );
   const res = r!.result as any;
   assertEquals(res.isError, false);
-  assertEquals(res.structuredContent.keine_daten, true);
+  assertEquals(toolDaten(r).keine_daten, true);
+});
+
+// --- tools/call: Ergebnisform ---
+Deno.test("tools/call sendet KEIN structuredContent (kein Tool deklariert ein outputSchema)", async () => {
+  // Regressionsschutz: unangekuendigtes structuredContent laesst strenge
+  // MCP-Clients den Aufruf verwerfen, obwohl der Server mit 200 antwortet.
+  const r = await dispatch(
+    { jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "get_sales_overview", arguments: {} } },
+    ctxMit({ GET_SALES_AND_TRAFFIC_REPORT: salesPayload })
+  );
+  const res = r!.result as any;
+  assertEquals("structuredContent" in res, false);
+  assertEquals(res.content[0].type, "text");
+  // kein Tool darf ein outputSchema haben, solange wir structuredContent weglassen
+  assertEquals(toolListe().some((t: any) => t.outputSchema), false);
 });
 
 // --- tools/call: unbekanntes Tool ---

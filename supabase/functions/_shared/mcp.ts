@@ -427,11 +427,19 @@ export async function dispatch(
       }
       try {
         const daten = await tool.handle(args, ctx);
-        // MCP-Ergebnis: menschenlesbarer JSON-Text UND strukturiert.
+        // MCP-Ergebnis: die Daten als JSON-Text im content.
+        //
+        // BEWUSST OHNE structuredContent: das darf laut Spec nur mitkommen, wenn
+        // das Tool ein outputSchema deklariert — unsere Tools tun das nicht (die
+        // Ausgaben sind je Report zu heterogen für ein sinnvolles Schema).
+        // Strenge Clients lehnen ein Ergebnis mit unangekündigtem
+        // structuredContent ab; tolerante ignorieren es. Genau daran scheiterte
+        // tools/call bei Claude, waehrend ChatGPT dieselben Antworten annahm.
+        // Die Daten gehen durch den Text-Content nicht verloren.
+        //
         // isError bleibt false — ein "keine Daten"-Zustand ist kein Protokollfehler.
         return ergebnis(id, {
           content: [{ type: "text", text: JSON.stringify(daten, null, 2) }],
-          structuredContent: daten,
           isError: false,
         });
       } catch (e) {
