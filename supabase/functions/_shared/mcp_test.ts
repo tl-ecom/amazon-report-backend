@@ -75,7 +75,8 @@ Deno.test("tools/list nennt alle Tools mit Schema", async () => {
   const tools = (r!.result as any).tools;
   assertEquals(tools.map((t: any) => t.name), [
     "get_sales_overview", "get_orders_overview", "get_listings_overview", "get_product_performance",
-    "get_returns_overview", "get_ads_overview", "get_sales_history", "get_orders_history", "get_orders_revenue",
+    "get_returns_overview", "get_ads_overview", "get_ads_verlauf",
+    "get_sales_history", "get_orders_history", "get_orders_revenue",
     "get_returns_history",
     "get_products", "get_kpi_history", "get_profit_history", "get_search_query_performance",
     "get_diagnoses", "get_change_log", "get_strategy_overview",
@@ -85,7 +86,7 @@ Deno.test("tools/list nennt alle Tools mit Schema", async () => {
 });
 
 Deno.test("toolListe ist stabil", () => {
-  assertEquals(toolListe().length, 17);
+  assertEquals(toolListe().length, 18);
 });
 
 Deno.test("Pulse-Tools rufen ladePulse mit der richtigen Datenart", async () => {
@@ -98,6 +99,7 @@ Deno.test("Pulse-Tools rufen ladePulse mit der richtigen Datenart", async () => 
     ["get_products", "produkte"], ["get_kpi_history", "kpi"], ["get_profit_history", "ertrag"],
     ["get_search_query_performance", "sqp"], ["get_diagnoses", "diagnosen"],
     ["get_change_log", "aenderungen"], ["get_strategy_overview", "strategie"],
+    ["get_ads_verlauf", "ads_verlauf"],
   ];
   for (const [tool, art] of paare) {
     await dispatch({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: {} } }, ctx);
