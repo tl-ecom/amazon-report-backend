@@ -201,7 +201,7 @@ export interface AdsOverview {
   warnungen: string[];
 }
 
-const FORMELN: Record<string, string> = {
+export const FORMELN: Record<string, string> = {
   acos: "spend / sales × 100 — die zentrale Effizienzkennzahl (niedriger = besser)",
   roas: "sales / spend — Kehrwert-Perspektive zu ACOS",
   ctr: "clicks / impressions × 100",
@@ -228,23 +228,43 @@ class AdsAkku {
   }
 
   finish(): AdsKennzahlen {
-    const spend = round2(this.spendCents / 100);
-    const sales = round2(this.salesCents / 100);
-    const mul100 = (x: number | null) => (x === null ? null : round2(x * 100));
-    return {
-      impressions: this.impressions,
-      clicks: this.clicks,
-      spend,
-      sales,
-      orders: this.orders,
-      einheiten: this.einheiten,
-      ctr: mul100(safeDiv(this.clicks, this.impressions)),
-      cvr: mul100(safeDiv(this.orders, this.clicks)),
-      cpc: nullOrRound(safeDiv(spend, this.clicks)),
-      acos: mul100(safeDiv(spend, sales)),
-      roas: nullOrRound(safeDiv(sales, spend)),
-    };
+    return kennzahlenAusSummen(this);
   }
+}
+
+/**
+ * Kennzahlen aus Rohsummen. Die EINZIGE Stelle, an der ACOS, ROAS, CTR, CVR und
+ * CPC entstehen — genutzt vom Report-Overview (report_data) wie vom Zeitraum-
+ * Verlauf (ads_daily). Zwei Wege zu denselben Zahlen duerfen nicht zwei Formeln
+ * haben.
+ *
+ * Geld kommt in Cent herein und geht in Euro heraus; Nenner 0 ergibt null,
+ * nicht 0 — „unbekannt ist nicht null".
+ */
+export function kennzahlenAusSummen(s: {
+  impressions: number;
+  clicks: number;
+  spendCents: number;
+  salesCents: number;
+  orders: number;
+  einheiten: number;
+}): AdsKennzahlen {
+  const spend = round2(s.spendCents / 100);
+  const sales = round2(s.salesCents / 100);
+  const mul100 = (x: number | null) => (x === null ? null : round2(x * 100));
+  return {
+    impressions: s.impressions,
+    clicks: s.clicks,
+    spend,
+    sales,
+    orders: s.orders,
+    einheiten: s.einheiten,
+    ctr: mul100(safeDiv(s.clicks, s.impressions)),
+    cvr: mul100(safeDiv(s.orders, s.clicks)),
+    cpc: nullOrRound(safeDiv(spend, s.clicks)),
+    acos: mul100(safeDiv(spend, sales)),
+    roas: nullOrRound(safeDiv(sales, spend)),
+  };
 }
 
 function num(x: unknown): number {

@@ -38,6 +38,12 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   get_orders_overview: "orders",
   get_listings_overview: "listings",
   get_ads_overview: "ads",
+  // Derselbe Tab bzw. dieselben Zahlen, andere Quelle (ads_daily statt
+  // report_data) — muessen hinter demselben Feature liegen, sonst umginge der
+  // Zeitraum-Weg die Sperre. `ads_verlauf` ist der Web-, `get_ads_verlauf` der
+  // KI-Name derselben Sache.
+  ads_verlauf: "ads",
+  get_ads_verlauf: "ads",
   get_returns_overview: "returns",
   returns_uebersicht: "returns",
   get_product_performance: "products",

@@ -189,6 +189,22 @@ const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "get_ads_verlauf",
+    description:
+      "Sponsored-Products-Kennzahlen über einen FREI WÄHLBAREN Zeitraum (bis ~95 Tage " +
+      "zurück, so weit die Tagesreihe reicht): Spend, attribuierter Umsatz, ACOS, ROAS, " +
+      "CTR und CPC — als Gesamtwert, als Tageskurve (proTag) sowie je Kampagne und je " +
+      "ASIN. Zeitraum via von/bis ('YYYY-MM-DD'), Default letzte 30 Tage. " +
+      "UNTERSCHIED zu get_ads_overview: jenes zeigt immer nur das zuletzt gezogene " +
+      "Report-Fenster; hier bestimmst du den Zeitraum und bekommst den Verlauf. " +
+      "Für Trends, Vorher/Nachher-Vergleiche und Monatsbetrachtungen dieses Werkzeug " +
+      "nehmen. Endet der Zeitraum in den letzten ~72h, ist er vorläufig (is_provisional). " +
+      "Reichen die Daten nicht über den ganzen Zeitraum, steht das in `warnungen` — " +
+      "fehlende Tage sind NICHT als 0 enthalten.",
+    inputSchema: ZEITRAUM_SCHEMA,
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_verlauf", args) : pulseNichtVerfuegbar()),
+  },
+  {
     name: "get_sales_history",
     description:
       "Sales-&-Traffic-Kennzahlen über einen FREI WÄHLBAREN Zeitraum aus der " +

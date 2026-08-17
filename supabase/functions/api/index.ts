@@ -29,6 +29,7 @@ import { generiereBrief, listeBriefs, setzeCoachNotiz } from "../_shared/brief.t
 import { ladeFeatures, zugriffErlaubt } from "../_shared/entitlements.ts";
 import { erstelleNote, listeNotes, loescheNote, setzeNoteSichtbarkeit } from "../_shared/notes.ts";
 import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
+import { adsVerlauf } from "../_shared/ads_verlauf.ts";
 import { produktUebersicht } from "../_shared/produkte.ts";
 import { anstossenSqp, listeSqp, sqpAsins } from "../_shared/sqp.ts";
 import { radarDaten } from "../_shared/reimbursements.ts";
@@ -519,6 +520,11 @@ Deno.serve(async (req) => {
     }
     if (resource === "kpi_verlauf") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await kpiVerlauf(service, tenantId) });
+    }
+    // Ads über einen frei wählbaren Zeitraum (aus ads_daily). get_ads_overview
+    // bleibt daneben bestehen: es zeigt das zuletzt gezogene Report-Fenster.
+    if (resource === "ads_verlauf") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsVerlauf(service, tenantId, args as any) });
     }
     if (resource === "produkt_uebersicht") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await produktUebersicht(service, tenantId, args as any) });
