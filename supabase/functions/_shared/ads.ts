@@ -91,6 +91,88 @@ export function istVorlaeufig(endDate: string, heute: Date = new Date()): boolea
   return end > grenze;
 }
 
+// --- Report-Fenster ---
+
+/**
+ * Groesste Spanne, die Amazon je Anfrage erlaubt — in KALENDERTAGEN inklusive
+ * Start und Ende. Verifiziert am 2026-08-17 an der Fehlermeldung:
+ *   "startDate to endDate range (90 days) must not exceed maximum range (31 days)"
+ *
+ * NICHT verwechseln mit der Vorhaltung von ~95 Tagen: die sagt, wie weit man
+ * zurueckreichen darf, diese hier, wie breit ein einzelnes Fenster sein darf.
+ * Laengere Zeitraeume brauchen mehrere Anfragen mit versetzten Fenstern.
+ */
+export const MAX_SPANNE_TAGE = 31;
+
+const TAG_MS = 86_400_000;
+
+function istDatum(s: unknown): s is string {
+  return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) &&
+    !Number.isNaN(Date.parse(s + "T00:00:00Z"));
+}
+
+/** Kalendertage von start bis ende, inklusive beider Enden. */
+export function spanneTage(startDate: string, endDate: string): number {
+  const a = Date.parse(startDate + "T00:00:00Z");
+  const b = Date.parse(endDate + "T00:00:00Z");
+  return Math.round((b - a) / TAG_MS) + 1;
+}
+
+export interface AdsFenster {
+  startDate: string;
+  endDate: string;
+}
+
+/**
+ * Bestimmt das Report-Fenster — entweder explizit (Backfill aelterer Zeitraeume)
+ * oder relativ zu heute (Tagesbetrieb).
+ *
+ * Relativ: Ads-Daten fuer heute sind unvollstaendig, das Fenster endet deshalb
+ * VOLATIL_TAGE vor heute. include_volatile geht bis gestern und macht den
+ * Datensatz spaeter vorlaeufig.
+ */
+export function baueFenster(opts: {
+  days?: number;
+  startDate?: unknown;
+  endDate?: unknown;
+  includeVolatile?: boolean;
+  heute?: Date;
+}): { ok: true; fenster: AdsFenster } | { ok: false; fehler: string } {
+  const { startDate, endDate } = opts;
+
+  // Explizites Fenster: beide Enden oder keines — ein halbes waere zweideutig.
+  if (startDate !== undefined || endDate !== undefined) {
+    if (!istDatum(startDate) || !istDatum(endDate)) {
+      return { ok: false, fehler: "start_date und end_date muessen beide als YYYY-MM-DD angegeben werden" };
+    }
+    if (startDate > endDate) {
+      return { ok: false, fehler: `start_date (${startDate}) liegt nach end_date (${endDate})` };
+    }
+    const spanne = spanneTage(startDate, endDate);
+    if (spanne > MAX_SPANNE_TAGE) {
+      return {
+        ok: false,
+        fehler: `Zeitraum umfasst ${spanne} Tage — Amazon erlaubt hoechstens ${MAX_SPANNE_TAGE} je Anfrage. ` +
+          "Laengere Zeitraeume in mehreren Anfragen holen.",
+      };
+    }
+    return { ok: true, fenster: { startDate, endDate } };
+  }
+
+  // Relatives Fenster. days ist ein OFFSET: days=30 ergibt 31 Kalendertage.
+  const days = opts.days ?? 14;
+  if (!Number.isFinite(days) || days < 1 || days > MAX_SPANNE_TAGE - 1) {
+    return { ok: false, fehler: `days muss zwischen 1 und ${MAX_SPANNE_TAGE - 1} liegen (ergibt bis zu ${MAX_SPANNE_TAGE} Kalendertage)` };
+  }
+
+  const heute = opts.heute ?? new Date();
+  const end = new Date(heute);
+  end.setUTCDate(end.getUTCDate() - (opts.includeVolatile ? 1 : VOLATIL_TAGE));
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - days);
+  return { ok: true, fenster: { startDate: ymd(start), endDate: ymd(end) } };
+}
+
 // --- Aufbereitung der Report-Zeilen ---
 
 export interface AdsKennzahlen {

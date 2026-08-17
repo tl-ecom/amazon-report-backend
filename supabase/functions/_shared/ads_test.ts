@@ -4,7 +4,7 @@
 // abgefragt werden. Die Zeilenstruktur entspricht der v3-Spec (spAdvertisedProduct).
 
 import { assertEquals, assertAlmostEquals } from "jsr:@std/assert@1";
-import { baueAdsDailyRows, baueAdsOverview, baueSpReportRequest, istVorlaeufig, VOLATIL_TAGE, ymd } from "./ads.ts";
+import { baueAdsDailyRows, baueAdsOverview, baueFenster, baueSpReportRequest, istVorlaeufig, spanneTage, VOLATIL_TAGE, ymd } from "./ads.ts";
 
 function zeile(o: {
   date?: string;
@@ -224,4 +224,54 @@ Deno.test("ads_daily: Zeilen ohne Datum oder Kampagne werden verworfen", () => {
 
 Deno.test("ads_daily: leerer Report ergibt keine Zeilen", () => {
   assertEquals(baueAdsDailyRows(T, []).length, 0);
+});
+
+// --- baueFenster (Report-Zeitraum) ---
+
+const HEUTE = new Date("2026-08-17T09:00:00Z");
+
+Deno.test("Fenster: relativ endet VOLATIL_TAGE vor heute", () => {
+  const f = baueFenster({ days: 30, heute: HEUTE });
+  if (!f.ok) throw new Error(f.fehler);
+  assertEquals(f.fenster.endDate, "2026-08-14"); // 17.8. minus 3
+  assertEquals(f.fenster.startDate, "2026-07-15");
+  assertEquals(spanneTage(f.fenster.startDate, f.fenster.endDate), 31);
+});
+
+Deno.test("Fenster: include_volatile geht bis gestern", () => {
+  const f = baueFenster({ days: 7, includeVolatile: true, heute: HEUTE });
+  if (!f.ok) throw new Error(f.fehler);
+  assertEquals(f.fenster.endDate, "2026-08-16");
+});
+
+Deno.test("Fenster: days=30 ist das Maximum, 31 wird abgelehnt", () => {
+  // days ist ein Offset — 30 ergibt 31 Kalendertage, also genau Amazons Grenze.
+  assertEquals(baueFenster({ days: 30, heute: HEUTE }).ok, true);
+  assertEquals(baueFenster({ days: 31, heute: HEUTE }).ok, false);
+  assertEquals(baueFenster({ days: 0, heute: HEUTE }).ok, false);
+});
+
+Deno.test("Fenster: explizite Daten werden uebernommen", () => {
+  const f = baueFenster({ startDate: "2026-06-14", endDate: "2026-07-14" });
+  if (!f.ok) throw new Error(f.fehler);
+  assertEquals(f.fenster, { startDate: "2026-06-14", endDate: "2026-07-14" });
+  assertEquals(spanneTage("2026-06-14", "2026-07-14"), 31);
+});
+
+Deno.test("Fenster: mehr als 31 Kalendertage wird abgelehnt", () => {
+  // Genau der Fall, an dem der erste Backfill-Versuch scheiterte (90 Tage).
+  const f = baueFenster({ startDate: "2026-05-16", endDate: "2026-08-14" });
+  assertEquals(f.ok, false);
+  if (!f.ok) assertEquals(f.fehler.includes("31"), true);
+});
+
+Deno.test("Fenster: 32 Kalendertage sind schon zu viel", () => {
+  assertEquals(baueFenster({ startDate: "2026-07-14", endDate: "2026-08-14" }).ok, false);
+});
+
+Deno.test("Fenster: halbes oder verdrehtes Datumspaar wird abgelehnt", () => {
+  assertEquals(baueFenster({ startDate: "2026-07-01" }).ok, false);
+  assertEquals(baueFenster({ endDate: "2026-07-01" }).ok, false);
+  assertEquals(baueFenster({ startDate: "2026-08-01", endDate: "2026-07-01" }).ok, false);
+  assertEquals(baueFenster({ startDate: "01.07.2026", endDate: "14.07.2026" }).ok, false);
 });

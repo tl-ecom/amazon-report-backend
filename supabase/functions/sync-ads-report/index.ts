@@ -15,7 +15,7 @@
 // Die Rechen-/Parselogik ist in _shared/ads.ts voll unit-getestet.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { baueSpReportRequest, istVorlaeufig, schreibeAdsVerlauf, VOLATIL_TAGE, ymd } from "../_shared/ads.ts";
+import { baueFenster, baueSpReportRequest, istVorlaeufig, schreibeAdsVerlauf, ymd } from "../_shared/ads.ts";
 
 const ADS_ENDPOINT = "https://advertising-api-eu.amazon.com";
 const LWA_TOKEN_URL = "https://api.amazon.com/auth/o2/token";
@@ -38,13 +38,11 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const tenant_id: string | undefined = body.tenant_id;
     const resumeReportId: string | undefined = body.report_id;
-    const days: number = Number(body.days ?? DEFAULT_DAYS);
     const includeVolatile: boolean = body.include_volatile === true;
+    // Backfill: aelteres Fenster nachholen, ohne den aktuellen Stand zu ueberschreiben.
+    let istBackfill: boolean = body.backfill === true;
 
     if (!tenant_id) return json({ error: "tenant_id fehlt" }, 400);
-    if (!resumeReportId && (!Number.isFinite(days) || days < 1 || days > 90)) {
-      return json({ error: "days muss zwischen 1 und 90 liegen" }, 400);
-    }
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -103,16 +101,19 @@ Deno.serve(async (req) => {
       if (!job) return json({ error: "report_id gehört nicht zu diesem Tenant" }, 404);
       reportId = resumeReportId;
       endDate = job.config?.endDate ?? ymd(new Date());
+      // Beim Wiederaufnehmen zaehlt, wie der Job angelegt wurde — sonst wuerde
+      // ein Backfill-Chunk beim Fortsetzen doch den aktuellen Stand ueberschreiben.
+      istBackfill = job.config?.backfill === true;
     } else {
-      // Fenster: Ads-Daten für heute sind unvollständig. Standard endet
-      // VOLATIL_TAGE vor heute (stabil). include_volatile geht bis gestern und
-      // markiert den Datensatz später als is_provisional.
-      const end = new Date();
-      end.setUTCDate(end.getUTCDate() - (includeVolatile ? 1 : VOLATIL_TAGE));
-      const start = new Date(end);
-      start.setUTCDate(start.getUTCDate() - days);
-      endDate = ymd(end);
-      const startDate = ymd(start);
+      const f = baueFenster({
+        days: body.days === undefined ? DEFAULT_DAYS : Number(body.days),
+        startDate: body.start_date,
+        endDate: body.end_date,
+        includeVolatile,
+      });
+      if (!f.ok) return json({ error: f.fehler }, 400);
+      const { startDate } = f.fenster;
+      endDate = f.fenster.endDate;
 
       const created = await erstelleReport(adsHeaders, baueSpReportRequest(startDate, endDate), deadline);
       if (!created.ok) return json({ error: "Ads-Report anfordern fehlgeschlagen", detail: created.detail }, 502);
@@ -124,7 +125,7 @@ Deno.serve(async (req) => {
         report_type: REPORT_TYPE,
         status: "PROCESSING",
         amazon_report_id: reportId,
-        config: { days, startDate, endDate, include_volatile: includeVolatile },
+        config: { startDate, endDate, include_volatile: includeVolatile, backfill: istBackfill },
       });
       if (insErr) return json({ error: "Job speichern fehlgeschlagen", detail: insErr.message }, 500);
     }
@@ -186,18 +187,24 @@ Deno.serve(async (req) => {
     const isProvisional = istVorlaeufig(endDate);
     const dataTimestamp = new Date().toISOString();
 
-    // Reihenfolge Pflicht (Unique-Index one_latest_per_report): erst altes
-    // is_latest zurücksetzen, dann einfügen.
-    const { error: updErr } = await supabase
-      .from("report_data")
-      .update({ is_latest: false })
-      .eq("tenant_id", tenant_id)
-      .eq("source", "ads")
-      .eq("report_type", REPORT_TYPE)
-      .eq("is_latest", true);
-    if (updErr) {
-      await markJobFatal(supabase, tenant_id, reportId, updErr.message);
-      return json({ error: "is_latest zurücksetzen fehlgeschlagen", detail: updErr.message }, 500);
+    // Ein Backfill holt ein ALTES Fenster nach und darf den aktuellen Stand
+    // nicht verdraengen — sonst zeigte der Ads-Tab nach dem Nachholen z.B. den
+    // Mai als „aktuell". Er wandert deshalb mit is_latest=false in die Ablage;
+    // die Kennzahlen landen trotzdem ueber ads_daily im Verlauf.
+    if (!istBackfill) {
+      // Reihenfolge Pflicht (Unique-Index one_latest_per_report): erst altes
+      // is_latest zurücksetzen, dann einfügen.
+      const { error: updErr } = await supabase
+        .from("report_data")
+        .update({ is_latest: false })
+        .eq("tenant_id", tenant_id)
+        .eq("source", "ads")
+        .eq("report_type", REPORT_TYPE)
+        .eq("is_latest", true);
+      if (updErr) {
+        await markJobFatal(supabase, tenant_id, reportId, updErr.message);
+        return json({ error: "is_latest zurücksetzen fehlgeschlagen", detail: updErr.message }, 500);
+      }
     }
 
     const { error: insErr } = await supabase.from("report_data").insert({
@@ -207,7 +214,7 @@ Deno.serve(async (req) => {
       payload: { format: "ads_v3", rows },
       data_timestamp: dataTimestamp,
       is_provisional: isProvisional,
-      is_latest: true,
+      is_latest: !istBackfill,
     });
     if (insErr) {
       await markJobFatal(supabase, tenant_id, reportId, insErr.message);
