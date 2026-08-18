@@ -5,7 +5,8 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
-  akkuZuZeilen, detailZuZeilen, verarbeiteFinancialEvents, verarbeiteGebuehrenDetail,
+  akkuZuZeilen, detailZuZeilen, monatSchreibbar,
+  verarbeiteFinancialEvents, verarbeiteGebuehrenDetail,
 } from "../_shared/finances.ts";
 
 const SP_ENDPOINT = "https://sellingpartnerapi-eu.amazon.com";
@@ -84,7 +85,30 @@ Deno.serve(async (req) => {
       if (nextToken && seiten < MAX_SEITEN) await schlaf(PAUSE_MS);
     } while (nextToken && seiten < MAX_SEITEN);
 
-    const zeilen = akkuZuZeilen(akku);
+    const abgeschnitten = seiten >= MAX_SEITEN && Boolean(nextToken);
+
+    // NUR VOLLSTAENDIG GESEHENE MONATE SCHREIBEN.
+    //
+    // Der Upsert ERSETZT den Wert eines Monats. Ein Monat, den dieser Lauf nur
+    // angeschnitten hat, wuerde damit einen korrekten Wert durch einen Teilwert
+    // ersetzen. Genau so ging am 18.8.2026 der Juni verloren (1.063 statt 16.584
+    // Euro), und beim Reparaturversuch derselben Sache der Mai.
+    //
+    // Zwei Faelle, in denen ein Monat angeschnitten ist:
+    //
+    //   1. Der Fensteranfang liegt mitten im Monat -> diesem Monat fehlt der
+    //      Anfang. Betrifft immer genau einen Monat, den aeltesten.
+    //   2. Der Lauf brach bei MAX_SEITEN ab -> welche Monate unvollstaendig
+    //      sind, ist NICHT bestimmbar (die Reihenfolge der Seiten ist nicht
+    //      zugesichert). Dann wird gar nichts geschrieben. Lieber keine neuen
+    //      Daten als kaputte: der naechste Lauf holt es nach.
+    //
+    // Der LAUFENDE Monat wird geschrieben, obwohl er naturgemaess unvollstaendig
+    // ist — er ist so vollstaendig, wie er sein kann, und ohne ihn gaebe es fuer
+    // den aktuellen Monat nie Zahlen. Die Anzeige weist ihn gesondert aus.
+    const vollstaendig = (monat: string) => monatSchreibbar(monat, postedAfter, abgeschnitten);
+
+    const zeilen = akkuZuZeilen(akku).filter((z) => vollstaendig(z.monat));
     if (zeilen.length > 0) {
       const { error: upErr } = await supabase.from("finance_monatlich").upsert(
         zeilen.map((z) => ({ tenant_id, monat: z.monat, gebuehren_cents: z.gebuehren_cents, updated_at: new Date().toISOString() })),
@@ -94,7 +118,7 @@ Deno.serve(async (req) => {
     }
 
     // Detailzeilen je Monat/SKU/Gebuehrenart. sku=null -> '' (ohne Artikelbezug).
-    const detailZeilen = detailZuZeilen(detailAkku);
+    const detailZeilen = detailZuZeilen(detailAkku).filter((d) => vollstaendig(d.monat));
     if (detailZeilen.length > 0) {
       const jetzt = new Date().toISOString();
       const BATCH = 500;
@@ -110,13 +134,24 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Was NICHT geschrieben wurde, muss in der Antwort stehen — sonst ist das
+    // Auslassen genauso still wie vorher das Ueberschreiben.
+    const gesehen = akkuZuZeilen(akku).map((z) => z.monat);
+    const uebersprungen = gesehen.filter((m) => !vollstaendig(m));
+
     return json({
       ok: true,
       seiten,
-      abgeschnitten: seiten >= MAX_SEITEN && Boolean(nextToken),
+      abgeschnitten,
       monate: zeilen.length,
       gebuehren_detailzeilen: detailZeilen.length,
       gebuehren_gesamt_cents: zeilen.reduce((s, z) => s + z.gebuehren_cents, 0),
+      uebersprungene_monate: uebersprungen,
+      hinweis: abgeschnitten
+        ? `Abbruch nach ${MAX_SEITEN} Seiten — NICHTS geschrieben, weil nicht bestimmbar ist, welche Monate vollstaendig sind. Mit kleinerem 'tage' erneut versuchen.`
+        : uebersprungen.length > 0
+        ? `Monat(e) ${uebersprungen.join(", ")} liegen nur teilweise im Fenster und wurden bewusst nicht geschrieben — ein Teilwert wuerde den korrekten ersetzen.`
+        : undefined,
     });
   } catch (e) {
     return json({ error: "Ausnahme", detail: String(e) }, 500);

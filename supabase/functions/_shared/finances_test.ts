@@ -1,8 +1,52 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
-  akkuZuZeilen, detailZuZeilen, monatAusDatum,
+  akkuZuZeilen, angeschnittenerMonat, detailZuZeilen, monatAusDatum, monatSchreibbar,
   verarbeiteFinancialEvents, verarbeiteGebuehrenDetail,
 } from "./finances.ts";
+
+// --- Welche Monate darf ein Lauf schreiben? ---
+//
+// Der Upsert ERSETZT den Monatswert. Ein nur angeschnittener Monat wuerde einen
+// korrekten Wert durch einen Teilwert ersetzen — genau so gingen am 18.8.2026
+// erst Junis Gebuehren verloren und beim Reparaturversuch die des Mai.
+
+Deno.test("Fensteranfang mitten im Monat schneidet genau diesen Monat an", () => {
+  assertEquals(angeschnittenerMonat("2026-05-16T00:00:00.000Z"), "2026-05");
+});
+
+Deno.test("Fensteranfang exakt am Monatsersten schneidet nichts an", () => {
+  assertEquals(angeschnittenerMonat("2026-05-01T00:00:00.000Z"), null);
+});
+
+Deno.test("Der angeschnittene Monat wird nicht geschrieben, die spaeteren schon", () => {
+  const fenster = "2026-05-16T00:00:00.000Z";
+  assertEquals(monatSchreibbar("2026-05", fenster, false), false);
+  assertEquals(monatSchreibbar("2026-06", fenster, false), true);
+  assertEquals(monatSchreibbar("2026-07", fenster, false), true);
+});
+
+Deno.test("Nach einem Abbruch wird GAR NICHTS geschrieben", () => {
+  // Welche Monate vollstaendig sind, ist dann nicht bestimmbar — die
+  // Reihenfolge der Seiten ist nicht zugesichert. Lieber keine neuen Daten
+  // als kaputte.
+  const fenster = "2026-05-01T00:00:00.000Z";
+  assertEquals(monatSchreibbar("2026-05", fenster, true), false);
+  assertEquals(monatSchreibbar("2026-06", fenster, true), false);
+  assertEquals(monatSchreibbar("2026-07", fenster, true), false);
+});
+
+Deno.test("Der laufende Monat gilt als schreibbar", () => {
+  // Er ist naturgemaess unvollstaendig, aber so vollstaendig wie moeglich.
+  // Wuerde man ihn aussparen, gaebe es fuer den aktuellen Monat nie Zahlen.
+  const jetzt = new Date();
+  const laufend = `${jetzt.getUTCFullYear()}-${String(jetzt.getUTCMonth() + 1).padStart(2, "0")}`;
+  const fenster = new Date(jetzt.getTime() - 40 * 86400000).toISOString();
+  assertEquals(monatSchreibbar(laufend, fenster, false), true);
+});
+
+Deno.test("Unlesbares Fensterdatum schneidet keinen Monat an", () => {
+  assertEquals(angeschnittenerMonat("kaputt"), null);
+});
 
 Deno.test("monatAusDatum: ISO -> YYYY-MM, Müll -> null", () => {
   assertEquals(monatAusDatum("2026-06-13T10:00:00Z"), "2026-06");
