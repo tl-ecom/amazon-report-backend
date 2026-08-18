@@ -188,8 +188,12 @@ export async function produktUebersicht(
       vk_netto: jeStueck(umsatz),
       // Gebühren kommen signiert (negativ) — hier als positiver Abzug zeigen.
       gebuehren_je_stueck: gebuehren == null ? null : jeStueck(-gebuehren),
+      // Aufschluesselung der Gebuehren, damit die Summe nachpruefbar ist:
+      // Verkaufsprovision haengt am Preis, die FBA-Gebuehr an Groesse und
+      // Gewicht — verschiedene Hebel, deshalb einzeln.
       fba_je_stueck: fba == null ? null : jeStueck(-fba),
       verkaufsgebuehr_je_stueck: verkaufsgebuehr == null ? null : jeStueck(-verkaufsgebuehr),
+      sonstige_je_stueck: sonstige == null ? null : jeStueck(-sonstige),
       ek_je_stueck: hatEk ? jeStueck(wareneinsatz) : null,
       db_vor_werbung_je_stueck: jeStueck(vorWerbung),
       // Das ist die Zahl, die vorher unerklärt in der Spalte stand.
