@@ -23,6 +23,7 @@
 import { nettoGebuehr } from "./ust_faktor.ts";
 import { ladeUstFaktor } from "./ust_lauf.ts";
 import { zeitraumAus } from "./ads_verlauf.ts";
+import { type Abdeckung, abgedeckterZeitraum, findeLuecken } from "./abdeckung.ts";
 
 export interface BetriebskostenRow {
   kategorie: string;
@@ -124,6 +125,76 @@ export function baueBetriebskosten(
   };
 }
 
+export interface Werbeabgleich {
+  ads_api: number | null;
+  abrechnung_netto: number | null;
+  abrechnung_brutto: number | null;
+  differenz: number | null;
+  abweichung_prozent: number | null;
+  belastbar: boolean;
+  hinweis: string;
+}
+
+/**
+ * Gegenprobe: Werbekosten aus zwei unabhängigen Quellen.
+ *
+ * Die Ads-API meldet, was an einem Anzeigentag ausgegeben wurde. Die Abrechnung
+ * meldet, was Amazon wann vom Guthaben abgezogen hat. ZWEI ZEITACHSEN — kleine
+ * Abweichungen sind deshalb normal und kein Fehler.
+ *
+ * Aussagekräftig ist der Vergleich nur ohne Abrechnungslücken. Und auch dann
+ * nur eingeschränkt: Werbung wird nicht zwingend über das Guthaben abgerechnet,
+ * sie kann auch per Karte belastet werden. Ein Fehlbetrag auf der
+ * Abrechnungsseite ist also nicht automatisch ein Datenfehler. Deshalb steht
+ * hier `belastbar` statt einer Ampel — die Zahlen laden zum Nachsehen ein, sie
+ * urteilen nicht.
+ */
+export function baueWerbeabgleich(
+  adsSpendCents: number | null,
+  werbungRow: BetriebskostenRow | null,
+  ustFaktor: number | null,
+  ohneLuecken: boolean,
+): Werbeabgleich {
+  const adsApi = adsSpendCents === null ? null : r2(adsSpendCents / 100);
+
+  let abrNetto: number | null = null;
+  let abrBrutto: number | null = null;
+  if (werbungRow) {
+    const nettoAus = n(werbungRow.netto_ausgewiesen_cents);
+    const steuerAus = n(werbungRow.steuer_ausgewiesen_cents);
+    const ohneAusweis = n(werbungRow.brutto_ohne_ausweis_cents);
+    // Beträge kommen negativ (Abzug) — für den Vergleich als Ausgabe positiv.
+    abrNetto = r2(-(nettoAus + nettoGebuehr(ohneAusweis, ustFaktor)) / 100);
+    abrBrutto = r2(-(nettoAus + steuerAus + ohneAusweis) / 100);
+  }
+
+  const vergleichbar = adsApi !== null && abrNetto !== null && adsApi > 0;
+  const differenz = vergleichbar ? r2(adsApi - abrNetto!) : null;
+  const abweichung = vergleichbar ? r2((differenz! / adsApi!) * 100) : null;
+
+  let hinweis: string;
+  if (!vergleichbar) {
+    hinweis = "Zum Vergleich fehlt eine der beiden Quellen im Zeitraum.";
+  } else if (!ohneLuecken) {
+    hinweis = "Im Zeitraum fehlen Abrechnungen — die Abweichung ist deshalb nicht aussagekräftig.";
+  } else {
+    hinweis =
+      "Die Ads-API bucht nach Anzeigentag, die Abrechnung nach Buchungstag — kleine Abweichungen " +
+      "sind normal. Werbung kann zudem per Karte statt über das Guthaben belastet werden; dann " +
+      "fehlt sie auf der Abrechnungsseite, ohne dass ein Fehler vorliegt.";
+  }
+
+  return {
+    ads_api: adsApi,
+    abrechnung_netto: abrNetto,
+    abrechnung_brutto: abrBrutto,
+    differenz,
+    abweichung_prozent: abweichung,
+    belastbar: vergleichbar && ohneLuecken,
+    hinweis,
+  };
+}
+
 /** Einziger Teil dieses Moduls, der die DB anfasst. Zeitraum wie überall sonst. */
 export async function betriebskosten(
   supabase: any,
@@ -132,15 +203,49 @@ export async function betriebskosten(
 ): Promise<unknown> {
   const { von, bis } = zeitraumAus(opts);
 
-  const [summen, ustFaktor] = await Promise.all([
+  const [summen, ustFaktor, abdeckung, adsSummen] = await Promise.all([
     supabase.rpc("betriebskosten_summen", { p_tenant: tenant_id, p_von: von, p_bis: bis }),
     ladeUstFaktor(supabase, tenant_id),
+    supabase.rpc("settlement_abdeckung", { p_tenant: tenant_id }),
+    supabase.rpc("ads_summen", { p_tenant: tenant_id, p_von: von, p_bis: bis }),
   ]);
   if (summen?.error) throw new Error(`betriebskosten_summen: ${summen.error.message}`);
 
+  const alleRows = (summen?.data ?? []) as BetriebskostenRow[];
+  // Werbung ist KEIN Kostenposten dieser Ansicht — sie steht schon im Ads-Bereich.
+  // Sie dient hier nur als Gegenprobe zur Ads-API.
+  const basis = baueBetriebskosten(alleRows.filter((r) => r.kategorie !== "werbung"), ustFaktor);
+
+  // Lücken in den Abrechnungen: Alles hier Gerechnete ist nur so vollständig wie
+  // die vorliegenden Abrechnungen. Fehlt ein Zeitraum, sind die Summen zu
+  // niedrig — und sähen ohne diesen Hinweis aus wie fertige Zahlen.
+  const bereiche = (abdeckung?.data ?? []) as Abdeckung[];
+  const luecken = findeLuecken(bereiche).filter((l) => l.bis >= von && l.von <= bis);
+
+  const adsGesamt = ((adsSummen?.data ?? []) as Array<{ ebene: string; spend_cents: number | string }>)
+    .find((r) => r.ebene === "gesamt");
+
   return {
     zeitraum: { von, bis },
-    ...baueBetriebskosten((summen?.data ?? []) as BetriebskostenRow[], ustFaktor),
+    ...basis,
+    hinweise: [
+      ...basis.hinweise,
+      ...luecken.map((l) =>
+        `Abrechnungslücke ${l.von} bis ${l.bis} (${l.tage} Tage) — Kosten aus diesem Zeitraum ` +
+        "fehlen, die Summen sind insoweit zu niedrig."
+      ),
+    ],
+    abdeckung: {
+      zeitraum: abgedeckterZeitraum(bereiche),
+      abrechnungen: bereiche.length,
+      luecken,
+    },
+    werbeabgleich: baueWerbeabgleich(
+      adsGesamt ? Number(adsGesamt.spend_cents) : null,
+      alleRows.find((r) => r.kategorie === "werbung") ?? null,
+      ustFaktor,
+      luecken.length === 0,
+    ),
     rechenweg:
       "Netto ist der Kosten — die Umsatzsteuer kommt als Vorsteuer zurück. Brutto ist der Betrag, " +
       "der vom Guthaben abging. Getrennt von den Verkaufsgebühren: diese Kosten fallen je Lieferung " +
