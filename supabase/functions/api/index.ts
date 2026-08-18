@@ -30,6 +30,7 @@ import { ladeFeatures, zugriffErlaubt } from "../_shared/entitlements.ts";
 import { erstelleNote, listeNotes, loescheNote, setzeNoteSichtbarkeit } from "../_shared/notes.ts";
 import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
 import { adsVerlauf } from "../_shared/ads_verlauf.ts";
+import { betriebskosten } from "../_shared/betriebskosten.ts";
 import { produktUebersicht } from "../_shared/produkte.ts";
 import { anstossenSqp, listeSqp, sqpAsins } from "../_shared/sqp.ts";
 import { radarDaten } from "../_shared/reimbursements.ts";
@@ -529,6 +530,11 @@ Deno.serve(async (req) => {
     }
     // Ads über einen frei wählbaren Zeitraum (aus ads_daily). get_ads_overview
     // bleibt daneben bestehen: es zeigt das zuletzt gezogene Report-Fenster.
+    // Kosten, die nicht am einzelnen Verkauf haengen: Anlieferung, Lagerung,
+    // Entfernung, Erstattungen. Bewusst getrennt von den Verkaufsgebuehren.
+    if (resource === "betriebskosten") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await betriebskosten(service, tenantId, args as any) });
+    }
     if (resource === "ads_verlauf") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await adsVerlauf(service, tenantId, args as any) });
     }

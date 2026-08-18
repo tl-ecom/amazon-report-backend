@@ -65,6 +65,9 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   masse_abgleich: "masse",
   steuerbarkeit: "gebuehren",
   lager_kosten: "lager",
+  // Anlieferung, Lagerung, Entfernung, Erstattungen — dieselbe Familie wie
+  // lager_kosten, deshalb hinter demselben Feature.
+  betriebskosten: "lager",
   masse_uebersicht: "masse",
   abrechnungen: "auszahlungen",
   // MCP-Zugang (KI-Anbindung) — schaltbar, damit das Häkchen in der Tarif-Matrix
