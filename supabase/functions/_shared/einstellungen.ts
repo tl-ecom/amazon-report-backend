@@ -1,7 +1,13 @@
-// einstellungen.ts — manuelle Firmen-Einstellungen: Ziel-ACOS und Kosten-Abschlag.
-// Der Kosten-Abschlag (%) lässt den Seller Amazon-Gebühren/Retouren/Anlieferkosten
-// selbst berücksichtigen, solange diese noch nicht automatisch aus der SP-API kommen.
-// Break-even ACOS = Rohmarge − Kosten-Abschlag (im Frontend gerechnet).
+// einstellungen.ts — manuelle Einstellungen, auf zwei Ebenen.
+//
+// FIRMA (tenant_einstellungen): Ziel-ACOS als Vorgabe, Zielmarge, Steuerprofil.
+// Der Kosten-Abschlag steht hier nur noch aus Bestandsgründen — der Break-even
+// wird längst aus den echten Gebühren je SKU gerechnet, nicht aus einem
+// geschätzten Prozentsatz.
+//
+// PRODUKT (asin_einstellungen): Ziel-ACOS und Umsatzsteuersatz je ASIN. Beides
+// ist produktabhängig — ein Artikel mit 36 % Rohmarge verträgt keinen Ziel-ACOS,
+// der für einen mit 80 % passt, und 7 % USt gilt nur für bestimmte Waren.
 
 function pruefeProzent(v: unknown, feld: string, erlaubtNull = false): number | null {
   if ((v === null || v === undefined || v === "") && erlaubtNull) return null;
@@ -42,4 +48,46 @@ export async function setzeEinstellungen(
   const { error } = await supabase.from("tenant_einstellungen").upsert(satz, { onConflict: "tenant_id" });
   if (error) throw new Error(`einstellungen upsert: ${error.message}`);
   return { ok: true };
+}
+
+/** Nur diese Sätze kommen in Deutschland vor. Ein Tippfehler wie 1,9 statt 19
+ *  wäre sonst nicht von einer Absicht zu unterscheiden und verfälschte jede
+ *  Marge — lieber ablehnen als stillschweigend übernehmen. */
+const UST_SAETZE = [0, 7, 19];
+
+/**
+ * Ziel-ACOS und/oder Umsatzsteuersatz für EIN Produkt setzen.
+ *
+ * Leerer String löscht den Wert (null = keine Angabe), damit man eine Vorgabe
+ * auch wieder zurücknehmen kann. Nur mitgeschickte Felder werden angefasst:
+ * sonst löschte das Speichern des Ziel-ACOS den Steuersatz gleich mit.
+ */
+export async function setzeAsinEinstellung(
+  supabase: any, tenant_id: string,
+  args: { asin?: unknown; ziel_acos_prozent?: unknown; ust_prozent?: unknown },
+): Promise<{ ok: true; asin: string }> {
+  const asin = String(args.asin ?? "").trim().toUpperCase();
+  if (!/^[A-Z0-9]{10}$/.test(asin)) throw new Error("Bitte eine gültige ASIN angeben (10 Zeichen).");
+
+  const satz: Record<string, unknown> = { tenant_id, asin, updated_at: new Date().toISOString() };
+
+  if ("ziel_acos_prozent" in args) {
+    satz.ziel_acos_prozent = pruefeProzent(args.ziel_acos_prozent, "Ziel-ACOS", true);
+  }
+  if ("ust_prozent" in args) {
+    const roh = args.ust_prozent;
+    if (roh === null || roh === undefined || roh === "") {
+      satz.ust_prozent = null;
+    } else {
+      const n = typeof roh === "number" ? roh : parseFloat(String(roh).replace(",", "."));
+      if (!UST_SAETZE.includes(n)) {
+        throw new Error(`Umsatzsteuersatz: erlaubt sind ${UST_SAETZE.join(", ")} % (oder leer für den Firmenwert).`);
+      }
+      satz.ust_prozent = n;
+    }
+  }
+
+  const { error } = await supabase.from("asin_einstellungen").upsert(satz, { onConflict: "tenant_id,asin" });
+  if (error) throw new Error(`asin_einstellungen upsert: ${error.message}`);
+  return { ok: true, asin };
 }

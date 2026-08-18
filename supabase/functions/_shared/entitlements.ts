@@ -48,6 +48,9 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   returns_uebersicht: "returns",
   get_product_performance: "products",
   produkt_uebersicht: "products",
+  // Einstellung je Produkt — gehoert zum Produkt-Feature, nicht zu Ads, auch
+  // wenn die Tabelle im Ads-Tab steht.
+  asin_einstellung_setzen: "products",
   sqp: "sqp",
   sqp_asins: "sqp",
   sqp_laden: "sqp",

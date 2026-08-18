@@ -16,9 +16,18 @@
 // rechnen, während die Gebühren netto stehen, macht jede Zahl systematisch zu
 // schön — genau in der Größenordnung des Steuersatzes.
 //
-// Werbekosten sind noch nicht angebunden (Ads-API bei Amazon nicht freigegeben).
-// Sie werden deshalb als UNBEKANNT ausgewiesen, nicht als 0 — sonst stünde da
-// ein Gewinn, den es so nicht gibt.
+// Werbekosten kommen je ASIN aus ads_daily (seit 2026-08-17 angebunden). Ohne
+// Ads-Verbindung bleiben sie UNBEKANNT, nicht 0 — sonst stünde da ein Gewinn,
+// den es so nicht gibt.
+//
+// Zusätzlich die Kette JE EINHEIT, die den Break-even ACOS herleitet:
+//   VK brutto − USt = VK netto − Gebühren − EK = DB vor Werbung
+//   Break-even ACOS = DB vor Werbung / VK netto
+//   − Werbung = DB nach Werbung;  TACOS = Werbung / Nettoumsatz gesamt
+// Ohne diese Herleitung ist der Break-even eine Zahl, die man glauben muss.
+//
+// Ziel-ACOS und Umsatzsteuersatz kommen je Produkt aus asin_einstellungen;
+// fehlt der Steuersatz dort, gilt der Mandanten-Wert.
 
 import { nettoGebuehr } from "./ust_faktor.ts";
 import { ladeUstFaktor } from "./ust_lauf.ts";
@@ -54,13 +63,36 @@ export async function produktUebersicht(
     von = new Date(Date.now() - fenster * 86400000).toISOString().slice(0, 10);
     bis = new Date().toISOString().slice(0, 10);
   }
-  const [{ data, error }, ustFaktor, einstellung] = await Promise.all([
+  const [{ data, error }, ustFaktor, einstellung, jeAsin, adsRes] = await Promise.all([
     supabase.rpc("produkt_uebersicht", { p_tenant: tenant_id, p_von: von, p_bis: bis }),
     ladeUstFaktor(supabase, tenant_id),
     supabase.from("tenant_einstellungen").select("umsatzsteuer_prozent")
       .eq("tenant_id", tenant_id).maybeSingle(),
+    supabase.from("asin_einstellungen").select("asin, ziel_acos_prozent, ust_prozent")
+      .eq("tenant_id", tenant_id),
+    // Werbekosten je ASIN aus der Tagesreihe — derselbe Zeitraum, damit die
+    // Kette in einer Zeile aufgeht.
+    supabase.rpc("ads_summen", { p_tenant: tenant_id, p_von: von, p_bis: bis }),
   ]);
   if (error) throw new Error(`produkt_uebersicht: ${error.message}`);
+
+  const proAsin = new Map<string, { ziel_acos_prozent: number | null; ust_prozent: number | null }>();
+  for (const e of (jeAsin?.data ?? []) as any[]) {
+    proAsin.set(String(e.asin), {
+      ziel_acos_prozent: e.ziel_acos_prozent == null ? null : Number(e.ziel_acos_prozent),
+      ust_prozent: e.ust_prozent == null ? null : Number(e.ust_prozent),
+    });
+  }
+
+  // Werbung je ASIN in Euro. Fehlt die Ads-Verbindung, bleibt die Karte leer —
+  // dann ist Werbung UNBEKANNT, nicht 0.
+  const werbungJeAsin = new Map<string, number>();
+  for (const r of (adsRes?.data ?? []) as any[]) {
+    if (r.ebene === "asin" && r.schluessel) {
+      werbungJeAsin.set(String(r.schluessel), Number(r.spend_cents) / 100);
+    }
+  }
+  const hatWerbung = werbungJeAsin.size > 0;
 
   // Umsatzsteuersatz auf den eigenen Umsatz. 19 % ist der Regelfall in
   // Deutschland; 0 bei Kleinunternehmern, deren Umsatz bereits netto ist.
@@ -70,10 +102,18 @@ export async function produktUebersicht(
     : 1;
 
   const produkte = ((data ?? []) as Row[]).map((r) => {
+    const eig = proAsin.get(r.asin);
+    // Steuersatz je Produkt, sonst der Mandanten-Wert. 7 % gilt z. B. für
+    // Lebensmittel — mandantenweit wäre das für gemischte Sortimente falsch.
+    const satzProdukt = eig?.ust_prozent ?? null;
+    const teiler = satzProdukt !== null && satzProdukt >= 0 && satzProdukt < 100
+      ? 1 + satzProdukt / 100
+      : umsatzTeiler;
+
     const umsatzBrutto = (Number(r.umsatz_cents) || 0) / 100;
     // Alles Weitere rechnet auf dem NETTOUMSATZ. Die vereinnahmte Umsatzsteuer
     // gehört dem Finanzamt; sie in Marge oder Gewinn zu führen wäre erfunden.
-    const umsatz = runde(umsatzBrutto / umsatzTeiler);
+    const umsatz = runde(umsatzBrutto / teiler);
     const umsatzsteuer = runde(umsatzBrutto - umsatz);
     const wareneinsatz = (Number(r.wareneinsatz_cents) || 0) / 100;
     const einheiten = Number(r.einheiten) || 0;
@@ -92,11 +132,26 @@ export async function produktUebersicht(
     const verkaufsgebuehr = je(r.verkaufsgebuehr_cents);
     const sonstige = je(r.sonstige_gebuehren_cents);
 
-    // Nettogewinn OHNE Werbekosten — die fehlen noch. Der Name sagt das, damit
+    // Deckungsbeitrag VOR Werbung. Der Name sagt ausdrücklich „vor", damit
     // niemand ihn für das Endergebnis hält.
     const vorWerbung = hatEk && hatGeb && rohertrag != null ? runde(rohertrag + gebuehren!) : null;
     // Zwischenstufe ohne EK: was nach Amazon übrig bleibt.
     const umsatzNachGebuehren = hatGeb ? runde(umsatz + gebuehren!) : null;
+
+    // --- Die Kette je Einheit ---
+    //
+    // Break-even ACOS ist keine eigenständige Größe, sondern der Deckungsbeitrag
+    // vor Werbung in Prozent vom Nettoumsatz: so viel Werbung verträgt das
+    // Produkt, bevor es sich nicht mehr trägt. Als nackte Prozentzahl ist das
+    // nicht nachvollziehbar — deshalb hier jede Stufe einzeln, in Euro.
+    //
+    // Je Einheit statt je Zeitraum, weil sich so über Produkte vergleichen
+    // lässt: „ich verkaufe für X, davon bleibt Y".
+    const jeStueck = (wert: number | null) =>
+      wert == null || einheiten <= 0 ? null : runde(wert / einheiten);
+
+    const werbung = werbungJeAsin.get(r.asin) ?? (hatWerbung ? 0 : null);
+    const nachWerbung = vorWerbung != null && werbung != null ? runde(vorWerbung - werbung) : null;
 
     return {
       asin: r.asin,
@@ -119,12 +174,33 @@ export async function produktUebersicht(
       gebuehrenquote: hatGeb && umsatz > 0 ? runde((-gebuehren! / umsatz) * 100, 1) : null,
       gebuehren_anteilig: Boolean(r.gebuehren_anteilig),
       umsatz_nach_gebuehren: umsatzNachGebuehren,
-      // Werbekosten fehlen -> das Endergebnis ist NICHT berechenbar.
-      werbekosten: null,
+      werbekosten: werbung == null ? null : runde(werbung),
       nettogewinn_vor_werbung: vorWerbung,
       marge_vor_werbung: vorWerbung != null && umsatz > 0 ? runde((vorWerbung / umsatz) * 100, 1) : null,
-      nettogewinn: null,
-      nettomarge: null,
+      nettogewinn: nachWerbung,
+      nettomarge: nachWerbung != null && umsatz > 0 ? runde((nachWerbung / umsatz) * 100, 1) : null,
+
+      // --- Kette je Einheit (die Herleitung des Break-even) ---
+      einheiten_basis: einheiten,
+      vk_brutto: jeStueck(umsatzBrutto),
+      ust_prozent: satzProdukt ?? ustSatz,
+      ust_je_stueck: jeStueck(umsatzsteuer),
+      vk_netto: jeStueck(umsatz),
+      // Gebühren kommen signiert (negativ) — hier als positiver Abzug zeigen.
+      gebuehren_je_stueck: gebuehren == null ? null : jeStueck(-gebuehren),
+      fba_je_stueck: fba == null ? null : jeStueck(-fba),
+      verkaufsgebuehr_je_stueck: verkaufsgebuehr == null ? null : jeStueck(-verkaufsgebuehr),
+      ek_je_stueck: hatEk ? jeStueck(wareneinsatz) : null,
+      db_vor_werbung_je_stueck: jeStueck(vorWerbung),
+      // Das ist die Zahl, die vorher unerklärt in der Spalte stand.
+      break_even_acos: vorWerbung != null && umsatz > 0 ? runde((vorWerbung / umsatz) * 100, 1) : null,
+      werbung_je_stueck: jeStueck(werbung),
+      db_nach_werbung_je_stueck: jeStueck(nachWerbung),
+      // Tatsächlicher ACOS: Werbung gemessen am beworbenen Umsatz kennt nur die
+      // Ads-Seite. TACOS misst sie am GESAMTumsatz des Produkts — die ehrlichere
+      // Grösse, weil organische Verkäufe die Werbung mittragen.
+      tacos: werbung != null && umsatz > 0 ? runde((werbung / umsatz) * 100, 1) : null,
+      ziel_acos_prozent: eig?.ziel_acos_prozent ?? null,
     };
   });
 
@@ -145,10 +221,13 @@ export async function produktUebersicht(
     umsatzsteuer_prozent: ustSatz,
     summe_umsatz_netto: runde(produkte.reduce((s, p) => s + p.umsatz, 0)),
     summe_umsatzsteuer: runde(produkte.reduce((s, p) => s + p.umsatzsteuer, 0)),
-    // Werbekosten fehlen -> der Nettogewinn ist unvollstaendig, und das steht hier.
-    hat_werbekosten: false,
-    rechenweg: "Nettoumsatz = Umsatz − Umsatzsteuer. Rohertrag = Nettoumsatz − Einkaufspreis. " +
-      "Nettogewinn = Rohertrag − Amazon-Gebühren (netto) − Werbekosten.",
-    fehlt: ["Werbekosten (PPC) — die Ads-API ist für dieses Konto noch nicht freigegeben"],
+    hat_werbekosten: hatWerbung,
+    rechenweg: "Je Einheit: VK brutto − Umsatzsteuer = VK netto. Davon Amazon-Gebühren (netto) " +
+      "und Einkaufspreis ab = Deckungsbeitrag vor Werbung. Dessen Anteil am VK netto IST der " +
+      "Break-even ACOS. Davon die tatsächliche Werbung ab = Deckungsbeitrag nach Werbung. " +
+      "TACOS = Werbung / Nettoumsatz gesamt (nicht nur beworbener Umsatz).",
+    fehlt: hatWerbung
+      ? []
+      : ["Werbekosten (PPC) — keine Ads-Verbindung für diesen Mandanten, Werbung ist unbekannt (nicht 0)"],
   };
 }

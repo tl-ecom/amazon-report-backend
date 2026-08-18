@@ -38,7 +38,7 @@ import { ladenhueterRadar } from "../_shared/ladenhueter.ts";
 import { bestandshistorie } from "../_shared/bestandshistorie.ts";
 import { boardReport } from "../_shared/board.ts";
 import { ertragVerlauf, listeEk, loescheEk, setzeEk } from "../_shared/ertrag.ts";
-import { ladeEinstellungen, setzeEinstellungen } from "../_shared/einstellungen.ts";
+import { ladeEinstellungen, setzeAsinEinstellung, setzeEinstellungen } from "../_shared/einstellungen.ts";
 import { importiereEkCsv, importiereEkVonUrl, speichereEkUrl } from "../_shared/sellerboard_import.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, legeFirmaAn, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
 import { importiereFeeSchedule, listeFeeKlassifizierung, listeFeeSchedule, setzeFeeKlassifizierung } from "../_shared/fee_stammdaten.ts";
@@ -350,6 +350,12 @@ Deno.serve(async (req) => {
       }
       if (action === "einstellungen_setzen") {
         const r = await setzeEinstellungen(service, tenantId, args as any);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      // Ziel-ACOS und Umsatzsteuersatz JE PRODUKT. Beides ist produktabhängig,
+      // ein Firmenwert passt nicht für ein gemischtes Sortiment.
+      if (action === "asin_einstellung_setzen") {
+        const r = await setzeAsinEinstellung(service, tenantId, args as any);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
       // Steuerprofil der Firma: Sitzland + Vorsteuerabzug. Daraus leitet sich
