@@ -314,6 +314,9 @@ Deno.serve(async (req) => {
 
     // ---- Stufe 1: anfordern ODER laufenden Report wiederaufnehmen ----
     let reportId: string;
+    // Nur bei Abrechnungen gesetzt: wie viele Berichte noch fehlen. Gehoert in
+    // die Antwort, damit man sieht, ob der Rueckstand abgearbeitet wird.
+    let nochOffen: number | null = null;
 
     if (resumeReportId) {
       // Wiederaufnahme: der Report MUSS diesem Tenant gehören. Ohne diese Prüfung
@@ -367,15 +370,40 @@ Deno.serve(async (req) => {
       }
 
       if (konfig.vorhanden) {
-        // Von Amazon erzeugter Report (Abrechnung): den jüngsten fertigen holen.
-        // `nach` erlaubt gezielt ältere Abrechnungszeiträume (Backfill).
-        const gefunden = await findeVorhandenenReport(
-          accessToken, reportType, ctx.marketplace_id, body.nach ?? null, rl,
+        // Von Amazon erzeugter Report (Abrechnung): den jüngsten holen, der noch
+        // FEHLT. Welche schon da sind, steht in den eigenen Jobs — die Report-ID
+        // wird dort ohnehin mitgeschrieben.
+        const { data: geholt } = await supabase
+          .from("report_jobs")
+          .select("amazon_report_id")
+          .eq("tenant_id", tenant_id)
+          .eq("report_type", reportType)
+          .eq("status", "DONE")
+          .not("amazon_report_id", "is", null);
+        const bereitsGeholt = new Set<string>(
+          ((geholt ?? []) as Array<{ amazon_report_id: string }>).map((r) => String(r.amazon_report_id)),
         );
+
+        const gefunden = await findeVorhandenenReport(
+          accessToken, reportType, ctx.marketplace_id, body.nach ?? null, rl, bereitsGeholt,
+        );
+
+        // Nichts Neues ist kein Fehler — frueher wurde hier taeglich derselbe
+        // Bericht erneut geladen.
+        if (gefunden.nichtsNeues) {
+          return json({
+            ok: true,
+            status: "NICHTS_NEUES",
+            report_type: reportType,
+            hinweis: gefunden.detail,
+            dauer_s: Math.round((Date.now() - startedAt) / 1000),
+          });
+        }
         if (!gefunden.ok) {
           return json({ error: "Kein Abrechnungsbericht verfügbar", detail: gefunden.detail }, 502);
         }
         reportId = gefunden.reportId!;
+        nochOffen = gefunden.offen ?? null;
       } else {
         const requested = await requestReport(accessToken, {
           reportType,
@@ -599,6 +627,9 @@ Deno.serve(async (req) => {
       status: "DONE",
       report_id: reportId,
       report_type: reportType,
+      // Bei Abrechnungen: wie viele Berichte danach noch fehlen. Steht > 0, holt
+      // der naechste Lauf den naechsten — so werden Lueckstaende abgearbeitet.
+      ...(nochOffen !== null ? { abrechnungen_offen: Math.max(0, nochOffen - 1) } : {}),
       dauer_s: Math.round((Date.now() - startedAt) / 1000),
       compression: fetched.compression,
       datenstruktur_schluessel: keys,
@@ -639,8 +670,22 @@ Deno.serve(async (req) => {
 /**
  * Von Amazon erzeugte Reports auflisten und den passenden auswählen.
  * Nur für Typen mit `vorhanden: true` (Abrechnungsbericht) — die lassen sich
- * nicht anfordern. Ohne `nach` gewinnt der jüngste fertige Report; mit `nach`
- * (YYYY-MM-DD) der jüngste, dessen Datenende NICHT nach diesem Tag liegt.
+ * nicht anfordern.
+ *
+ * WARUM NICHT EINFACH DER JÜNGSTE (bis 2026-08-19 so): Amazon listet bis zu 100
+ * verfügbare Abrechnungen, geholt wurde aber nur `fertige[0]`. Zwischen zwei
+ * Auszahlungen liegen ~14 Tage — der tägliche Lauf holte also zwei Wochen lang
+ * denselben Bericht, während jede Abrechnung, die zwischen zwei Läufen abgelöst
+ * wurde, NIE geholt wurde. Bei Vaneja fehlten dadurch 07.05.-05.06. und
+ * 19.06.-14.07. komplett: die Berichte lagen bei Amazon bereit, sie wurden nur
+ * nicht abgerufen.
+ *
+ * Jetzt gewinnt der jüngste Bericht, der noch NICHT geholt wurde. Damit ist ein
+ * neuer sofort da, und an Tagen ohne neuen arbeitet der Lauf die Lücken
+ * rückwärts ab — statt zum vierzehnten Mal dieselbe Datei zu laden.
+ *
+ * `nach` (YYYY-MM-DD) grenzt zusätzlich auf Berichte ein, deren Datenende nicht
+ * nach diesem Tag liegt (gezielter Backfill).
  */
 async function findeVorhandenenReport(
   accessToken: string,
@@ -648,7 +693,8 @@ async function findeVorhandenenReport(
   marketplaceId: string,
   nach: string | null,
   rl: RateSammler,
-): Promise<{ ok: boolean; reportId?: string; detail?: unknown }> {
+  bereitsGeholt: Set<string> = new Set(),
+): Promise<{ ok: boolean; reportId?: string; detail?: unknown; nichtsNeues?: boolean; offen?: number }> {
   const url = new URL(`${SP_ENDPOINT}/reports/2021-06-30/reports`);
   url.searchParams.set("reportTypes", reportType);
   url.searchParams.set("marketplaceIds", marketplaceId);
@@ -671,11 +717,28 @@ async function findeVorhandenenReport(
       detail: "Amazon führt keinen fertigen Abrechnungsbericht — er entsteht erst mit der nächsten Auszahlung.",
     };
   }
-  const treffer = nach
-    ? fertige.find((r: any) => String(r.dataEndTime ?? "").slice(0, 10) <= nach)
-    : fertige[0];
-  if (!treffer) return { ok: false, detail: `Kein Abrechnungsbericht mit Ende bis ${nach}` };
-  return { ok: true, reportId: treffer.reportId };
+  const inFrage = nach
+    ? fertige.filter((r: any) => String(r.dataEndTime ?? "").slice(0, 10) <= nach)
+    : fertige;
+  if (inFrage.length === 0) {
+    return { ok: false, detail: `Kein Abrechnungsbericht mit Ende bis ${nach}` };
+  }
+
+  // fertige ist absteigend nach dataEndTime sortiert -> der erste ungeholte ist
+  // der juengste, der noch fehlt.
+  const offen = inFrage.filter((r: any) => !bereitsGeholt.has(String(r.reportId)));
+  if (offen.length === 0) {
+    // Kein Fehler: Es gibt schlicht nichts Neues. Frueher wurde hier taeglich
+    // derselbe Bericht erneut geladen.
+    return {
+      ok: false,
+      nichtsNeues: true,
+      offen: 0,
+      detail: `Alle ${inFrage.length} verfuegbaren Abrechnungsberichte sind bereits geholt.`,
+    };
+  }
+
+  return { ok: true, reportId: String(offen[0].reportId), offen: offen.length };
 }
 
 // --- Stufe 1: Report anfordern (429 nach Amazons eigenem Limit behandeln) ---
