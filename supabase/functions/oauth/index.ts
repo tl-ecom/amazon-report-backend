@@ -72,18 +72,56 @@ Deno.serve(async (req) => {
     const rest = mcpPfadRest(path.slice(prIdx + PR.length));
     return json(baueResourceMetadata(mcpRessource(resource, rest), issuer));
   }
-  if (req.method === "POST" && path.endsWith("/register")) return dcrRegister(req);
+  if (req.method === "POST" && path.endsWith("/register")) return mitSpur("register", req, () => dcrRegister(req));
   if (path.endsWith("/authorize")) {
-    return req.method === "GET" ? authorizeGet(req) : json({ error: "invalid_request", error_description: "GET erwartet" }, 405);
+    return mitSpur("authorize", req, () => req.method === "GET" ? authorizeGet(req) : Promise.resolve(json({ error: "invalid_request", error_description: "GET erwartet" }, 405)));
   }
   if (path.endsWith("/confirm")) {
-    return req.method === "POST" ? confirmPost(req) : json({ error: "invalid_request", error_description: "POST erwartet" }, 405);
+    return mitSpur("confirm", req, () => req.method === "POST" ? confirmPost(req) : Promise.resolve(json({ error: "invalid_request", error_description: "POST erwartet" }, 405)));
   }
   if (path.endsWith("/token")) {
-    return req.method === "POST" ? tokenPost(req) : json({ error: "invalid_request", error_description: "POST erforderlich" }, 405);
+    return mitSpur("token", req, () => req.method === "POST" ? tokenPost(req) : Promise.resolve(json({ error: "invalid_request", error_description: "POST erforderlich" }, 405)));
   }
   return json({ error: "not_found" }, 404);
 });
+
+
+/**
+ * Ablaufspur. Haelt fest, WELCHER Schritt mit welchem Ergebnis lief — ohne
+ * Geheimnisse (keine Codes, keine Tokens, kein code_verifier).
+ *
+ * Anlass: Ein Verbindungsversuch scheiterte nach der Zustimmung, der Code wurde
+ * ausgestellt und nie eingeloest. Statisch war jedes Glied in Ordnung. Ohne
+ * Spur bleibt nur die Frage, ob der Client /token gar nicht ruft — und die
+ * beantwortet man nicht durch Nachdenken, sondern durch Hinsehen.
+ *
+ * Ein Fehler beim Protokollieren darf den Handshake NIE stoeren.
+ */
+async function mitSpur(
+  schritt: string, req: Request, lauf: () => Promise<Response>,
+): Promise<Response> {
+  const antwort = await lauf();
+  try {
+    let grund: string | null = null;
+    let clientId: string | null = null;
+    if (!antwort.ok) {
+      const txt = await antwort.clone().text();
+      grund = txt.slice(0, 300);
+    }
+    // client_id steht je nach Schritt in Query oder Formular — beides versuchen.
+    try {
+      clientId = new URL(req.url).searchParams.get("client_id");
+    } catch { /* egal */ }
+    await service().from("oauth_ereignisse").insert({
+      schritt,
+      ergebnis: antwort.ok ? "ok" : "fehler",
+      client_id: clientId,
+      grund,
+      user_agent: (req.headers.get("user-agent") ?? "").slice(0, 200),
+    });
+  } catch { /* Protokollieren darf nie stoeren */ }
+  return antwort;
+}
 
 // --- Dynamic Client Registration (RFC 7591) ---
 async function dcrRegister(req: Request): Promise<Response> {
