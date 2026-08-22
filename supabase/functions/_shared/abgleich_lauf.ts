@@ -7,9 +7,11 @@
 // tatsächlich zugewiesene Klasse. Lässt sich das nicht bestimmen, bleibt die
 // Soll-Gebühr null und der Befund ist Datenpflege, kein Kostenfall.
 
-import { klasseFuerMasse, waehleTarif, type Klasse } from "./groessenklassen.ts";
+import {
+  klasseFuerMasse, waehleTarif, type Klasse, type Preisgrenze,
+} from "./groessenklassen.ts";
 import { abgleichReport, type Paar } from "./masse_abgleich.ts";
-import { baueKlassen } from "./korridor_lauf.ts";
+import { baueKlassen, ladePreisgrenzen } from "./korridor_lauf.ts";
 
 const LAND: Record<string, string> = {
   A1PA6795UKMFR9: "DE", A13V1IB3VIYZZH: "FR", APJ6JRA9NG5V4: "IT",
@@ -28,12 +30,13 @@ export async function masseAbgleich(
   const markt = LAND[String(ctx?.marketplace_id ?? "")] ?? null;
   if (!markt) return leer("Der Marktplatz dieser Firma ist nicht bekannt.");
 
-  const [katalogRes, produkteRes, scheduleRes] = await Promise.all([
+  const [katalogRes, produkteRes, scheduleRes, grenzen] = await Promise.all([
     supabase.from("katalog_masse").select("*").eq("tenant_id", tenant_id).eq("marketplace", markt),
     supabase.rpc("korridor_produkte", { p_tenant: tenant_id, p_markt: markt, p_tage: tage }),
     supabase.from("fee_schedule").select("*").eq("marketplace", markt)
       .lte("gueltig_ab", new Date().toISOString().slice(0, 10))
       .order("gueltig_ab", { ascending: false }),
+    ladePreisgrenzen(supabase, markt) as Promise<Preisgrenze[]>,
   ]);
   if (produkteRes.error) throw new Error(`korridor_produkte: ${produkteRes.error.message}`);
 
@@ -80,11 +83,16 @@ export async function masseAbgleich(
     // Tabelle gegen Tabelle ist sauber: Der Unterschied kommt ausschliesslich
     // aus den Massen. Die tatsächlich erwartete Gebühr steht daneben.
     //
-    // Welche Tabelle „dieselbe" ist, entscheidet der Artikelpreis: Unter der
-    // Preisgrenze gilt der Niedrigpreisversand (Rate Card S. 5) mit eigenen
-    // Betraegen. Ohne Preis ist das nicht entscheidbar — dann bleibt die
+    // Welche Tabelle „dieselbe" ist, entscheiden Artikelpreis UND Produktgruppe:
+    // Unter der Preisgrenze gilt der Niedrigpreisversand (Rate Card S. 5) mit
+    // eigenen Betraegen, und diese Grenze liegt je nach Kategorie bei 20 € oder
+    // bei 12 €. Ohne Preis ist das nicht entscheidbar — dann bleibt die
     // Soll-Gebuehr leer und der Befund ist Datenpflege, kein Kostenfall.
-    const wahl = waehleTarif(zahl(r.preis_cents), r.groessenklasse ?? null, klassen);
+    const wahl = waehleTarif({
+      preis_cents: zahl(r.preis_cents),
+      groessenklasse: r.groessenklasse ?? null,
+      produktgruppe: r.produktgruppe ?? null,
+    }, klassen, grenzen);
     const tarifKlassen = wahl.klassen ?? [];
     const aktuelleKlasse = tarifKlassen.find((x) => x.size_tier === r.groessenklasse);
     let istCents: number | null = null;

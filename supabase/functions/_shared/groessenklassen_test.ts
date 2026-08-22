@@ -1,8 +1,8 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
-  abrechnungsgewicht, aufschlagFuer, gebuehrFuer, klasseFuerMasse, korridorReport,
-  NIEDRIGPREIS_GRENZE_CENTS, niedrigpreisGrenze, pruefeKorridor,
-  TREIBSTOFF_AUFSCHLAG, volumengewicht,
+  abrechnungsgewicht, aufschlagFuer, gebuehrFuer, grenzeFuer, klasseFuerMasse,
+  korridorReport, NIEDRIGPREIS_GRENZE_CENTS, niedrigpreisGrenze, pruefeKorridor,
+  tarifNachGebuehr, TREIBSTOFF_AUFSCHLAG, volumengewicht,
   type Klasse, type Produkt,
 } from "./groessenklassen.ts";
 
@@ -37,7 +37,7 @@ function produkt(over: Partial<Produkt> = {}): Produkt {
   return {
     sku: "TEST-1", asin: "B0TEST", produktname: "Testprodukt",
     laengste_seite_cm: 40, mittlere_seite_cm: 24, kuerzeste_seite_cm: 11,
-    gewicht_g: 800, groessenklasse: "StandardParcel",
+    gewicht_g: 800, groessenklasse: "StandardParcel", produktgruppe: "Automotive",
     preis_cents: 2997, fulfilment_cents: 344, einheiten: 1000, fenster_tage: 365,
     ...over,
   };
@@ -333,6 +333,106 @@ Deno.test("Niedrigpreis: die Tarife werden nicht vermischt", () => {
 Deno.test("Niedrigpreis: kein Treibstoffaufschlag, im Standardtarif schon", () => {
   assertEquals(aufschlagFuer("standard"), TREIBSTOFF_AUFSCHLAG);
   assertEquals(aufschlagFuer("niedrigpreis"), 1);
+});
+
+// --- Zweite Preisgrenze: 12 € statt 20 € in sieben Kategorien (Rate Card S. 5) ---
+
+const NP_ALLE = [GROSSER_UMSCHLAG, STANDARD_UMSCHLAG, NP_GROSSER_UMSCHLAG, NP_STANDARD_UMSCHLAG];
+/** So wie in public.fee_preisgrenze fuer DE hinterlegt. */
+const GRENZEN = [
+  { produktgruppe: null, grenze_cents: 2000 },
+  { produktgruppe: "Grocery", grenze_cents: 1200 },
+  { produktgruppe: "Biss", grenze_cents: 1200 },
+];
+
+Deno.test("Preisgrenze: Kategoriezeile schlaegt die Vorgabe", () => {
+  assertEquals(grenzeFuer("Grocery", GRENZEN), { grenze: 1200, aus_gruppe: true });
+  assertEquals(grenzeFuer("Automotive", GRENZEN), { grenze: 2000, aus_gruppe: false });
+  assertEquals(grenzeFuer(null, GRENZEN), { grenze: 2000, aus_gruppe: false });
+  // Schreibweise darf nicht entscheiden.
+  assertEquals(grenzeFuer("  grocery ", GRENZEN).grenze, 1200);
+});
+
+Deno.test("Preisgrenze: ohne Tabelle bleibt es beim bisherigen Verhalten", () => {
+  assertEquals(grenzeFuer("Grocery", [], [NP_GROSSER_UMSCHLAG]).grenze, 2000);
+  assertEquals(grenzeFuer("Grocery", []).grenze, NIEDRIGPREIS_GRENZE_CENTS);
+});
+
+Deno.test("Preisgrenze: 15,97 € in einer 12-€-Kategorie faellt aus dem Niedrigpreisversand", () => {
+  // Derselbe Artikel, derselbe Preis — nur die Kategorie unterscheidet sie.
+  const autoteil = pruefeKorridor(
+    warnweste({ preis_cents: 1597, produktgruppe: "Automotive" }), NP_ALLE, GRENZEN,
+  );
+  const lebensmittel = pruefeKorridor(
+    warnweste({ preis_cents: 1597, produktgruppe: "Grocery" }), NP_ALLE, GRENZEN,
+  );
+  assertEquals(autoteil.tarif, "niedrigpreis");
+  assertEquals(lebensmittel.tarif, "standard");
+  // Und die angewandte Grenze steht im Befund, damit er nachvollziehbar bleibt.
+  assertEquals(autoteil.preisgrenze_eur, 20);
+  assertEquals(lebensmittel.preisgrenze_eur, 12);
+  assertEquals(lebensmittel.grenze_aus_gruppe, true);
+});
+
+Deno.test("Preisgrenze: unter BEIDEN Grenzen bleibt die Kategorie folgenlos", () => {
+  const a = pruefeKorridor(warnweste({ produktgruppe: "Automotive" }), NP_ALLE, GRENZEN);
+  const b = pruefeKorridor(warnweste({ produktgruppe: "Grocery" }), NP_ALLE, GRENZEN);
+  assertEquals(a.tarif, "niedrigpreis"); // 9,97 € < 12 € < 20 €
+  assertEquals(b.tarif, "niedrigpreis");
+});
+
+Deno.test("Gegenprobe: Amazons Gebuehr widerlegt die Vorgabegrenze", () => {
+  // Produktgruppe fehlt in der Grenzentabelle -> Vorgabe 20 € -> Niedrigpreis.
+  // Amazon rechnet aber 3,09 € ab (= Standard 3,04 x 1,015) statt 2,65 €.
+  // Die gemessene Gebuehr ist die haertere Quelle als die Namenszuordnung.
+  const b = pruefeKorridor(
+    warnweste({ preis_cents: 1597, produktgruppe: "Unbekannte Gruppe", fulfilment_cents: 309 }),
+    NP_ALLE, GRENZEN,
+  );
+  assertEquals(b.tarif, "standard");
+  assertEquals(b.tarif_korrigiert, true);
+  assertEquals(b.grenze_aus_gruppe, false);
+});
+
+Deno.test("Gegenprobe: greift nur in eine Richtung", () => {
+  // 29,97 € liegt ueber jeder Grenze — niedrigpreisfaehig ist der Artikel nie,
+  // auch wenn die gemessene Gebuehr zufaellig zur S.5-Zeile passt. Eine
+  // unbekannte Kategorie kann die Grenze nur senken, nie anheben.
+  const b = pruefeKorridor(
+    warnweste({ preis_cents: 2997, produktgruppe: "Unbekannte Gruppe", fulfilment_cents: 265 }),
+    NP_ALLE, GRENZEN,
+  );
+  assertEquals(b.tarif, "standard");
+  assertEquals(b.tarif_korrigiert, false);
+});
+
+Deno.test("Gegenprobe: bei bekannter Kategorie wird nicht mehr gegengeprueft", () => {
+  // Steht die Gruppe in der Tabelle, ist die Frage entschieden. Eine abweichende
+  // Gebuehr ist dann ein Gebuehrenbefund (tabelle_passt), kein Tarifzweifel.
+  const b = pruefeKorridor(
+    warnweste({ preis_cents: 997, produktgruppe: "Grocery", fulfilment_cents: 309 }),
+    NP_ALLE, GRENZEN,
+  );
+  assertEquals(b.tarif, "niedrigpreis"); // 9,97 € < 12 €
+  assertEquals(b.tarif_korrigiert, false);
+  assertEquals(b.tabelle_passt, false); // stattdessen HIER sichtbar
+});
+
+Deno.test("Gegenprobe: uneindeutige Gebuehr entscheidet nichts", () => {
+  // Liegen beide Tabellenwerte innerhalb der Toleranz, wird nichts behauptet.
+  assertEquals(tarifNachGebuehr(3.0, [
+    { tarif: "niedrigpreis", gebuehr: 2.95 },
+    { tarif: "standard", gebuehr: 3.05 },
+  ]), null);
+  // Und wenn keiner passt, ebenfalls nicht.
+  assertEquals(tarifNachGebuehr(9.9, [
+    { tarif: "niedrigpreis", gebuehr: 2.95 },
+    { tarif: "standard", gebuehr: 3.05 },
+  ]), null);
+  assertEquals(tarifNachGebuehr(3.05, [
+    { tarif: "niedrigpreis", gebuehr: null },
+    { tarif: "standard", gebuehr: 3.05 },
+  ]), "standard");
 });
 
 Deno.test("Niedrigpreis: rechnet nur mit dem Stueckgewicht, nicht mit dem Volumen", () => {

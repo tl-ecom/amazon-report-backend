@@ -71,19 +71,57 @@ export type Tarif = "standard" | "niedrigpreis";
 /**
  * Ab diesem Artikelpreis gilt der Standardtarif; darunter der Niedrigpreisversand
  * (Rate Card S. 5: „höchstens 20 € (DE, NL, FR, IT, ES, BE, IE) einschließlich
- * MwSt."). Nur der Rückfall: Bringt die Tabelle eine eigene Grenze mit
- * (`preis_grenze_cents`), gilt die — die Grenze gehört zur Rate Card und ändert
- * sich mit ihr, nicht mit dem Code.
- *
- * OFFEN: Für Schönheit/Gesundheit/Körperpflege, Geschäfts-/Industrie-/
- * Wissenschaftsbedarf, Bürobedarf, Lebensmittel, Bücher, Amazon-Gerätezubehör
- * und Küche liegt die Grenze bei 12 € statt 20 €. Das ist hier NICHT abgebildet:
- * Es bräuchte eine belastbare Zuordnung von Amazons Produktgruppen auf diese
- * Kategorienamen, und die zu raten wäre derselbe Fehler in klein. Betroffen wären
- * nur Artikel zwischen 12 und 20 € in genau diesen Kategorien — für die fällt die
- * Gebühr dann zu niedrig aus.
+ * MwSt."). Nur der Rückfall: Nennt die Grenzentabelle einen Wert, gilt der — die
+ * Grenze gehört zur Rate Card und ändert sich mit ihr, nicht mit dem Code.
  */
 export const NIEDRIGPREIS_GRENZE_CENTS = 2000;
+
+/**
+ * Eine Grenze aus `public.fee_preisgrenze`.
+ *
+ * Die Rate Card nennt NICHT eine Grenze, sondern zwei: 20 € in den meisten
+ * Kategorien, aber nur 12 € bei Schönheit/Gesundheit/Körperpflege,
+ * Geschäfts-/Industrie-/Wissenschaftsbedarf, Bürobedarf, Lebensmitteln und
+ * Feinkost, Büchern, Amazon-Gerätezubehör und Küche (S. 5).
+ *
+ * An echten Daten belegt — gleiche Klasse, gleicher Marktplatz, beide unter 20 €:
+ *   Warnwesten 4er, Automotive, 15,97 € → gemessen 3,03 €, Niedrigpreis 3,04 €
+ *   Trennspray 2er, Grocery,    18,97 € → gemessen 3,57 €, Standard    3,47 €
+ */
+export interface Preisgrenze {
+  /** Amazons `product-group`. null = Vorgabe für alle Gruppen ohne eigene Zeile. */
+  produktgruppe: string | null;
+  grenze_cents: number;
+}
+
+/** Gruppennamen robust vergleichen — Amazon schreibt sie nicht immer gleich. */
+function normGruppe(s: string | null | undefined): string | null {
+  const t = (s ?? "").trim().toLowerCase();
+  return t === "" ? null : t;
+}
+
+/**
+ * Welche Preisgrenze gilt für diese Produktgruppe?
+ *
+ * `aus_gruppe` sagt, ob die Grenze aus einer Kategoriezeile stammt oder aus der
+ * Vorgabe. Das ist kein Schmuck: Nur bei der Vorgabe besteht das Restrisiko, dass
+ * eine Ausnahmekategorie unter einem Namen auftritt, den die Tabelle nicht kennt.
+ * Deshalb wird dieser Fall später gegen Amazons tatsächliche Gebühr gegengeprüft.
+ */
+export function grenzeFuer(
+  produktgruppe: string | null,
+  grenzen: Preisgrenze[],
+  klassen: Klasse[] = [],
+): { grenze: number; aus_gruppe: boolean } {
+  const gesucht = normGruppe(produktgruppe);
+  if (gesucht !== null) {
+    const treffer = grenzen.find((g) => normGruppe(g.produktgruppe) === gesucht);
+    if (treffer) return { grenze: treffer.grenze_cents, aus_gruppe: true };
+  }
+  const vorgabe = grenzen.find((g) => normGruppe(g.produktgruppe) === null);
+  if (vorgabe) return { grenze: vorgabe.grenze_cents, aus_gruppe: false };
+  return { grenze: niedrigpreisGrenze(klassen), aus_gruppe: false };
+}
 
 export interface Gewichtsstufe {
   max_weight_g: number | null; // null = oberste Stufe ohne Obergrenze
@@ -121,6 +159,8 @@ export interface Produkt {
   kuerzeste_seite_cm: number | null;
   gewicht_g: number | null;
   groessenklasse: string | null;
+  /** Amazons `product-group` — entscheidet, WELCHE Preisgrenze gilt. */
+  produktgruppe: string | null;
   /** Artikelpreis in Cent — entscheidet, welcher Tarif gilt. */
   preis_cents: number | null;
   /** Von Amazon erwartete Gebühr je Stück in Cent (netto). */
@@ -157,8 +197,35 @@ export interface KorridorBefund {
   einheiten: number;
   /** Gebühr laut Tabelle vs. was Amazon nennt — weicht das ab, ist die Ersparnis unsicher. */
   tabelle_passt: boolean | null;
+  /** Angewandte Preisgrenze des Niedrigpreisversands in Euro. */
+  preisgrenze_eur: number | null;
+  /** Kam sie aus einer Kategoriezeile (true) oder aus der Vorgabe (false)? */
+  grenze_aus_gruppe: boolean | null;
+  /**
+   * true = die Tarifwahl nach Preis wurde durch Amazons tatsächliche Gebühr
+   * widerlegt und korrigiert. Ein Hinweis darauf, dass die Produktgruppe in der
+   * Grenzentabelle fehlt.
+   */
+  tarif_korrigiert: boolean;
   text: string;
   grund: string | null;
+}
+
+/**
+ * Welcher Tarif passt zu dem, was Amazon tatsächlich abrechnet?
+ *
+ * Gegenprobe für den Fall, dass die Grenzentabelle die Produktgruppe nicht kennt.
+ * Antwortet nur, wenn GENAU ein Kandidat innerhalb der Toleranz liegt — bei zwei
+ * Treffern oder keinem ist nichts entschieden, und dann wird nichts behauptet.
+ */
+export function tarifNachGebuehr(
+  gemessen_eur: number,
+  kandidaten: Array<{ tarif: Tarif; gebuehr: number | null }>,
+): Tarif | null {
+  const treffer = kandidaten.filter(
+    (k) => k.gebuehr !== null && Math.abs(gemessen_eur - k.gebuehr) <= TABELLE_ABWEICHUNG * k.gebuehr,
+  );
+  return treffer.length === 1 ? treffer[0].tarif : null;
 }
 
 function nz(x: number | null | undefined): number | null {
@@ -185,21 +252,40 @@ export function niedrigpreisGrenze(klassen: Klasse[]): number {
 }
 
 /**
- * Welcher Tarif gilt für diesen Artikelpreis?
+ * Welcher Tarif gilt für diesen Artikelpreis bei dieser Grenze?
  *
  * null, wenn Amazon keinen Preis meldet: Dann ist die Frage nicht entscheidbar,
  * und die Standardtabelle zu nehmen wäre genau der Fehler, um den es hier geht.
  */
-export function tarifFuer(preis_cents: number | null, klassen: Klasse[]): Tarif | null {
+export function tarifFuer(preis_cents: number | null, grenze_cents: number): Tarif | null {
   const preis = nz(preis_cents);
   if (preis === null) return null;
-  return preis < niedrigpreisGrenze(klassen) ? "niedrigpreis" : "standard";
+  return preis < grenze_cents ? "niedrigpreis" : "standard";
 }
 
 /** Ergebnis der Tarifwahl: entweder ein Tarif samt seinen Klassen, oder ein Grund. */
 export type TarifWahl =
-  | { tarif: Tarif; klassen: Klasse[]; grund?: undefined }
-  | { tarif: null; klassen?: undefined; grund: string };
+  | {
+    tarif: Tarif;
+    klassen: Klasse[];
+    /** Die angewandte Preisgrenze in Cent — gehört in jeden Befund, damit er prüfbar ist. */
+    grenze_cents: number;
+    /**
+     * Kam die Grenze aus einer Kategoriezeile (true) oder aus der Vorgabe (false)?
+     * Bei der Vorgabe ist die Zuordnung nur so gut wie die Grenzentabelle — dieser
+     * Fall wird gegen Amazons tatsächliche Gebühr gegengeprüft.
+     */
+    grenze_aus_gruppe: boolean;
+    grund?: undefined;
+  }
+  | { tarif: null; klassen?: undefined; grenze_cents?: undefined; grenze_aus_gruppe?: undefined; grund: string };
+
+/** Was für die Tarifwahl gebraucht wird — als Objekt, damit die drei Felder nicht verrutschen. */
+export interface TarifEingabe {
+  preis_cents: number | null;
+  groessenklasse: string | null;
+  produktgruppe: string | null;
+}
 
 /**
  * Welcher Tarif gilt für dieses Produkt, und welche Klassen gehören dazu?
@@ -221,10 +307,10 @@ export type TarifWahl =
  * Modul 2, Modul 3 und die Gebührenänderungs-Vorschau rufen sie alle auf.
  */
 export function waehleTarif(
-  preis_cents: number | null, groessenklasse: string | null, klassen: Klasse[],
+  p: TarifEingabe, klassen: Klasse[], grenzen: Preisgrenze[] = [],
 ): TarifWahl {
-  const grenze = niedrigpreisGrenze(klassen);
-  const nachPreis = tarifFuer(preis_cents, klassen);
+  const { grenze, aus_gruppe } = grenzeFuer(p.produktgruppe, grenzen, klassen);
+  const nachPreis = tarifFuer(p.preis_cents, grenze);
   if (nachPreis === null) {
     return {
       tarif: null,
@@ -246,14 +332,14 @@ export function waehleTarif(
           "Tabelle, nicht die Standardtabelle. Für diesen Marktplatz ist sie nicht hinterlegt.",
       };
     }
-    if (!niedrigpreis.some((k) => k.size_tier === groessenklasse)) tarif = "standard";
+    if (!niedrigpreis.some((k) => k.size_tier === p.groessenklasse)) tarif = "standard";
   }
 
   const passend = klassen.filter((k) => k.tarif === tarif);
   if (passend.length === 0) {
     return { tarif: null, grund: "Für den Standardtarif ist keine Gebührentabelle hinterlegt." };
   }
-  return { tarif, klassen: passend };
+  return { tarif, klassen: passend, grenze_cents: grenze, grenze_aus_gruppe: aus_gruppe };
 }
 
 /**
@@ -367,6 +453,7 @@ function leer(p: Produkt, grund: string, tarif: Tarif | null = null): KorridorBe
     ziel_klasse: null, ziel_label: null, blocker: [],
     ersparnis_je_stueck: null, ersparnis_jahr: null, hochgerechnet: false,
     einheiten: p.einheiten, tabelle_passt: null,
+    preisgrenze_eur: null, grenze_aus_gruppe: null, tarif_korrigiert: false,
     text: "Nicht bewertbar.", grund,
   };
 }
@@ -377,7 +464,9 @@ function leer(p: Produkt, grund: string, tarif: Tarif | null = null): KorridorBe
  * `klassen` muss die Klassen EINES Marktplatzes und EINER Gültigkeitsperiode
  * enthalten — Klassen über Zeiträume zu mischen ergäbe Fantasie-Ersparnisse.
  */
-export function pruefeKorridor(p: Produkt, klassen: Klasse[]): KorridorBefund {
+export function pruefeKorridor(
+  p: Produkt, klassen: Klasse[], grenzen: Preisgrenze[] = [],
+): KorridorBefund {
   const l = nz(p.laengste_seite_cm), b = nz(p.mittlere_seite_cm), h = nz(p.kuerzeste_seite_cm);
   const stueck = nz(p.gewicht_g);
   if (l === null || b === null || h === null || stueck === null) {
@@ -388,10 +477,44 @@ export function pruefeKorridor(p: Produkt, klassen: Klasse[]): KorridorBefund {
   // ERST der Tarif, dann alles andere: Standardtabelle und Niedrigpreisversand
   // haben dieselben Klassennamen, aber andere Beträge. Wer die Klasse zuerst
   // sucht, findet sie auch in der falschen Tabelle — und rechnet ab da falsch.
-  const wahl = waehleTarif(p.preis_cents, p.groessenklasse, klassen);
+  const wahl = waehleTarif(p, klassen, grenzen);
   if (wahl.tarif === null) return leer(p, wahl.grund);
-  const { tarif, klassen: tarifKlassen } = wahl;
+  let tarif = wahl.tarif;
+  const { grenze_cents, grenze_aus_gruppe } = wahl;
 
+  // Gegenprobe, wenn die Grenze nur aus der Vorgabe stammt: Dann kennt die
+  // Grenzentabelle diese Produktgruppe nicht, und es bleibt die Möglichkeit, dass
+  // sie zu den Kategorien mit der niedrigeren Grenze gehört. Amazons tatsächlich
+  // erwartete Gebühr entscheidet das — sie ist die härtere Quelle als jede
+  // Namenszuordnung. Antwortet die Gegenprobe nicht eindeutig, bleibt es beim
+  // Preis-Ergebnis.
+  //
+  // NUR in eine Richtung: Eine unbekannte Kategorie kann die Grenze ausschließlich
+  // SENKEN (20 € -> 12 €, Rate Card S. 5) und ein Produkt damit aus dem Programm
+  // nehmen — nie hinein. Ein Artikel über der Vorgabegrenze ist nicht
+  // niedrigpreisfähig, egal welche Gebühr zufällig zu welcher Zeile passt. Ohne
+  // diese Schranke würde eine Gebühr, die in beiden Tabellen plausibel aussieht,
+  // teure Artikel in den falschen Tarif ziehen.
+  const gemessen = nz(p.fulfilment_cents);
+  let tarif_korrigiert = false;
+  if (!grenze_aus_gruppe && gemessen !== null && tarif === "niedrigpreis") {
+    const kandidat = (t: Tarif) => {
+      const k = klassen.find((x) => x.tarif === t && x.size_tier === p.groessenklasse);
+      if (!k) return null;
+      const g = gebuehrFuer(k, abrechnungsgewicht(t, stueck, l, b, h));
+      return g === null ? null : runde(g * aufschlagFuer(t));
+    };
+    const gegen = tarifNachGebuehr(gemessen / 100, [
+      { tarif: "niedrigpreis", gebuehr: kandidat("niedrigpreis") },
+      { tarif: "standard", gebuehr: kandidat("standard") },
+    ]);
+    if (gegen !== null && gegen !== tarif) {
+      tarif = gegen;
+      tarif_korrigiert = true;
+    }
+  }
+
+  const tarifKlassen = klassen.filter((k) => k.tarif === tarif);
   const aktuell = tarifKlassen.find((k) => k.size_tier === p.groessenklasse);
   if (!aktuell) {
     return leer(p, `Die Klasse „${p.groessenklasse}" ist in der Gebührentabelle nicht hinterlegt` +
@@ -426,13 +549,18 @@ export function pruefeKorridor(p: Produkt, klassen: Klasse[]): KorridorBefund {
   const basis = {
     sku: p.sku, asin: p.asin, produktname: p.produktname, tarif,
     aktuelle_klasse: p.groessenklasse, einheiten: p.einheiten,
+    preisgrenze_eur: grenze_cents / 100, grenze_aus_gruppe, tarif_korrigiert,
   };
   // Weicht die Tabelle von dem ab, was Amazon tatsaechlich erwartet, ist die
   // Ersparnis nur so gut wie die Tabelle. Das wird ausgewiesen, nicht verschwiegen.
-  const gemessen = nz(p.fulfilment_cents);
+  //
+  // Verglichen wird MIT dem Treibstoffaufschlag: Amazons gemeldete Gebuehr
+  // enthaelt ihn, der Tabellenwert nicht. Ohne ihn traegt jeder Standard-Vergleich
+  // einen systematischen Fehler von 1,5 % mit sich.
+  const erwartet = gebuehrJetzt * aufschlagFuer(tarif);
   const tabelle_passt = gemessen === null
     ? null
-    : Math.abs(gemessen / 100 - gebuehrJetzt) <= TABELLE_ABWEICHUNG * gebuehrJetzt;
+    : Math.abs(gemessen / 100 - erwartet) <= TABELLE_ABWEICHUNG * erwartet;
 
   if (guenstiger.length === 0) {
     return {
@@ -551,8 +679,10 @@ export function pruefeKorridor(p: Produkt, klassen: Klasse[]): KorridorBefund {
 }
 
 /** Alle Produkte prüfen und die Chancen nach € sortieren. */
-export function korridorReport(produkte: Produkt[], klassen: Klasse[]) {
-  const befunde = produkte.map((p) => pruefeKorridor(p, klassen));
+export function korridorReport(
+  produkte: Produkt[], klassen: Klasse[], grenzen: Preisgrenze[] = [],
+) {
+  const befunde = produkte.map((p) => pruefeKorridor(p, klassen, grenzen));
   const chancen = befunde.filter((b) => b.status === "chance")
     .sort((a, b) => (b.ersparnis_jahr ?? 0) - (a.ersparnis_jahr ?? 0));
   return {
@@ -569,5 +699,9 @@ export function korridorReport(produkte: Produkt[], klassen: Klasse[]) {
     // Ehrlichkeit: wo die Tabelle nicht zur gebuchten Gebühr passt, ist die
     // Ersparnis nur eine Rechnung, keine Zusage.
     unsicher: chancen.filter((b) => b.tabelle_passt === false).length,
+    // Wie oft Amazons tatsächliche Gebühr die Tarifwahl nach Preis widerlegt hat.
+    // Jeder Fall ist ein Hinweis, dass der Grenzentabelle eine Produktgruppe fehlt
+    // — sichtbar, statt still korrigiert.
+    tarif_korrigiert: befunde.filter((b) => b.tarif_korrigiert).length,
   };
 }

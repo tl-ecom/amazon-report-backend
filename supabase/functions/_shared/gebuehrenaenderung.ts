@@ -35,6 +35,7 @@ import {
   niedrigpreisGrenze,
   waehleTarif,
   type Klasse,
+  type Preisgrenze,
   type Produkt,
   type Tarif,
 } from "./groessenklassen.ts";
@@ -158,7 +159,9 @@ function leeresDelta(p: Produkt, grund: string): GebuehrDelta {
  * `alt` und `neu` müssen je genau EINE Gültigkeitsperiode enthalten. Zeilen aus
  * zwei Perioden zu mischen ergäbe einen Unterschied, den es nie gab.
  */
-export function vergleicheGebuehr(p: Produkt, alt: Klasse[], neu: Klasse[]): GebuehrDelta {
+export function vergleicheGebuehr(
+  p: Produkt, alt: Klasse[], neu: Klasse[], grenzen: Preisgrenze[] = [],
+): GebuehrDelta {
   const l = nz(p.laengste_seite_cm), b = nz(p.mittlere_seite_cm), h = nz(p.kuerzeste_seite_cm);
   const stueck = nz(p.gewicht_g);
   if (l === null || b === null || h === null || stueck === null) {
@@ -169,8 +172,8 @@ export function vergleicheGebuehr(p: Produkt, alt: Klasse[], neu: Klasse[]): Geb
   // Der Tarif wird für BEIDE Tabellen einzeln bestimmt: Ändert die neue Rate Card
   // die Preisgrenze des Niedrigpreisversands, wechselt ein Produkt den Tarif,
   // ohne dass sich an ihm selbst etwas geändert hat.
-  const wahlAlt = waehleTarif(p.preis_cents, p.groessenklasse, alt);
-  const wahlNeu = waehleTarif(p.preis_cents, p.groessenklasse, neu);
+  const wahlAlt = waehleTarif(p, alt, grenzen);
+  const wahlNeu = waehleTarif(p, neu, grenzen);
   if (wahlAlt.tarif === null) return leeresDelta(p, `Bisherige Tabelle: ${wahlAlt.grund}`);
   if (wahlNeu.tarif === null) return leeresDelta(p, `Neue Tabelle: ${wahlNeu.grund}`);
   const tarifAlt = wahlAlt.tarif, tarifNeu = wahlNeu.tarif;
@@ -455,6 +458,11 @@ export interface SimulationEingabe {
   /** Zielmarge je ASIN — vom Aufrufer aus Korridor/Rolle/Firma aufgelöst. */
   ziele: Map<string, Zielmarge>;
   umsatzsteuerProzent: number;
+  /**
+   * Preisgrenzen des Niedrigpreisversands je Produktgruppe. Leer = die Vorgabe
+   * gilt für alle; dann rechnet die Vorschau wie vor der Kategorieunterscheidung.
+   */
+  grenzen?: Preisgrenze[];
 }
 
 /**
@@ -462,7 +470,9 @@ export interface SimulationEingabe {
  * erst wer unter die Zielmarge fällt (nach Jahresbetrag), dann der Rest.
  */
 export function simuliere(e: SimulationEingabe) {
-  const deltas = e.produkte.map((p) => vergleicheGebuehr(p, e.klassenAlt, e.klassenNeu));
+  const deltas = e.produkte.map((p) =>
+    vergleicheGebuehr(p, e.klassenAlt, e.klassenNeu, e.grenzen ?? [])
+  );
 
   const proAsin = new Map<string, GebuehrDelta[]>();
   for (const d of deltas) {

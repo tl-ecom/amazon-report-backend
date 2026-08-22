@@ -7,7 +7,7 @@
 //   2. Gebührentabelle für den Marktplatz (Klassengrenzen aus der Rate Card)
 
 import {
-  korridorReport, niedrigpreisGrenze, type Klasse, type Produkt,
+  grenzeFuer, korridorReport, type Klasse, type Preisgrenze, type Produkt,
 } from "./groessenklassen.ts";
 
 /** Marktplatz-ID -> Land. Spiegelt public.marktplatz_land aus der Migration. */
@@ -62,6 +62,34 @@ export function baueKlassen(zeilen: any[]): Klasse[] {
   return [...proTier.values()];
 }
 
+/**
+ * Preisgrenzen des Niedrigpreisversands für einen Marktplatz laden — jüngste
+ * Gültigkeitsperiode, eine Zeile je Produktgruppe plus die Vorgabe.
+ *
+ * Fehlt die Tabelle, kommt eine leere Liste zurück; `grenzeFuer` fällt dann auf
+ * die Grenze aus `fee_schedule` bzw. die dokumentierte Vorgabe zurück. Das ist
+ * genau das bisherige Verhalten — nur eben ohne die Kategorieunterscheidung.
+ */
+export async function ladePreisgrenzen(supabase: any, markt: string): Promise<Preisgrenze[]> {
+  const { data, error } = await supabase.from("fee_preisgrenze")
+    .select("produktgruppe, grenze_cents, gueltig_ab")
+    .eq("marketplace", markt)
+    .lte("gueltig_ab", new Date().toISOString().slice(0, 10))
+    .order("gueltig_ab", { ascending: false });
+  if (error) throw new Error(`fee_preisgrenze: ${error.message}`);
+  const zeilen = (data ?? []) as any[];
+  if (zeilen.length === 0) return [];
+  // Nur EINE Periode — Grenzen über Stichtage zu mischen ergäbe eine Tabelle,
+  // die es nie gab.
+  const neuesteAb = zeilen[0].gueltig_ab;
+  return zeilen
+    .filter((z) => z.gueltig_ab === neuesteAb)
+    .map((z) => ({
+      produktgruppe: z.produktgruppe ?? null,
+      grenze_cents: Number(z.grenze_cents),
+    }));
+}
+
 /** Land des Marktplatzes, auf den diese Firma verbunden ist. null = unbekannt. */
 export async function marktplatzFuer(supabase: any, tenant_id: string): Promise<string | null> {
   const { data: ctx } = await supabase.from("auth_contexts")
@@ -92,6 +120,7 @@ export async function groessenklassenKorridor(
   }
   const neuesteAb = zeilen[0].gueltig_ab;
   const klassen = baueKlassen(zeilen.filter((z) => z.gueltig_ab === neuesteAb));
+  const grenzen = await ladePreisgrenzen(supabase, markt);
 
   const { data: rows, error: pErr } = await supabase.rpc("korridor_produkte", {
     p_tenant: tenant_id, p_markt: markt, p_tage: tage,
@@ -107,6 +136,7 @@ export async function groessenklassenKorridor(
     kuerzeste_seite_cm: r.kuerzeste_seite_cm === null ? null : Number(r.kuerzeste_seite_cm),
     gewicht_g: r.gewicht_g === null ? null : Number(r.gewicht_g),
     groessenklasse: r.groessenklasse ?? null,
+    produktgruppe: r.produktgruppe ?? null,
     preis_cents: r.preis_cents === null || r.preis_cents === undefined ? null : Number(r.preis_cents),
     fulfilment_cents: r.fulfilment_cents === null ? null : Number(r.fulfilment_cents),
     einheiten: Number(r.einheiten) || 0,
@@ -117,16 +147,24 @@ export async function groessenklassenKorridor(
     return leerAntwort("Der Gebührenvorschau-Report liegt noch nicht vor. Er wird täglich abgeholt; ohne ihn kennt Pulse weder Maße noch Größenklasse.");
   }
 
-  const report = korridorReport(produkte, klassen);
+  const report = korridorReport(produkte, klassen, grenzen);
 
   // Fehlt die Niedrigpreistabelle, verschwinden die guenstigen Artikel aus den
   // Chancen — richtig, aber erklaerungsbeduerftig. Deshalb wird hier beziffert,
   // WIE VIELE Produkte daran haengen, statt es dem Leser zu ueberlassen.
-  const grenze = niedrigpreisGrenze(klassen);
+  //
+  // Die Grenze haengt an der Produktgruppe (20 € bzw. 12 €, Rate Card S. 5),
+  // deshalb je Produkt einzeln — eine gemeinsame Zahl waere fuer die eine oder
+  // die andere Haelfte falsch.
   const niedrigpreisTabelle = klassen.some((k) => k.tarif === "niedrigpreis");
-  const betroffen = produkte.filter(
-    (p) => p.preis_cents !== null && p.preis_cents < grenze,
+  const betroffen = produkte.filter((p) =>
+    p.preis_cents !== null &&
+    p.preis_cents < grenzeFuer(p.produktgruppe, grenzen, klassen).grenze
   ).length;
+  const grenze = grenzeFuer(null, grenzen, klassen).grenze; // Vorgabe, fuer die Anzeige
+  const kategoriegrenzen = [
+    ...new Set(grenzen.filter((g) => g.produktgruppe !== null).map((g) => g.grenze_cents)),
+  ].sort((a, b) => a - b);
 
   return {
     marktplatz: markt,
@@ -136,6 +174,10 @@ export async function groessenklassenKorridor(
     produkte_geprueft: produkte.length,
     ...report,
     niedrigpreis_grenze_eur: grenze / 100,
+    // Die abweichenden Grenzen bestimmter Kategorien — damit im Frontend steht,
+    // WARUM zwei gleich teure Artikel auf verschiedenen Tabellen landen.
+    niedrigpreis_grenze_kategorien_eur: kategoriegrenzen.map((c) => c / 100),
+    niedrigpreis_kategorien_hinterlegt: grenzen.filter((g) => g.produktgruppe !== null).length,
     niedrigpreis_tabelle_hinterlegt: niedrigpreisTabelle,
     niedrigpreis_produkte: betroffen,
     // Der Hebel kommt aus dem Coaching-Modell und ist fuer diesen Befundtyp fest.
@@ -155,8 +197,9 @@ function leerAntwort(grund: string) {
     marktplatz: null, gueltig_ab: null, fenster_tage: null,
     klassen_hinterlegt: 0, produkte_geprueft: 0,
     befunde: [], chancen: [], summe_ersparnis_jahr: null,
-    nicht_bewertbar: 0, unsicher: 0, niedrigpreis: 0,
-    niedrigpreis_grenze_eur: null, niedrigpreis_tabelle_hinterlegt: false,
+    nicht_bewertbar: 0, unsicher: 0, niedrigpreis: 0, tarif_korrigiert: 0,
+    niedrigpreis_grenze_eur: null, niedrigpreis_grenze_kategorien_eur: [],
+    niedrigpreis_kategorien_hinterlegt: 0, niedrigpreis_tabelle_hinterlegt: false,
     niedrigpreis_produkte: 0,
     hebel: "produkt_market_fit", hinweis: null, hinweis_niedrigpreis: null,
     nicht_bewertbar_grund: grund,

@@ -49,7 +49,7 @@ function produkt(over: Partial<Produkt> = {}): Produkt {
   return {
     sku: "TEST-1", asin: "B0TEST", produktname: "Testprodukt",
     laengste_seite_cm: 40, mittlere_seite_cm: 30, kuerzeste_seite_cm: 5,
-    gewicht_g: 800, groessenklasse: "StandardParcel",
+    gewicht_g: 800, groessenklasse: "StandardParcel", produktgruppe: "Automotive",
     preis_cents: 2997, fulfilment_cents: 399, einheiten: 1000, fenster_tage: 365,
     ...over,
   };

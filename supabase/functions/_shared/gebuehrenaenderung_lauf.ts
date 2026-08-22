@@ -14,7 +14,7 @@
 // Ohne künftige Rate Card gibt es keine Vorschau. Dann sagt das Modul genau das
 // und nennt den Weg dorthin, statt eine leere Tabelle zu zeigen.
 
-import { baueKlassen, marktplatzFuer } from "./korridor_lauf.ts";
+import { baueKlassen, ladePreisgrenzen, marktplatzFuer } from "./korridor_lauf.ts";
 import { niedrigpreisGrenze } from "./groessenklassen.ts";
 import { produktUebersicht } from "./produkte.ts";
 import {
@@ -153,11 +153,12 @@ export async function gebuehrenVorschau(
   const klassenAlt: Klasse[] = baueKlassen(zeilen.filter((z) => z.gueltig_ab === alt));
   const klassenNeu: Klasse[] = baueKlassen(zeilen.filter((z) => z.gueltig_ab === neu));
 
-  const [produkteRes, uebersicht, einstellung] = await Promise.all([
+  const [produkteRes, uebersicht, einstellung, grenzen] = await Promise.all([
     supabase.rpc("korridor_produkte", { p_tenant: tenant_id, p_markt: markt, p_tage: tage }),
     produktUebersicht(supabase, tenant_id, { tage }),
     supabase.from("tenant_einstellungen").select("ziel_marge_prozent")
       .eq("tenant_id", tenant_id).maybeSingle(),
+    ladePreisgrenzen(supabase, markt),
   ]);
   if (produkteRes.error) throw new Error(`korridor_produkte: ${produkteRes.error.message}`);
 
@@ -170,6 +171,7 @@ export async function gebuehrenVorschau(
     kuerzeste_seite_cm: nz(r.kuerzeste_seite_cm),
     gewicht_g: nz(r.gewicht_g),
     groessenklasse: r.groessenklasse ?? null,
+    produktgruppe: r.produktgruppe ?? null,
     preis_cents: nz(r.preis_cents),
     fulfilment_cents: nz(r.fulfilment_cents),
     einheiten: Number(r.einheiten) || 0,
@@ -199,7 +201,7 @@ export async function gebuehrenVorschau(
   }
 
   const r = simuliere({
-    produkte, klassenAlt, klassenNeu, ertraege, ziele,
+    produkte, klassenAlt, klassenNeu, ertraege, ziele, grenzen,
     umsatzsteuerProzent: Number(u.umsatzsteuer_prozent ?? 19),
   });
 
