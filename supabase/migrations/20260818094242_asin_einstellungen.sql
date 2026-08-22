@@ -33,4 +33,4 @@ comment on table public.asin_einstellungen is
 
 alter table public.asin_einstellungen enable row level security;
 
-notify pgrst, 'reload schema';
+notify pgrst, 'reload schema';;

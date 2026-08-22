@@ -102,4 +102,4 @@ $function$;
 revoke all on function public.korridor_produkte(uuid, text, integer) from public, anon, authenticated;
 grant execute on function public.korridor_produkte(uuid, text, integer) to service_role;
 
-notify pgrst, 'reload schema';
+notify pgrst, 'reload schema';;

@@ -71,4 +71,4 @@ comment on function public.ads_summen(uuid, date, date) is
 revoke all on function public.ads_summen(uuid, date, date) from public;
 grant execute on function public.ads_summen(uuid, date, date) to service_role;
 
-notify pgrst, 'reload schema';
+notify pgrst, 'reload schema';;

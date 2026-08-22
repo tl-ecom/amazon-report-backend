@@ -1,4 +1,4 @@
-﻿-- settlement_abdeckung — welche Zeitraeume decken die vorliegenden Abrechnungen ab?
+-- settlement_abdeckung — welche Zeitraeume decken die vorliegenden Abrechnungen ab?
 --
 -- Alles, was aus settlement_zeilen gerechnet wird (Anlieferung, Lagerung,
 -- Werbekosten laut Amazon), ist nur so vollstaendig wie die vorliegenden
@@ -27,14 +27,15 @@ as $function$
   where s.tenant_id = p_tenant
     and s.gebucht_am is not null
   group by s.settlement_id
-  having count(*) > 10
+  having count(*) > 10          -- Kleinstabrechnungen (Korrekturbuchungen) sind
+                                 -- keine Abdeckung eines Zeitraums
   order by min(s.gebucht_am)
 $function$;
 
 comment on function public.settlement_abdeckung(uuid) is
-  'Zeitraeume, die durch vorliegende Abrechnungen abgedeckt sind (Spanne aus gebucht_am, da settlement_start/-end leer sind). Grundlage fuer die Luecken-Erkennung.';
+  'Zeitraeume, die durch vorliegende Abrechnungen abgedeckt sind (Spanne aus gebucht_am, da settlement_start/-end leer sind). Grundlage fuer die Luecken-Erkennung: alles aus settlement_zeilen ist nur so vollstaendig wie diese Abdeckung.';
 
 revoke all on function public.settlement_abdeckung(uuid) from public;
 grant execute on function public.settlement_abdeckung(uuid) to service_role;
 
-notify pgrst, 'reload schema';
+notify pgrst, 'reload schema';;

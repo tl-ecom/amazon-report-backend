@@ -69,4 +69,4 @@ begin
 end $function$;
 
 comment on function internal.cron_sync_wache() is
-  'Taeglicher Waechter (06:00 UTC): schickt sync_stoerungen() per Resend an info@tl-ecom.de. Ohne resend_api_key im Vault wird ins Postgres-Log gewarnt statt still zu schweigen.';
+  'Taeglicher Waechter (06:00 UTC): schickt sync_stoerungen() per Resend an info@tl-ecom.de. Ohne resend_api_key im Vault wird ins Postgres-Log gewarnt statt still zu schweigen.';;
