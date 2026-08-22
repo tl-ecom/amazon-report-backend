@@ -102,9 +102,12 @@ async function mitSpur(
 ): Promise<Response> {
   const antwort = await lauf();
   try {
+    // 302 ist bei /authorize der Erfolgsfall, `Response.ok` waere dort aber
+    // false (nur 200-299). Deshalb an der Statusklasse messen, nicht an .ok.
+    const geglueckt = antwort.status < 400;
     let grund: string | null = null;
     let clientId: string | null = null;
-    if (!antwort.ok) {
+    if (!geglueckt) {
       const txt = await antwort.clone().text();
       grund = txt.slice(0, 300);
     }
