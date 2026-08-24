@@ -117,7 +117,7 @@ async function mitSpur(
     } catch { /* egal */ }
     await service().from("oauth_ereignisse").insert({
       schritt,
-      ergebnis: antwort.ok ? "ok" : "fehler",
+      ergebnis: geglueckt ? "ok" : "fehler",
       client_id: clientId,
       grund,
       user_agent: (req.headers.get("user-agent") ?? "").slice(0, 200),

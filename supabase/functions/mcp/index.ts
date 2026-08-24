@@ -41,7 +41,34 @@ const CORS = {
   "Access-Control-Max-Age": "86400",
 };
 
+/**
+ * Ablaufspur (public.oauth_ereignisse) — dieselbe Tabelle wie beim OAuth-Handshake.
+ *
+ * Anlass: Am 24.08. lief der Handshake vollstaendig durch, der Client meldete
+ * danach trotzdem „Server hat nicht geantwortet". Dass die Anfrage ankam, liess
+ * sich nur indirekt zeigen (oauth_tokens.last_used_at); ob und wie schnell wir
+ * geantwortet haben, war von aussen unsichtbar. Genau diese Luecke schliesst das.
+ *
+ * Bewusst OHNE Inhalte: keine Tokens, keine Argumente, keine Ergebnisse — nur
+ * Methode, Ausgang und Dauer. Und ohne `await`: Protokollieren darf die Antwort
+ * niemals verzoegern, sonst misst es das Problem, das es finden soll.
+ */
+function spur(
+  supabase: any, methode: string, status: number, dauer_ms: number, req: Request, grund?: string,
+) {
+  try {
+    supabase.from("oauth_ereignisse").insert({
+      schritt: `mcp:${methode}`.slice(0, 60),
+      ergebnis: status < 400 ? "ok" : "fehler",
+      grund: grund ? grund.slice(0, 300) : null,
+      dauer_ms: Math.round(dauer_ms),
+      user_agent: (req.headers.get("user-agent") ?? "").slice(0, 200),
+    }).then(() => {}, () => {});
+  } catch { /* Protokollieren darf nie stoeren */ }
+}
+
 Deno.serve(async (req) => {
+  const beginn = performance.now();
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 
   // MCP spricht ausschließlich POST. GET/anderes klar abweisen.
@@ -67,6 +94,10 @@ Deno.serve(async (req) => {
     // Tenant-Slug. Sonst antwortet der AS mit der blanken Basis-URL, der Client
     // vergleicht sie mit seiner konfigurierten URL und verwirft sie als fremd.
     const ressource = mcpRessource(oauthBasis().resource, mcpPfadRest(new URL(req.url).pathname));
+    // Ein 401 ist hier der NORMALE erste Schritt eines Clients, der den
+    // OAuth-Flow noch sucht — deshalb protokolliert, aber nicht als Alarm zu
+    // lesen. Interessant wird er, wenn er sich nach der Anmeldung wiederholt.
+    spur(supabase, "auth", 401, performance.now() - beginn, req, "kein gueltiger Bearer-Token");
     return new Response(
       JSON.stringify(protokollFehler(null, "Ungültiger oder fehlender Bearer-Token")),
       {
@@ -132,12 +163,24 @@ Deno.serve(async (req) => {
       if (a !== null) antworten.push(a);
     }
     // Nur Notifications im Batch → 202 ohne Body (MCP-konform).
-    if (antworten.length === 0) return new Response(null, { status: 202, headers: CORS });
+    if (antworten.length === 0) {
+      spur(supabase, "batch", 202, performance.now() - beginn, req);
+      return new Response(null, { status: 202, headers: CORS });
+    }
+    spur(supabase, `batch(${antworten.length})`, 200, performance.now() - beginn, req);
     return json(antworten);
   }
 
+  const methode = String((body as Record<string, unknown>)?.method ?? "unbekannt");
   const antwort = await dispatch(body as Record<string, unknown>, ctx);
-  if (antwort === null) return new Response(null, { status: 202, headers: CORS }); // reine Notification
+  if (antwort === null) {
+    spur(supabase, methode, 202, performance.now() - beginn, req); // reine Notification
+    return new Response(null, { status: 202, headers: CORS });
+  }
+  // Ein JSON-RPC-Fehler kommt mit HTTP 200 zurueck — fuer die Spur zaehlt der
+  // fachliche Ausgang, sonst sieht ein Dauerfehler wie lauter gute Antworten aus.
+  const rpcFehler = antwort.error;
+  spur(supabase, methode, rpcFehler ? 500 : 200, performance.now() - beginn, req, rpcFehler?.message);
   return json(antwort);
 });
 
