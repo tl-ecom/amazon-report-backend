@@ -33,6 +33,14 @@ const CORS = {
 const CODE_TTL_MS = 5 * 60 * 1000;
 const ACCESS_TTL_MS = 60 * 60 * 1000;
 const REFRESH_TTL_MS = 30 * 86400 * 1000;
+/**
+ * Wie lange der zuletzt rotierte Refresh-Token noch gilt.
+ *
+ * Zwei Minuten: lang genug für einen Wiederholungsversuch und für zwei
+ * Client-Instanzen, die sich in die Quere kommen — kurz genug, dass ein
+ * abgefangener alter Token praktisch wertlos bleibt.
+ */
+const REFRESH_SCHONFRIST_MS = 2 * 60 * 1000;
 
 const SB_URL = () => Deno.env.get("SUPABASE_URL")!;
 const ANON = () => Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -265,7 +273,19 @@ async function refreshGrant(form: FormData): Promise<Response> {
 
   const refresh_hash = await sha256Hex(refresh);
   const db = service();
-  const { data: row } = await db.from("oauth_tokens").select("*").eq("refresh_hash", refresh_hash).eq("revoked", false).maybeSingle();
+  // Der aktuelle ODER der zuletzt rotierte Token innerhalb seiner Schonfrist.
+  //
+  // Warum beides: Ein claude.ai-Konnektor gilt kontoweit — Web, Desktop und App
+  // teilen sich denselben Refresh-Token. Erneuern zwei davon fast gleichzeitig,
+  // gewinnt einer, und der andere hielt die Verbindung bisher fuer tot. Genauso
+  // bei einem Wiederholungsversuch, wenn die Antwort unterwegs verloren geht.
+  // Am 24.08. an echten Daten gesehen: 07:56:13 ok, 07:57:03 "unbekannt" — und
+  // damit war eine 48 Stunden alte Verbindung erledigt.
+  const { data: row } = await db.from("oauth_tokens")
+    .select("*")
+    .or(`refresh_hash.eq.${refresh_hash},and(refresh_vorher_hash.eq.${refresh_hash},refresh_vorher_bis.gt.${new Date().toISOString()})`)
+    .eq("revoked", false)
+    .maybeSingle();
   if (!row) return oauthErr("invalid_grant", "Refresh-Token unbekannt oder widerrufen");
   if (row.refresh_expires_at && new Date(row.refresh_expires_at).getTime() < Date.now()) return oauthErr("invalid_grant", "Refresh-Token abgelaufen");
   if (client_id && row.client_id !== client_id) return oauthErr("invalid_grant", "client_id passt nicht");
@@ -273,9 +293,17 @@ async function refreshGrant(form: FormData): Promise<Response> {
   const access = zufallsToken(32);
   const neuRefresh = zufallsToken(32);
   const now = Date.now();
+  // Der bisher aktuelle Token wird der "vorherige" und bleibt kurz gueltig.
+  // Kam die Anfrage schon mit dem vorherigen (Wettlauf), bleibt dieser stehen —
+  // sonst wuerde der Wettlauf-Verlierer den Gewinner aussperren.
+  const kamMitVorherigem = row.refresh_hash !== refresh_hash;
   const { error } = await db.from("oauth_tokens").update({
     access_hash: await sha256Hex(access),
     refresh_hash: await sha256Hex(neuRefresh),
+    refresh_vorher_hash: kamMitVorherigem ? row.refresh_vorher_hash : row.refresh_hash,
+    refresh_vorher_bis: kamMitVorherigem
+      ? row.refresh_vorher_bis
+      : new Date(now + REFRESH_SCHONFRIST_MS).toISOString(),
     access_expires_at: new Date(now + ACCESS_TTL_MS).toISOString(),
     refresh_expires_at: new Date(now + REFRESH_TTL_MS).toISOString(),
     last_used_at: new Date().toISOString(),
