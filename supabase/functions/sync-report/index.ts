@@ -180,11 +180,20 @@ const REPORT_KONFIG: Record<string, ReportKonfig> = {
     format: "tsv",
     // Bestandsalter je SKU. Ebenfalls eine Momentaufnahme.
     //
-    // Am 31.07.2026 kam hier ein FATAL, und es sah nach einer fehlenden
-    // Freischaltung aus. Es war unsere eigene Anfrage: Der Typ stand nirgends in
-    // dieser Konfiguration, also griff der Rueckfall mit maxDays 30 — ein
-    // Zeitfenster auf einer Momentaufnahme. Genau daran scheitert Amazon.
-    // Danach wurde es nie wieder versucht.
+    // NICHT IN BENUTZUNG — Amazon liefert hier FATAL. Nachgemessen 27.08.2026
+    // fuer Vaneja: Der Report wird angenommen (PROCESSING) und scheitert dann.
+    // Ein Berechtigungsproblem waere schon beim Anlegen abgelehnt worden.
+    //
+    // Der erste FATAL am 31.07. sah nach unserem Fehler aus (der Typ fehlte hier,
+    // also griff der Rueckfall mit maxDays 30 — ein Zeitfenster auf einer
+    // Momentaufnahme). Die Konfiguration ist jetzt richtig, das Ergebnis bleibt
+    // gleich. Warum, sagt Amazons Fehlerdokument zum FATAL-Report; das holen wir
+    // derzeit nicht ab.
+    //
+    // Gebraucht wird er ohnehin nicht: GET_FBA_INVENTORY_PLANNING_DATA liefert
+    // dieselben Altersklassen, laeuft sauber durch und steht im Zeitplan.
+    // Dieser Eintrag bleibt stehen, damit die Frage nicht ein drittes Mal
+    // durchprobiert wird.
     snapshot: true,
     stableLagDays: 0,
     maxDays: 0,
