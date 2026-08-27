@@ -32,4 +32,4 @@ comment on column public.oauth_tokens.refresh_vorher_hash is
 comment on column public.oauth_tokens.refresh_vorher_bis is
   'Ende der Schonfrist fuer refresh_vorher_hash. Danach zaehlt nur noch refresh_hash.';
 
-notify pgrst, 'reload schema';
+notify pgrst, 'reload schema';;

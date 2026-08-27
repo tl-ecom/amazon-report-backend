@@ -16,4 +16,4 @@ comment on table public.oauth_ereignisse is
   'Ablaufspur von OAuth-Handshake und MCP-Aufrufen zur Fehlersuche. Enthaelt KEINE Geheimnisse und keine Nutzdaten — nur Schritt, Ausgang, Grund und Dauer.';
 
 comment on column public.oauth_ereignisse.dauer_ms is
-  'Serverseitige Bearbeitungsdauer in Millisekunden. Trennt "wir waren zu langsam" von "der Client hat die Antwort nicht angenommen".';
+  'Serverseitige Bearbeitungsdauer in Millisekunden. Trennt "wir waren zu langsam" von "der Client hat die Antwort nicht angenommen".';;
