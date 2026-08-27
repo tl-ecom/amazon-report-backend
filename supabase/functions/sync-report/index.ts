@@ -482,11 +482,23 @@ Deno.serve(async (req) => {
       }
 
       if (status.processingStatus === "FATAL" || status.processingStatus === "CANCELLED") {
+        // Amazon legt einem FATAL-Report meist ein Fehlerdokument bei und nennt
+        // dessen ID hier. Bisher haben wir sie verworfen und nur "Amazon meldet
+        // FATAL" gespeichert — eine Meldung, die nichts erklärt. Sie hat beim
+        // Bestandsalter-Report zu der falschen Vermutung geführt, es fehle eine
+        // Freischaltung. Der Grund stand die ganze Zeit bei Amazon bereit.
+        const grund = status.reportDocumentId
+          ? await holeFehlertext(accessToken, status.reportDocumentId, rl)
+          : null;
+        const detail = grund
+          ? `Amazon meldet ${status.processingStatus}: ${grund}`
+          : `Amazon meldet ${status.processingStatus} (kein Fehlerdokument beigelegt)`;
+
         await supabase
           .from("report_jobs")
           .update({
             status: status.processingStatus,
-            error_detail: `Amazon meldet ${status.processingStatus}`,
+            error_detail: detail,
             completed_at: new Date().toISOString(),
           })
           .eq("tenant_id", tenant_id)
@@ -496,8 +508,9 @@ Deno.serve(async (req) => {
           ok: false,
           status: status.processingStatus,
           report_id: reportId,
+          grund,
           hinweis: status.processingStatus === "FATAL"
-            ? "Amazon konnte den Report nicht erstellen (FATAL). Zeitraum/Berechtigungen prüfen."
+            ? "Amazon konnte den Report nicht erstellen (FATAL). Grund siehe `grund`, sofern Amazon ein Fehlerdokument beigelegt hat."
             : "Report wurde storniert (CANCELLED) — meist: keine Daten im Zeitraum.",
         }, 200);
       }
@@ -833,6 +846,49 @@ async function checkReport(
 }
 
 // --- Stufe 3: Dokument-URL holen, laden, entpacken, parsen ---
+/**
+ * Amazons Begründung zu einem FATAL-Report.
+ *
+ * Das Fehlerdokument wird wie ein normales Report-Dokument abgeholt, aber NICHT
+ * geparst: Welches Format Amazon dort liefert, ist nicht zugesichert (mal JSON
+ * mit `errorDetails`, mal blanker Text). Also roher Text, gekürzt — lieber eine
+ * unformatierte Meldung als gar keine.
+ *
+ * Gibt bei jedem Problem null zurück statt zu werfen. Eine Diagnose, die den
+ * Ablauf zum Absturz bringt, wäre schlimmer als eine fehlende Diagnose.
+ */
+async function holeFehlertext(
+  accessToken: string,
+  documentId: string,
+  rl: RateSammler
+): Promise<string | null> {
+  try {
+    const resp = await fetch(`${SP_ENDPOINT}/reports/2021-06-30/documents/${documentId}`, {
+      method: "GET",
+      headers: { "x-amz-access-token": accessToken },
+    });
+    merkeRate(rl, "getReportDocument", resp);
+    if (!resp.ok) return null;
+
+    const doc = await resp.json();
+    if (!doc?.url) return null;
+
+    const datei = await fetch(doc.url);
+    if (!datei.ok) return null;
+
+    let bytes = new Uint8Array(await datei.arrayBuffer());
+    if (doc.compressionAlgorithm === "GZIP") {
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+      bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+
+    const text = new TextDecoder("utf-8").decode(bytes).replace(/\s+/g, " ").trim();
+    return text ? text.slice(0, 600) : null;
+  } catch {
+    return null;
+  }
+}
+
 // getReportDocument hat eines der strengsten Limits (~1 Request pro 60s),
 // deshalb braucht auch dieser Schritt eine 429-Behandlung.
 async function fetchDocument(
