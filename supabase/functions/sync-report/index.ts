@@ -176,6 +176,19 @@ const REPORT_KONFIG: Record<string, ReportKonfig> = {
     stableLagDays: 0,
     maxDays: 0,
   },
+  GET_FBA_INVENTORY_AGED_DATA: {
+    format: "tsv",
+    // Bestandsalter je SKU. Ebenfalls eine Momentaufnahme.
+    //
+    // Am 31.07.2026 kam hier ein FATAL, und es sah nach einer fehlenden
+    // Freischaltung aus. Es war unsere eigene Anfrage: Der Typ stand nirgends in
+    // dieser Konfiguration, also griff der Rueckfall mit maxDays 30 — ein
+    // Zeitfenster auf einer Momentaufnahme. Genau daran scheitert Amazon.
+    // Danach wurde es nie wieder versucht.
+    snapshot: true,
+    stableLagDays: 0,
+    maxDays: 0,
+  },
   GET_FBA_INVENTORY_PLANNING_DATA: {
     format: "tsv",
     // Momentaufnahme OHNE Zeitraum. Mit Zeitfenster angefordert antwortet Amazon
