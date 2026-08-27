@@ -187,8 +187,9 @@ const REPORT_KONFIG: Record<string, ReportKonfig> = {
     // Der erste FATAL am 31.07. sah nach unserem Fehler aus (der Typ fehlte hier,
     // also griff der Rueckfall mit maxDays 30 — ein Zeitfenster auf einer
     // Momentaufnahme). Die Konfiguration ist jetzt richtig, das Ergebnis bleibt
-    // gleich. Warum, sagt Amazons Fehlerdokument zum FATAL-Report; das holen wir
-    // derzeit nicht ab.
+    // gleich. Und warum, sagt Amazon nicht: Zum FATAL wird KEIN Fehlerdokument
+    // beigelegt (nachgemessen 27.08.2026, nachdem der Abruf dafuer gebaut war).
+    // Ueber die API ist die Frage damit zu Ende — der Report scheitert wortlos.
     //
     // Gebraucht wird er ohnehin nicht: GET_FBA_INVENTORY_PLANNING_DATA liefert
     // dieselben Altersklassen, laeuft sauber durch und steht im Zeitplan.
