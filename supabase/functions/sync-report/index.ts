@@ -487,12 +487,19 @@ Deno.serve(async (req) => {
         // FATAL" gespeichert — eine Meldung, die nichts erklärt. Sie hat beim
         // Bestandsalter-Report zu der falschen Vermutung geführt, es fehle eine
         // Freischaltung. Der Grund stand die ganze Zeit bei Amazon bereit.
+        //
+        // Die beiden Fehlschlaege werden getrennt gemeldet: "Amazon nennt kein
+        // Dokument" ist eine Aussage ueber Amazon, "Dokument nicht lesbar" eine
+        // ueber uns. Beides in einen Satz zu werfen hiesse, die naechste
+        // Fehlersuche wieder im Nebel beginnen zu lassen.
         const grund = status.reportDocumentId
           ? await holeFehlertext(accessToken, status.reportDocumentId, rl)
           : null;
         const detail = grund
           ? `Amazon meldet ${status.processingStatus}: ${grund}`
-          : `Amazon meldet ${status.processingStatus} (kein Fehlerdokument beigelegt)`;
+          : !status.reportDocumentId
+          ? `Amazon meldet ${status.processingStatus} und nennt kein Fehlerdokument`
+          : `Amazon meldet ${status.processingStatus}; Fehlerdokument ${status.reportDocumentId} war nicht lesbar`;
 
         await supabase
           .from("report_jobs")
