@@ -34,13 +34,33 @@ const CODE_TTL_MS = 5 * 60 * 1000;
 const ACCESS_TTL_MS = 60 * 60 * 1000;
 const REFRESH_TTL_MS = 30 * 86400 * 1000;
 /**
- * Wie lange der zuletzt rotierte Refresh-Token noch gilt.
+ * Wie lange ein rotierter Refresh-Token noch gilt.
  *
- * Zwei Minuten: lang genug für einen Wiederholungsversuch und für zwei
- * Client-Instanzen, die sich in die Quere kommen — kurz genug, dass ein
- * abgefangener alter Token praktisch wertlos bleibt.
+ * 15 Minuten. Ein abgefangener alter Token bleibt damit kurz brauchbar — das ist
+ * der Preis dafür, dass Client-Instanzen, die sich in die Quere kommen, die
+ * Verbindung nicht verlieren.
  */
-const REFRESH_SCHONFRIST_MS = 2 * 60 * 1000;
+const REFRESH_SCHONFRIST_MS = 15 * 60 * 1000;
+/**
+ * Wie viele rotierte Token gleichzeitig in der Schonfrist bleiben.
+ *
+ * Nicht nur einer: Am 02.09. rotierte der Token dreimal in 30 Sekunden, und der
+ * zweite Wechsel warf den ersten hinaus, obwohl dessen Schonfrist noch lief. Die
+ * Instanz, die mit dem ersten kam, verlor die Verbindung.
+ */
+const REFRESH_SCHONFRIST_ANZAHL = 5;
+
+interface AltToken { h: string; bis: string; }
+
+/** Noch gültige Einträge, jüngste zuletzt. Abgelaufene fallen hier heraus. */
+function gueltigeAlte(roh: unknown): AltToken[] {
+  if (!Array.isArray(roh)) return [];
+  const jetzt = Date.now();
+  return (roh as AltToken[])
+    .filter((e) => e && typeof e.h === "string" && typeof e.bis === "string" &&
+      new Date(e.bis).getTime() > jetzt)
+    .slice(-REFRESH_SCHONFRIST_ANZAHL);
+}
 
 const SB_URL = () => Deno.env.get("SUPABASE_URL")!;
 const ANON = () => Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -281,11 +301,41 @@ async function refreshGrant(form: FormData): Promise<Response> {
   // bei einem Wiederholungsversuch, wenn die Antwort unterwegs verloren geht.
   // Am 24.08. an echten Daten gesehen: 07:56:13 ok, 07:57:03 "unbekannt" — und
   // damit war eine 48 Stunden alte Verbindung erledigt.
-  const { data: row } = await db.from("oauth_tokens")
+  //
+  // Zwei getrennte Abfragen statt einer .or()-Kette: Der Enthaltensein-Filter auf
+  // jsonb braucht geschweifte Klammern und Anführungszeichen im Wert, und die in
+  // eine .or()-Zeichenkette zu falten ist genau die Art Fummelei, die still
+  // danebengeht. Die zweite Abfrage läuft nur, wenn die erste nichts findet.
+  let { data: row } = await db.from("oauth_tokens")
     .select("*")
-    .or(`refresh_hash.eq.${refresh_hash},and(refresh_vorher_hash.eq.${refresh_hash},refresh_vorher_bis.gt.${new Date().toISOString()})`)
+    .eq("refresh_hash", refresh_hash)
     .eq("revoked", false)
     .maybeSingle();
+
+  if (!row) {
+    const { data: ausSchonfrist } = await db.from("oauth_tokens")
+      .select("*")
+      .contains("refresh_alt", [{ h: refresh_hash }])
+      .eq("revoked", false)
+      .maybeSingle();
+    // Der Index findet den Eintrag; ob seine Schonfrist noch läuft, entscheidet
+    // erst dieser Vergleich.
+    if (ausSchonfrist && gueltigeAlte(ausSchonfrist.refresh_alt).some((e) => e.h === refresh_hash)) {
+      row = ausSchonfrist;
+    }
+  }
+
+  if (!row) {
+    // Übergangsweise: Token, die noch mit der alten Einzel-Schonfrist rotiert
+    // wurden, sollen ihre Frist zu Ende leben dürfen.
+    const { data: altfall } = await db.from("oauth_tokens")
+      .select("*")
+      .eq("refresh_vorher_hash", refresh_hash)
+      .gt("refresh_vorher_bis", new Date().toISOString())
+      .eq("revoked", false)
+      .maybeSingle();
+    if (altfall) row = altfall;
+  }
   if (!row) return oauthErr("invalid_grant", "Refresh-Token unbekannt oder widerrufen");
   if (row.refresh_expires_at && new Date(row.refresh_expires_at).getTime() < Date.now()) return oauthErr("invalid_grant", "Refresh-Token abgelaufen");
   if (client_id && row.client_id !== client_id) return oauthErr("invalid_grant", "client_id passt nicht");
@@ -293,17 +343,17 @@ async function refreshGrant(form: FormData): Promise<Response> {
   const access = zufallsToken(32);
   const neuRefresh = zufallsToken(32);
   const now = Date.now();
-  // Der bisher aktuelle Token wird der "vorherige" und bleibt kurz gueltig.
-  // Kam die Anfrage schon mit dem vorherigen (Wettlauf), bleibt dieser stehen —
-  // sonst wuerde der Wettlauf-Verlierer den Gewinner aussperren.
-  const kamMitVorherigem = row.refresh_hash !== refresh_hash;
+  // Der bisher aktuelle Token wandert in die Schonfrist — zu den bereits dort
+  // liegenden, statt sie zu verdrängen. Abgelaufene fallen dabei heraus.
+  const alt = [
+    ...gueltigeAlte(row.refresh_alt),
+    { h: row.refresh_hash as string, bis: new Date(now + REFRESH_SCHONFRIST_MS).toISOString() },
+  ].slice(-REFRESH_SCHONFRIST_ANZAHL);
+
   const { error } = await db.from("oauth_tokens").update({
     access_hash: await sha256Hex(access),
     refresh_hash: await sha256Hex(neuRefresh),
-    refresh_vorher_hash: kamMitVorherigem ? row.refresh_vorher_hash : row.refresh_hash,
-    refresh_vorher_bis: kamMitVorherigem
-      ? row.refresh_vorher_bis
-      : new Date(now + REFRESH_SCHONFRIST_MS).toISOString(),
+    refresh_alt: alt,
     access_expires_at: new Date(now + ACCESS_TTL_MS).toISOString(),
     refresh_expires_at: new Date(now + REFRESH_TTL_MS).toISOString(),
     last_used_at: new Date().toISOString(),
