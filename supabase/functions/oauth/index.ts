@@ -315,7 +315,10 @@ async function refreshGrant(form: FormData): Promise<Response> {
   if (!row) {
     const { data: ausSchonfrist } = await db.from("oauth_tokens")
       .select("*")
-      .contains("refresh_alt", [{ h: refresh_hash }])
+      // Als JSON-ZEICHENKETTE, nicht als Array: supabase-js macht aus einem
+      // Array-Argument ein Postgres-Array-Literal ({...}) — fuer eine
+      // jsonb-Spalte falsch, und es scheitert lautlos statt zu werfen.
+      .contains("refresh_alt", JSON.stringify([{ h: refresh_hash }]))
       .eq("revoked", false)
       .maybeSingle();
     // Der Index findet den Eintrag; ob seine Schonfrist noch läuft, entscheidet
