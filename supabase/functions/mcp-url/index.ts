@@ -13,6 +13,8 @@
 // kann daher in Client-/Server-Logs auftauchen. Der Token ist an EINEN Tenant
 // gebunden und jederzeit widerrufbar (public.mcp_tokens.revoked = true).
 
+import { createClient } from "jsr:@supabase/supabase-js@2";
+
 Deno.serve(async (req) => {
   const inUrl = new URL(req.url);
   const token = (inUrl.searchParams.get("token") ?? inUrl.searchParams.get("key") ?? "").trim();
@@ -33,6 +35,27 @@ Deno.serve(async (req) => {
 
   const resp = await fetch(ziel, init);
   const buf = await resp.arrayBuffer();
+
+  // Ablaufspur: Kam ueberhaupt ein Token in der URL an?
+  //
+  // Anlass: Am 02.09. meldete Claude "keine Anmeldung konfiguriert, Server
+  // verlangt aber eine (401)". In der Spur sahen zwei Ursachen gleich aus —
+  // fehlender ?token=-Teil in der URL oder ein verstuemmelter Token. Hier steht
+  // jetzt, welche es war. NUR die Laenge, nie der Token selbst.
+  try {
+    const client = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+    client.from("oauth_ereignisse").insert({
+      schritt: "mcp-url",
+      ergebnis: resp.status < 400 ? "ok" : "fehler",
+      grund: (token
+        ? `Token in der URL (${token.length} Zeichen)`
+        : "KEIN token/key in der URL") + ` | pfad=${inUrl.pathname} | status=${resp.status}`,
+      user_agent: (req.headers.get("user-agent") ?? "").slice(0, 200),
+    }).then(() => {}, () => {});
+  } catch { /* Protokollieren darf nie stoeren */ }
 
   const out = new Headers();
   const ct = resp.headers.get("content-type");

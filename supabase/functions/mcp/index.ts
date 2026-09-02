@@ -57,10 +57,16 @@ function spur(
   supabase: any, methode: string, status: number, dauer_ms: number, req: Request, grund?: string,
 ) {
   try {
+    // Der Pfad (ohne Query) gehoert dazu: Er trennt den direkten Weg
+    // (/mcp/<slug>, Bearer im Header) vom Adapter (/mcp, Token aus der URL).
+    // Ohne ihn sehen beide Fehlschlaege gleich aus, und man raet, welcher
+    // Konnektor gerade spricht.
+    let pfad = "";
+    try { pfad = new URL(req.url).pathname; } catch { /* egal */ }
     supabase.from("oauth_ereignisse").insert({
       schritt: `mcp:${methode}`.slice(0, 60),
       ergebnis: status < 400 ? "ok" : "fehler",
-      grund: grund ? grund.slice(0, 300) : null,
+      grund: [grund, pfad ? `pfad=${pfad}` : null].filter(Boolean).join(" | ").slice(0, 300) || null,
       dauer_ms: Math.round(dauer_ms),
       user_agent: (req.headers.get("user-agent") ?? "").slice(0, 200),
     }).then(() => {}, () => {});
