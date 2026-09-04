@@ -31,6 +31,7 @@ Ablauf:
   Begruendung). Zeilen mit Zustand "paused"/"enabled" aendern auch den Zustand.
   Ergebnis ist dieselbe Vorschau wie oben, danach normal "setzen":
         python tools/ads_gebote.py tabelle --firma Vaneja --datei "Massnahmen.xlsx" --blatt Gebotsänderungen
+     Ohne --datei wird die neueste .xlsx aus tools/eingang/ genommen.
 
 Wo ausfuehren: auf dem PC (nicht VPS). Braucht nur Python 3 + requests.
 """
@@ -313,8 +314,23 @@ def lies_tabelle(datei, blatt):
     return out
 
 
+EINGANG = os.path.join(HIER, "eingang")
+
+
+def neueste_datei():
+    """Ohne --datei: die zuletzt geaenderte .xlsx aus tools/eingang."""
+    import glob
+    dateien = [f for f in glob.glob(os.path.join(EINGANG, "*.xlsx")) if not os.path.basename(f).startswith("~$")]
+    if not dateien:
+        sys.exit(f"Keine .xlsx in {EINGANG}. Datei dort ablegen oder --datei angeben.")
+    return max(dateien, key=os.path.getmtime)
+
+
 def cmd_tabelle(args):
     tenant, name = firma_id(args.firma)
+    if not args.datei:
+        args.datei = neueste_datei()
+        print(f"Datei: {args.datei}")
     zeilen = lies_tabelle(args.datei, args.blatt)
     if not zeilen:
         sys.exit("Keine Datenzeilen im Blatt.")
@@ -443,7 +459,7 @@ def main():
 
     s = sub.add_parser("tabelle", help="Excel-Massnahmenblatt einlesen -> Vorschau (schreibt nichts)")
     s.add_argument("--firma", required=True)
-    s.add_argument("--datei", required=True, help="Pfad zur .xlsx")
+    s.add_argument("--datei", default=None, help="Pfad zur .xlsx (Standard: neueste in tools/eingang)")
     s.add_argument("--blatt", default="Gebotsänderungen", help="Blattname (Standard: Gebotsänderungen)")
     s.set_defaults(fn=cmd_tabelle)
 

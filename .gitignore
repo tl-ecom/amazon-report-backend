@@ -29,3 +29,4 @@ node_modules/
 # Lokales Gebots-Werkzeug: Session und Vorschau bleiben auf dem PC
 tools/.op_session.json
 tools/.vorschau.json
+tools/eingang/*.xlsx
