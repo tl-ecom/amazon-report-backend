@@ -279,5 +279,18 @@ export async function stockoutRadar(supabase: any, tenant_id: string): Promise<u
     hat_buybox_daten: bbMap.size > 0,
     hat_bestandsdaten: basis.some((r: any) => r.bestand_bekannt),
     reichweite_knapp_tage: REICHWEITE_KNAPP_TAGE,
+    // Woher der Bestand stammt und wie alt er ist.
+    //
+    // Amazons FBA-Bestandsbericht faellt blockweise aus (03./04.09. je ein
+    // ganzer Tag, davor zwei Bloecke im August). Dann greift der Planungsreport
+    // als Zweitquelle. Ein stillschweigender Quellenwechsel waere schlimmer als
+    // der veraltete Stand — man vertraut den Zahlen, ohne zu wissen, woher sie
+    // kommen. Deshalb steht beides hier und gehoert sichtbar in den Tab.
+    bestand_quelle: (basis.find((r: any) => r.bestand_quelle)?.bestand_quelle as string) ?? null,
+    bestand_stand: (basis.find((r: any) => r.bestand_stand)?.bestand_stand as string) ?? null,
+    // Der Planungsreport kennt keine Zulaufmengen. Dann ist "unterwegs"
+    // unbekannt, nicht null — und die Bewertung darf daraus nicht schliessen,
+    // es sei nichts bestellt.
+    zulauf_bekannt: basis.some((r: any) => r.nachschub_unterwegs != null),
   };
 }
