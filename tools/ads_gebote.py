@@ -38,6 +38,12 @@ import time
 
 import requests
 
+# Windows-Konsole: Umlaute sauber ausgeben
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 SUPABASE_URL = "https://irvnghhxfjjnpodclfuc.supabase.co"
 # oeffentlicher anon-Key (kein Geheimnis, siehe FRONTEND.md)
 ANON_KEY = (
@@ -139,6 +145,21 @@ def kampagnen_ids(tenant, auswahl, status):
     return ids, namen, {k["campaignId"]: k["name"] for k in alle}
 
 
+# ----------------------------------------------------------------- Filter
+
+def filtere(zeilen, treffer):
+    """--treffer: nur Zeilen, deren id ODER text (Teilstring, ohne Gross/Klein) passt."""
+    if not treffer:
+        return zeilen
+    out = []
+    for z in zeilen:
+        for t in treffer:
+            if z["id"] == t or t.lower() in (z.get("text") or "").lower():
+                out.append(z)
+                break
+    return out
+
+
 # ----------------------------------------------------------------- Ausgabe
 
 def tabelle(zeilen, spalten):
@@ -171,10 +192,12 @@ def cmd_gebote(args):
     tenant, name = firma_id(args.firma)
     ids, namen, kname = kampagnen_ids(tenant, args.kampagne, args.kampagnen_status.split(","))
     d = ruf({"action": "gebote", "company_id": tenant, "kampagnen": ids, "status": args.status.split(","), "nur": args.nur})
+    d["zeilen"] = filtere(d["zeilen"], args.treffer)
     for z in d["zeilen"]:
         z["kampagne"] = kname.get(z["campaignId"], z["campaignId"])
     print(f"Firma: {name}   Kampagnen: {', '.join(namen)}")
-    print(f"Zeilen mit eigenem Gebot: {d['anzahl']}   erben Standardgebot der Anzeigengruppe: {d['erben_standard']}")
+    print(f"Zeilen mit eigenem Gebot: {d['anzahl']}   erben Standardgebot der Anzeigengruppe: {d['erben_standard']}"
+          + (f"   nach Filter: {len(d['zeilen'])}" if args.treffer else ""))
     tabelle(sorted(d["zeilen"], key=lambda z: (z["kampagne"], -z["gebot"])),
             ["kampagne", "art", "text", "matchType", "state", "gebot", "id"])
 
@@ -185,9 +208,14 @@ def cmd_vorschau(args):
     regel = {k: getattr(args, k) for k in ("prozent", "faktor", "absolut", "min", "max") if getattr(args, k) is not None}
     d = ruf({"action": "vorschau", "company_id": tenant, "kampagnen": ids, "status": args.status.split(","),
              "nur": args.nur, "regel": regel})
+    d["aenderungen"] = filtere(d["aenderungen"], args.treffer)
     for a in d["aenderungen"]:
         a["kampagne"] = kname.get(a["campaignId"], a["campaignId"])
     z = d["zusammenfassung"]
+    if args.treffer:
+        ae = d["aenderungen"]
+        z = {"anzahl": len(ae), "keywords": sum(a["art"] == "keyword" for a in ae), "targets": sum(a["art"] == "target" for a in ae),
+             "summe_alt": round(sum(a["gebot"] for a in ae), 2), "summe_neu": round(sum(a["neu"] for a in ae), 2)}
     print(f"Firma: {name}   Kampagnen: {', '.join(namen)}   Regel: {regel}")
     print(f"Aenderungen: {z['anzahl']} (Keywords {z['keywords']}, Targets {z['targets']})   "
           f"Summe Gebote {z['summe_alt']} -> {z['summe_neu']}   ohne eigenes Gebot (unveraendert): {d['erben_standard']}")
@@ -253,6 +281,7 @@ def main():
         s.add_argument("--kampagnen-status", default="ENABLED,PAUSED", help="welche Kampagnen beim Namens-Match zaehlen")
         s.add_argument("--status", default="ENABLED", help="Status der Keywords/Targets: ENABLED,PAUSED")
         s.add_argument("--nur", choices=["keyword", "target"], default=None, help="nur Keywords oder nur Product-Targets")
+        s.add_argument("--treffer", action="append", default=None, help="nur diese Zeilen: Keyword-/Target-ID oder Textteil, mehrfach moeglich")
 
     s = sub.add_parser("gebote", help="aktuelle Gebote ansehen")
     auswahl(s)
