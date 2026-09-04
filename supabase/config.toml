@@ -72,3 +72,9 @@ verify_jwt = false
 # pg_cron-Treiber mit service_role aufgerufen -> verify_jwt = true.
 [functions.backfill]
 verify_jwt = true
+
+# Gebote für Sponsored Products lesen/setzen. Der EINZIGE Schreibpfad in die
+# Ads-API; bewusst nicht im MCP. Session-JWT, nur Coach, Aufruf nur aus
+# tools/ads_gebote.py.
+[functions.ads-gebote]
+verify_jwt = true

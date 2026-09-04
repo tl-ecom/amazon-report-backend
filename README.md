@@ -129,6 +129,25 @@ npx deno@2 test supabase/functions/_shared/
 
 Test-Tenant-ID siehe UEBERGABE.md.
 
+## Gebote schreiben (nur Coach, nur lokal)
+
+Der einzige Schreibpfad in die Amazon-Ads-API ist die Function `ads-gebote`,
+bedient über `tools/ads_gebote.py`. Sie laesst nur Plattform-Admins durch
+(Session-JWT, Coach-Ansicht per `company_id`). Der MCP-Server fuer ChatGPT und
+andere Clients bleibt reiner Lesezugriff und kennt diese Function nicht.
+
+```
+python tools/ads_gebote.py login                                   # einmalig, Passwort wird abgefragt
+python tools/ads_gebote.py kampagnen --firma Vaneja
+python tools/ads_gebote.py gebote   --firma Vaneja --kampagne "Brand"
+python tools/ads_gebote.py vorschau --firma Vaneja --kampagne "Brand" --prozent -20   # schreibt nichts
+python tools/ads_gebote.py setzen   --firma Vaneja --grund "ACOS zu hoch"            # wendet die Vorschau an
+```
+
+Gebote haengen an Keywords und Product-Targets, nicht an Kampagnen. `setzen`
+prueft vor dem Schreiben, ob das Gebot bei Amazon noch dem Wert aus der Vorschau
+entspricht, und protokolliert jede Zeile in `ads_gebote_log`.
+
 ---
 
 ## Sicherheit
