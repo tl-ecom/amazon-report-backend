@@ -12,10 +12,12 @@
 //   kampagnen  SP-Kampagnen des Profils (Filter: status[])
 //   gebote     Keywords + Product-Targets der angegebenen Kampagnen mit Gebot
 //   vorschau   wie gebote, plus Regel -> geplante Änderungen. Schreibt NICHTS.
-//   setzen     Änderungen anwenden. Nur mit bestaetigung=true. Prüft vorher, ob
-//              das Gebot bei Amazon noch dem erwarteten Alt-Wert entspricht —
+//   pruefen    Ist-Gebot und Ist-Zustand zu einer Liste von IDs (Tabellen-Import)
+//   setzen     Änderungen anwenden: neues Gebot (neu) und/oder Zustand (state
+//              ENABLED|PAUSED). Nur mit bestaetigung=true. Prüft vorher, ob Gebot
+//              und Zustand bei Amazon noch den erwarteten Alt-Werten entsprechen —
 //              sonst wird die Zeile übersprungen. Jede Zeile landet im
-//              ads_gebote_log (wer, wann, was, von->auf, Ergebnis).
+//              ads_gebote_log (wer, wann, was, von->auf, Ergebnis, Grund).
 //
 // Spec (Advertising API v3, Sponsored Products, verifiziert 2026-09):
 //   POST /sp/campaigns/list   Content-Type/Accept application/vnd.spCampaign.v3+json
@@ -148,56 +150,88 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Aktuellen Stand gezielter Keywords/Targets (für Tabellen-Import: die Tabelle
+    // nennt IDs und erwartete Alt-Werte, wir liefern Ist-Gebot und Ist-Zustand).
+    if (action === "pruefen") {
+      const eingabe = Array.isArray(body.aenderungen) ? body.aenderungen : [];
+      const kwIds = eingabe.filter((a: any) => a?.art === "keyword").map((a: any) => String(a.id));
+      const tgIds = eingabe.filter((a: any) => a?.art === "target").map((a: any) => String(a.id));
+      if (!kwIds.length && !tgIds.length) return json({ error: "aenderungen leer." }, 400);
+      const aktuell = await ads.geboteNachId(kwIds, tgIds);
+      if (!aktuell.ok) return json({ error: "Aktuellen Stand laden fehlgeschlagen", detail: aktuell.detail }, 502);
+      return json({ tenant_id: tenantId, zeilen: aktuell.zeilen });
+    }
+
     if (action === "setzen") {
       if (body.bestaetigung !== true) return json({ error: "bestaetigung=true fehlt. Es wurde NICHTS geschrieben." }, 400);
       const eingabe = Array.isArray(body.aenderungen) ? body.aenderungen : [];
+      // Je Zeile: neues Gebot (neu) und/oder neuer Zustand (state). Mindestens eines.
       const gewollt = eingabe
-        .map((a: any) => ({ art: a?.art, id: str(a?.id), alt: Number(a?.gebot), neu: Number(a?.neu) }))
-        .filter((a: any) => (a.art === "keyword" || a.art === "target") && a.id && Number.isFinite(a.neu) && a.neu >= MIN_GEBOT);
+        .map((a: any) => ({
+          art: a?.art, id: str(a?.id), alt: Number(a?.gebot),
+          neu: a?.neu === undefined || a?.neu === null || a?.neu === "" ? null : Number(a.neu),
+          state: a?.state === "PAUSED" || a?.state === "ENABLED" ? a.state : null,
+          stateAlt: str(a?.state_alt), grund: str(a?.grund),
+        }))
+        .filter((a: any) => (a.art === "keyword" || a.art === "target") && a.id
+          && (a.state || (a.neu !== null && Number.isFinite(a.neu) && a.neu >= MIN_GEBOT)));
       if (!gewollt.length) return json({ error: "aenderungen leer oder ungültig. Es wurde NICHTS geschrieben." }, 400);
       if (gewollt.length > MAX_AENDERUNGEN) return json({ error: `Zu viele Änderungen (${gewollt.length} > ${MAX_AENDERUNGEN}).` }, 400);
 
-      // Aktuellen Stand bei Amazon holen: nur schreiben, wenn das Gebot noch dem
-      // erwarteten Alt-Wert entspricht (jemand könnte inzwischen in der Konsole
-      // gedreht haben).
+      // Aktuellen Stand bei Amazon holen: nur schreiben, wenn Gebot (und ggf.
+      // Zustand) noch dem erwarteten Alt-Wert entsprechen (jemand könnte
+      // inzwischen in der Konsole gedreht haben).
       const kwIds = gewollt.filter((a: any) => a.art === "keyword").map((a: any) => a.id);
       const tgIds = gewollt.filter((a: any) => a.art === "target").map((a: any) => a.id);
       const aktuell = await ads.geboteNachId(kwIds, tgIds);
       if (!aktuell.ok) return json({ error: "Aktuellen Stand laden fehlgeschlagen. Es wurde NICHTS geschrieben.", detail: aktuell.detail }, 502);
       const byId = new Map(aktuell.zeilen.map((z) => [`${z.art}:${z.id}`, z]));
 
-      const schreiben: { art: "keyword" | "target"; id: string; neu: number; zeile: GebotsZeile }[] = [];
+      type Schreib = { art: "keyword" | "target"; id: string; neu: number | null; state: string | null; grund: string | null; zeile: GebotsZeile };
+      const schreiben: Schreib[] = [];
       const ergebnisse: any[] = [];
       for (const g of gewollt) {
         const z = byId.get(`${g.art}:${g.id}`);
         if (!z) { ergebnisse.push({ ...g, ergebnis: "uebersprungen", detail: "bei Amazon nicht gefunden" }); continue; }
-        if (Number.isFinite(g.alt) && Math.abs(z.gebot - g.alt) > 0.005) {
-          ergebnisse.push({ ...g, ergebnis: "uebersprungen", detail: `Gebot ist inzwischen ${z.gebot}, erwartet ${g.alt}`, text: z.text, campaignId: z.campaignId });
+        if (g.neu !== null && Number.isFinite(g.alt) && Math.abs(z.gebot - g.alt) > 0.005) {
+          ergebnisse.push({ ...g, ergebnis: "uebersprungen", detail: `Gebot ist inzwischen ${z.gebot}, erwartet ${g.alt}`, text: z.text, campaignId: z.campaignId, adGroupId: z.adGroupId });
           continue;
         }
-        schreiben.push({ art: g.art, id: g.id, neu: g.neu, zeile: z });
+        if (g.state && g.stateAlt && z.state && z.state !== g.stateAlt) {
+          ergebnisse.push({ ...g, ergebnis: "uebersprungen", detail: `Zustand ist inzwischen ${z.state}, erwartet ${g.stateAlt}`, text: z.text, campaignId: z.campaignId, adGroupId: z.adGroupId });
+          continue;
+        }
+        const neu = g.neu !== null && Math.abs(z.gebot - g.neu) > 0.005 ? g.neu : null;
+        const state = g.state && z.state !== g.state ? g.state : null;
+        if (neu === null && state === null) {
+          ergebnisse.push({ ...g, ergebnis: "uebersprungen", detail: "schon so bei Amazon", text: z.text, campaignId: z.campaignId, adGroupId: z.adGroupId });
+          continue;
+        }
+        schreiben.push({ art: g.art, id: g.id, neu, state, grund: g.grund, zeile: z });
       }
 
+      const feld = (s: Schreib, idFeld: string) => ({ [idFeld]: s.id, ...(s.neu !== null ? { bid: s.neu } : {}), ...(s.state ? { state: s.state } : {}) });
       const kw = schreiben.filter((s) => s.art === "keyword");
       const tg = schreiben.filter((s) => s.art === "target");
-      const rk = await ads.setzeKeywords(kw.map((s) => ({ keywordId: s.id, bid: s.neu })));
-      const rt = await ads.setzeTargets(tg.map((s) => ({ targetId: s.id, bid: s.neu })));
-      for (const s of kw) {
-        const e = rk.get(s.id) ?? { ok: false, detail: "keine Antwort von Amazon" };
-        ergebnisse.push({ art: s.art, id: s.id, campaignId: s.zeile.campaignId, adGroupId: s.zeile.adGroupId, text: s.zeile.text, alt: s.zeile.gebot, neu: s.neu, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : e.detail });
-      }
-      for (const s of tg) {
-        const e = rt.get(s.id) ?? { ok: false, detail: "keine Antwort von Amazon" };
-        ergebnisse.push({ art: s.art, id: s.id, campaignId: s.zeile.campaignId, adGroupId: s.zeile.adGroupId, text: s.zeile.text, alt: s.zeile.gebot, neu: s.neu, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : e.detail });
+      const rk = await ads.setzeKeywords(kw.map((s) => feld(s, "keywordId")));
+      const rt = await ads.setzeTargets(tg.map((s) => feld(s, "targetId")));
+      for (const s of [...kw, ...tg]) {
+        const e = (s.art === "keyword" ? rk : rt).get(s.id) ?? { ok: false, detail: "keine Antwort von Amazon" };
+        ergebnisse.push({
+          art: s.art, id: s.id, campaignId: s.zeile.campaignId, adGroupId: s.zeile.adGroupId, text: s.zeile.text,
+          alt: s.zeile.gebot, neu: s.neu, state_alt: s.zeile.state ?? null, state: s.state, grund: s.grund,
+          ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : e.detail,
+        });
       }
 
       // Spur: jede Zeile, auch die übersprungenen.
       const logRows = ergebnisse.map((e) => ({
         tenant_id: tenantId, user_id: userId, art: e.art, objekt_id: e.id,
         campaign_id: e.campaignId ?? null, ad_group_id: e.adGroupId ?? null, text: e.text ?? null,
-        gebot_alt: Number.isFinite(e.alt) ? e.alt : null, gebot_neu: e.neu,
+        gebot_alt: Number.isFinite(e.alt) ? e.alt : null, gebot_neu: e.neu ?? null,
+        state_alt: e.state_alt ?? e.stateAlt ?? null, state_neu: e.state ?? null,
         ergebnis: e.ergebnis, detail: e.detail ? String(typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail)).slice(0, 1000) : null,
-        grund: str(body.grund),
+        grund: e.grund ?? str(body.grund),
       }));
       const { error: logErr } = await service.from("ads_gebote_log").insert(logRows);
 
@@ -314,10 +348,10 @@ class AdsClient {
     return { ok: true as const, zeilen };
   }
 
-  async setzeKeywords(items: { keywordId: string; bid: number }[]) {
+  async setzeKeywords(items: Record<string, unknown>[]) {
     return this.setze("/sp/keywords", CT.keyword, "keywords", "keywordId", items);
   }
-  async setzeTargets(items: { targetId: string; bid: number }[]) {
+  async setzeTargets(items: Record<string, unknown>[]) {
     return this.setze("/sp/targets", CT.target, "targetingClauses", "targetId", items);
   }
 

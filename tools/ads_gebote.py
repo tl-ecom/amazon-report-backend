@@ -26,6 +26,12 @@ Ablauf:
   5. Genau diese Vorschau anwenden (fragt noch einmal nach, ausser mit --ja):
         python tools/ads_gebote.py setzen --firma Vaneja --grund "ACOS zu hoch"
 
+  Alternativ eine Excel-Tabelle einlesen (Blatt mit Spalten Entity, Campaign ID,
+  Keyword-ID / Targeting-ID, Keyword / Target, Zustand, Gebot alt, Gebot NEU,
+  Begruendung). Zeilen mit Zustand "paused"/"enabled" aendern auch den Zustand.
+  Ergebnis ist dieselbe Vorschau wie oben, danach normal "setzen":
+        python tools/ads_gebote.py tabelle --firma Vaneja --datei "Massnahmen.xlsx" --blatt Gebotsänderungen
+
 Wo ausfuehren: auf dem PC (nicht VPS). Braucht nur Python 3 + requests.
 """
 
@@ -228,6 +234,140 @@ def cmd_vorschau(args):
     print("Anwenden:  python tools/ads_gebote.py setzen --firma %s --grund \"...\"" % args.firma)
 
 
+def _zahl(v):
+    if v is None or v == "":
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    t = str(v).strip().replace("€", "").replace(" ", "").replace(",", ".")
+    try:
+        return float(t)
+    except ValueError:
+        return None
+
+
+def _id(v):
+    """Excel liefert IDs gern als Float (337058135144638.0) -> ganzzahliger String."""
+    if v is None:
+        return None
+    if isinstance(v, float):
+        return str(int(v))
+    t = str(v).strip()
+    return t[:-2] if t.endswith(".0") else t
+
+
+def lies_tabelle(datei, blatt):
+    """Liest ein Massnahmen-Blatt. Spalten werden ueber die Kopfzeile gefunden (Teilstring,
+    ohne Gross/Klein); die Kopfzeile ist die erste Zeile mit 'Gebot' und 'NEU'."""
+    try:
+        import openpyxl
+    except ImportError:
+        sys.exit("openpyxl fehlt:  pip install openpyxl")
+    wb = openpyxl.load_workbook(datei, data_only=True)
+    if blatt not in wb.sheetnames:
+        sys.exit(f"Blatt '{blatt}' nicht gefunden. Vorhanden: {', '.join(wb.sheetnames)}")
+    ws = wb[blatt]
+    zeilen = list(ws.iter_rows(values_only=True))
+    kopf_idx = next((i for i, r in enumerate(zeilen)
+                     if any(c and "gebot" in str(c).lower() and "neu" in str(c).lower() for c in r)), None)
+    if kopf_idx is None:
+        sys.exit("Keine Kopfzeile mit 'Gebot NEU' gefunden.")
+    kopf = [str(c).strip().lower() if c is not None else "" for c in zeilen[kopf_idx]]
+
+    def spalte(*teile):
+        for i, k in enumerate(kopf):
+            if all(t in k for t in teile):
+                return i
+        return None
+
+    sp = {
+        "entity": spalte("entity"), "campaign": spalte("campaign"),
+        "id": spalte("keyword-id") if spalte("keyword-id") is not None else spalte("targeting-id"),
+        "text": spalte("keyword / target") if spalte("keyword / target") is not None else spalte("keyword"),
+        "match": spalte("match"), "zustand": spalte("zustand") if spalte("zustand") is not None else spalte("state"),
+        "alt": spalte("gebot", "alt"), "neu": spalte("gebot", "neu"),
+        "grund": spalte("begr") if spalte("begr") is not None else spalte("grund"),
+    }
+    fehlend = [k for k in ("entity", "campaign", "id", "neu") if sp[k] is None]
+    if fehlend:
+        sys.exit(f"Spalten nicht gefunden: {fehlend}. Kopfzeile: {kopf}")
+
+    def wert(r, k):
+        i = sp.get(k)
+        return r[i] if i is not None and i < len(r) else None
+
+    out = []
+    for r in zeilen[kopf_idx + 1:]:
+        ent = wert(r, "entity")
+        if not ent or not _id(wert(r, "id")):
+            continue
+        art = "keyword" if "keyword" in str(ent).lower() else "target"
+        zustand = str(wert(r, "zustand") or "").strip().lower()
+        state = "PAUSED" if zustand.startswith("paus") else ("ENABLED" if zustand.startswith(("enab", "akt")) else None)
+        out.append({
+            "art": art, "id": _id(wert(r, "id")), "campaignId": _id(wert(r, "campaign")),
+            "text": str(wert(r, "text") or ""), "matchType": str(wert(r, "match") or ""),
+            "gebot": _zahl(wert(r, "alt")), "neu": _zahl(wert(r, "neu")), "state": state,
+            "grund": (str(wert(r, "grund")).strip() if wert(r, "grund") else None),
+        })
+    return out
+
+
+def cmd_tabelle(args):
+    tenant, name = firma_id(args.firma)
+    zeilen = lies_tabelle(args.datei, args.blatt)
+    if not zeilen:
+        sys.exit("Keine Datenzeilen im Blatt.")
+    kname = {k["campaignId"]: k["name"] for k in
+             ruf({"action": "kampagnen", "company_id": tenant, "status": ["ENABLED", "PAUSED", "ARCHIVED"]})["kampagnen"]}
+    ist = ruf({"action": "pruefen", "company_id": tenant,
+               "aenderungen": [{"art": z["art"], "id": z["id"]} for z in zeilen]})["zeilen"]
+    by_id = {f"{z['art']}:{z['id']}": z for z in ist}
+
+    aend, schon, problem = [], [], []
+    for z in zeilen:
+        a = by_id.get(f"{z['art']}:{z['id']}")
+        z["kampagne"] = kname.get(z["campaignId"], z["campaignId"])
+        if not a:
+            z["hinweis"] = "bei Amazon nicht gefunden"; problem.append(z); continue
+        z["ist"] = a["gebot"]; z["state_alt"] = a.get("state"); z["text"] = z["text"] or a["text"]
+        gebot_aendert = z["neu"] is not None and abs(a["gebot"] - z["neu"]) > 0.005
+        state_aendert = z["state"] is not None and a.get("state") != z["state"]
+        if not gebot_aendert and not state_aendert:
+            z["hinweis"] = "schon so"; schon.append(z); continue
+        if gebot_aendert and z["gebot"] is not None and abs(a["gebot"] - z["gebot"]) > 0.005:
+            z["hinweis"] = f"Tabelle sagt alt {z['gebot']}, Amazon hat {a['gebot']}"; problem.append(z); continue
+        z["was"] = " + ".join(x for x in [
+            f"Gebot {a['gebot']} -> {z['neu']}" if gebot_aendert else "",
+            f"Zustand {a.get('state')} -> {z['state']}" if state_aendert else ""] if x)
+        z["delta"] = round(z["neu"] - a["gebot"], 2) if gebot_aendert else ""
+        if not gebot_aendert:
+            z["neu"] = None
+        if not state_aendert:
+            z["state"] = None
+        aend.append(z)
+
+    print(f"Firma: {name}   Datei: {os.path.basename(args.datei)} / {args.blatt}   Zeilen: {len(zeilen)}")
+    print(f"Anzuwenden: {len(aend)}   schon so: {len(schon)}   Probleme (werden NICHT geschrieben): {len(problem)}\n")
+    if aend:
+        print("ANZUWENDEN")
+        tabelle(aend, ["kampagne", "art", "text", "matchType", "was", "delta", "id"])
+    if schon:
+        print("\nSCHON SO (uebersprungen)")
+        tabelle(schon, ["kampagne", "art", "text", "ist", "state_alt", "id"])
+    if problem:
+        print("\nPROBLEME (uebersprungen)")
+        tabelle(problem, ["kampagne", "art", "text", "hinweis", "id"])
+    if not aend:
+        sys.exit("\nNichts anzuwenden.")
+    with open(VORSCHAU_DATEI, "w", encoding="utf-8") as f:
+        json.dump({"firma": name, "tenant_id": tenant, "kampagnen": sorted({a["kampagne"] for a in aend}),
+                   "regel": {"tabelle": os.path.basename(args.datei), "blatt": args.blatt},
+                   "erstellt": time.strftime("%Y-%m-%d %H:%M:%S"), "aenderungen": aend}, f, ensure_ascii=False, indent=1)
+    print(f"\nNICHTS geschrieben. Vorschau liegt in {VORSCHAU_DATEI}.")
+    print("Anwenden:  python tools/ads_gebote.py setzen --firma %s" % args.firma)
+
+
 def cmd_setzen(args):
     if not os.path.exists(VORSCHAU_DATEI):
         sys.exit("Keine Vorschau vorhanden. Erst:  python tools/ads_gebote.py vorschau ...")
@@ -246,12 +386,16 @@ def cmd_setzen(args):
         if antwort != "ja":
             sys.exit("Abgebrochen. Nichts geschrieben.")
     d = ruf({"action": "setzen", "company_id": tenant, "bestaetigung": True, "grund": args.grund,
-             "aenderungen": [{"art": a["art"], "id": a["id"], "gebot": a["gebot"], "neu": a["neu"]} for a in aend]})
+             "aenderungen": [{"art": a["art"], "id": a["id"], "gebot": a.get("ist", a.get("gebot")), "neu": a.get("neu"),
+                              "state": a.get("state"), "state_alt": a.get("state_alt"), "grund": a.get("grund")} for a in aend]})
     print(f"Geschrieben: {d['geschrieben']}   Fehler: {d['fehler']}   Uebersprungen: {d['uebersprungen']}")
+    ok = [e for e in d["ergebnisse"] if e["ergebnis"] == "ok"]
+    if ok:
+        tabelle(ok, ["art", "text", "alt", "neu", "state_alt", "state", "id"])
     problem = [e for e in d["ergebnisse"] if e["ergebnis"] != "ok"]
     if problem:
         print("\nNicht geschrieben:")
-        tabelle(problem, ["art", "id", "text", "alt", "neu", "ergebnis", "detail"])
+        tabelle(problem, ["art", "id", "text", "alt", "neu", "state", "ergebnis", "detail"])
     if d.get("log_fehler"):
         print(f"WARNUNG: Log konnte nicht geschrieben werden: {d['log_fehler']}")
     os.remove(VORSCHAU_DATEI)
@@ -296,6 +440,12 @@ def main():
     s.add_argument("--min", type=float, help="nicht unter diesen Wert (Amazon-Minimum 0.02)")
     s.add_argument("--max", type=float, help="nicht ueber diesen Wert")
     s.set_defaults(fn=cmd_vorschau)
+
+    s = sub.add_parser("tabelle", help="Excel-Massnahmenblatt einlesen -> Vorschau (schreibt nichts)")
+    s.add_argument("--firma", required=True)
+    s.add_argument("--datei", required=True, help="Pfad zur .xlsx")
+    s.add_argument("--blatt", default="Gebotsänderungen", help="Blattname (Standard: Gebotsänderungen)")
+    s.set_defaults(fn=cmd_tabelle)
 
     s = sub.add_parser("setzen", help="die letzte Vorschau bei Amazon anwenden")
     s.add_argument("--firma", required=True)
