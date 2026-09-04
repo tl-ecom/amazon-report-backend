@@ -157,5 +157,17 @@ export async function ladenhueterRadar(supabase: any, tenant_id: string): Promis
     anzahl_wiederanlauf: zaehle("wiederanlauf"),
     anzahl_ausgelistet: zaehle("ausgelistet"),
     anzahl_asins_geprueft: basis.length,
+    // Woher der Bestand stammt und wie alt er ist — wie beim Nachschub.
+    //
+    // Amazons FBA-Bestandsbericht faellt blockweise aus; dann greift der
+    // Planungsreport als Zweitquelle. Ein Ladenhueter-Befund fuehrt zu
+    // Entscheidungen ueber Abverkauf und Entfernung. Die trifft man nicht gern
+    // auf einem Stand, von dem man nicht weiss, wie alt er ist.
+    bestand_quelle: (basis.find((r: any) => r.bestand_quelle)?.bestand_quelle as string) ?? null,
+    bestand_stand: (basis.find((r: any) => r.bestand_stand)?.bestand_stand as string) ?? null,
+    // Ein Ladenhueter MIT Zulauf ist ein anderer Fall als einer ohne — da kommt
+    // noch Ware, die auch liegen bleibt. Der Planungsreport kennt den Zulauf
+    // nicht; dann ist er unbekannt, nicht null.
+    zulauf_bekannt: basis.some((r: any) => r.nachschub_unterwegs != null),
   };
 }
