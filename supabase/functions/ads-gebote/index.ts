@@ -47,6 +47,8 @@ const CT = {
   campNegKeyword: "application/vnd.spCampaignNegativeKeyword.v3+json",
   sbCampaign: "application/vnd.sbcampaignresource.v4+json",
   sbAdGroup: "application/vnd.sbadgroupresource.v4+json",
+  sbNegKeyword: "application/vnd.sbnegativekeyword.v3+json",     // GET /sb/negativeKeywords (Accept)
+  sbKeywordResp: "application/vnd.sbkeywordresponse.v3+json",   // POST/PUT-Antworten der SB-3.0-Keyword-Endpunkte
 };
 const SEITE = 1000;
 const UPDATE_BLOCK = 500;
@@ -377,7 +379,7 @@ Deno.serve(async (req) => {
     if (action === "sb_negatives") {
       const cid = str(body.campaignId);
       if (!cid) return json({ error: "campaignId fehlt." }, 400);
-      const r = await ads.get(`/sb/negativeKeywords?campaignIdFilter=${encodeURIComponent(cid)}`);
+      const r = await ads.get(`/sb/negativeKeywords?campaignIdFilter=${encodeURIComponent(cid)}`, CT.sbNegKeyword);
       if (!r.ok) return json({ error: "SB-Negatives laden fehlgeschlagen", detail: r.detail }, 502);
       const list = Array.isArray(r.data) ? r.data : [];
       return json({ tenant_id: tenantId, negatives: list.map((k: any) => ({ keywordId: String(k.keywordId), campaignId: String(k.campaignId), adGroupId: String(k.adGroupId), text: k.keywordText, matchType: k.matchType, state: k.state })) });
@@ -392,14 +394,15 @@ Deno.serve(async (req) => {
       const ag = await ads.alle("/sb/v4/adGroups/list", CT.sbAdGroup, { campaignIdFilter: { include: [cid] } }, "adGroups");
       if (!ag.ok || !ag.daten.length) return json({ error: "SB-Anzeigengruppe nicht gefunden", detail: ag.ok ? null : ag.detail }, 404);
       const agId = String(ag.daten[0].adGroupId);
-      const vorhanden = await ads.get(`/sb/negativeKeywords?campaignIdFilter=${encodeURIComponent(cid)}`);
+      const vorhanden = await ads.get(`/sb/negativeKeywords?campaignIdFilter=${encodeURIComponent(cid)}`, CT.sbNegKeyword);
       if (!vorhanden.ok) return json({ error: "SB-Negatives prüfen fehlgeschlagen", detail: vorhanden.detail }, 502);
       const alt = new Set((Array.isArray(vorhanden.data) ? vorhanden.data : []).map((k: any) => `${String(k.keywordText).toLowerCase()}|${k.matchType}`));
       const neu = kws.filter((k: any) => !alt.has(`${k.text.toLowerCase()}|${k.matchType}`));
       const dup = kws.filter((k: any) => alt.has(`${k.text.toLowerCase()}|${k.matchType}`));
       const ergebnisse: any[] = dup.map((k: any) => ({ ...k, ergebnis: "uebersprungen", detail: "existiert schon" }));
       if (neu.length) {
-        const r = await ads.postRaw("/sb/negativeKeywords", neu.map((k: any) => ({ campaignId: cid, adGroupId: agId, keywordText: k.text, matchType: k.matchType })));
+        // IDs sind in der SB-3.0-Spec int64, nicht String.
+        const r = await ads.postRaw("/sb/negativeKeywords", neu.map((k: any) => ({ campaignId: Number(cid), adGroupId: Number(agId), keywordText: k.text, matchType: k.matchType })), CT.sbKeywordResp);
         if (!r.ok) { for (const k of neu) ergebnisse.push({ ...k, ergebnis: "fehler", detail: r.detail }); }
         else {
           const arr = Array.isArray(r.data) ? r.data : [];
@@ -445,18 +448,22 @@ class AdsClient {
     return { ok: false, detail: "429 auch nach mehreren Versuchen" };
   }
 
-  /** GET mit JSON (ältere SB-Endpunkte wie /sb/negativeKeywords). */
-  async get(pfad: string): Promise<{ ok: true; data: any } | { ok: false; detail: unknown }> {
-    const resp = await fetch(`${ADS_ENDPOINT}${pfad}`, { method: "GET", headers: { ...this.headers, "Accept": "application/json" } });
+  /** GET (ältere SB-Endpunkte wie /sb/negativeKeywords): Accept ist dort ein Vendor-Typ. */
+  async get(pfad: string, accept = "application/json"): Promise<{ ok: true; data: any } | { ok: false; detail: unknown }> {
+    const resp = await fetch(`${ADS_ENDPOINT}${pfad}`, { method: "GET", headers: { ...this.headers, "Accept": accept } });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) return { ok: false, detail: { status: resp.status, ...(typeof data === "object" ? data : { body: data }) } };
     return { ok: true, data };
   }
 
-  /** POST mit application/json und Array-Body (ältere SB-Endpunkte). */
-  async postRaw(pfad: string, body: unknown): Promise<{ ok: true; data: any } | { ok: false; detail: unknown }> {
-    const r = await this.call("POST", pfad, "application/json", body);
-    return r.ok ? { ok: true, data: r.data } : r;
+  /** POST mit application/json und Array-Body (ältere SB-Endpunkte); Accept getrennt. */
+  async postRaw(pfad: string, body: unknown, accept = "application/json"): Promise<{ ok: true; data: any } | { ok: false; detail: unknown }> {
+    const resp = await fetch(`${ADS_ENDPOINT}${pfad}`, {
+      method: "POST", headers: { ...this.headers, "Content-Type": "application/json", "Accept": accept }, body: JSON.stringify(body),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) return { ok: false, detail: { status: resp.status, ...(typeof data === "object" && !Array.isArray(data) ? data : { body: data }) } };
+    return { ok: true, data };
   }
 
   /** SP-Kampagnen roh (inkl. dynamicBidding) nach IDs. */
@@ -496,8 +503,9 @@ class AdsClient {
   async alle(pfad: string, ct: string, body: Record<string, unknown>, feld: string): Promise<{ ok: true; daten: any[] } | { ok: false; detail: unknown }> {
     const out: any[] = [];
     let nextToken: string | undefined;
+    const seite = pfad.startsWith("/sb/") ? 100 : SEITE; // SB v4 erlaubt höchstens 100 je Seite
     for (let i = 0; i < 50; i++) {
-      const r = await this.call("POST", pfad, ct, { ...body, maxResults: SEITE, ...(nextToken ? { nextToken } : {}) });
+      const r = await this.call("POST", pfad, ct, { ...body, maxResults: seite, ...(nextToken ? { nextToken } : {}) });
       if (!r.ok) return r;
       out.push(...(r.data?.[feld] ?? []));
       nextToken = r.data?.nextToken || undefined;
