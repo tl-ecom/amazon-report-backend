@@ -43,6 +43,10 @@ const CT = {
   adGroup: "application/vnd.spAdGroup.v3+json",
   keyword: "application/vnd.spKeyword.v3+json",
   target: "application/vnd.spTargetingClause.v3+json",
+  negKeyword: "application/vnd.spNegativeKeyword.v3+json",
+  campNegKeyword: "application/vnd.spCampaignNegativeKeyword.v3+json",
+  sbCampaign: "application/vnd.sbcampaignresource.v4+json",
+  sbAdGroup: "application/vnd.sbadgroupresource.v4+json",
 };
 const SEITE = 1000;
 const UPDATE_BLOCK = 500;
@@ -244,7 +248,173 @@ Deno.serve(async (req) => {
       });
     }
 
-    return json({ error: "Unbekannte action. Erlaubt: firmen, kampagnen, gebote, vorschau, setzen" }, 400);
+    // ------------------------------------------------------------ Weitere Aktionen
+    // Alle Schreibaktionen hier: bestaetigung=true Pflicht, Spur in ads_aenderungen_log.
+    const spur = async (rows: any[]) => {
+      if (!rows.length) return null;
+      const { error } = await service.from("ads_aenderungen_log").insert(rows.map((r) => ({
+        tenant_id: tenantId, user_id: userId, grund: r.grund ?? str(body.grund) ?? null, ...r,
+      })));
+      return error?.message ?? null;
+    };
+    const bestaetigt = () => body.bestaetigung === true;
+
+    // Platzierungs-Modifier einer SP-Kampagne lesen
+    if (action === "platzierung") {
+      const ids = liste(body.kampagnen, []);
+      if (!ids.length) return json({ error: "kampagnen fehlt." }, 400);
+      const r = await ads.kampagnenRoh(ids);
+      if (!r.ok) return json({ error: "Kampagnen laden fehlgeschlagen", detail: r.detail }, 502);
+      return json({ tenant_id: tenantId, kampagnen: r.daten.map((c: any) => ({
+        campaignId: String(c.campaignId), name: c.name, state: c.state,
+        strategie: c.dynamicBidding?.strategy ?? null,
+        platzierungen: c.dynamicBidding?.placementBidding ?? [],
+      })) });
+    }
+
+    // Platzierungs-Modifier setzen: {campaignId, placement, prozent}
+    if (action === "platzierung_setzen") {
+      if (!bestaetigt()) return json({ error: "bestaetigung=true fehlt. Es wurde NICHTS geschrieben." }, 400);
+      const cid = str(body.campaignId); const placement = str(body.placement); const prozent = Number(body.prozent);
+      if (!cid || !placement || !Number.isFinite(prozent) || prozent < 0 || prozent > 900) return json({ error: "campaignId, placement und prozent (0–900) nötig." }, 400);
+      const r = await ads.kampagnenRoh([cid]);
+      if (!r.ok || !r.daten.length) return json({ error: "Kampagne nicht gefunden", detail: r.ok ? null : r.detail }, 404);
+      const c = r.daten[0];
+      const vorher = c.dynamicBidding?.placementBidding ?? [];
+      const nachher = vorher.filter((p: any) => p.placement !== placement).concat([{ placement, percentage: prozent }]);
+      const put = await ads.put("/sp/campaigns", CT.campaign, "campaigns", "campaignId",
+        [{ campaignId: cid, dynamicBidding: { strategy: c.dynamicBidding?.strategy ?? "LEGACY_FOR_SALES", placementBidding: nachher } }]);
+      const e = put.get(cid) ?? { ok: false, detail: "keine Antwort" };
+      const logErr = await spur([{ aktion: "platzierung_setzen", objekt_art: "campaign", objekt_id: cid, campaign_id: cid,
+        vorher: { placementBidding: vorher }, nachher: { placementBidding: nachher }, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : JSON.stringify(e.detail).slice(0, 1000) }]);
+      return json({ campaignId: cid, name: c.name, vorher, nachher, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : e.detail, ...(logErr ? { log_fehler: logErr } : {}) });
+    }
+
+    // SP-Negatives (Anzeigengruppe + Kampagne) lesen
+    if (action === "negatives") {
+      const ids = liste(body.kampagnen, []);
+      if (!ids.length) return json({ error: "kampagnen fehlt." }, 400);
+      const ag = await ads.alle("/sp/negativeKeywords/list", CT.negKeyword, { campaignIdFilter: { include: ids } }, "negativeKeywords");
+      if (!ag.ok) return json({ error: "Negatives laden fehlgeschlagen", detail: ag.detail }, 502);
+      const ck = await ads.alle("/sp/campaignNegativeKeywords/list", CT.campNegKeyword, { campaignIdFilter: { include: ids } }, "campaignNegativeKeywords");
+      if (!ck.ok) return json({ error: "Kampagnen-Negatives laden fehlgeschlagen", detail: ck.detail }, 502);
+      const m = (x: any, ebene: string) => ({ ebene, keywordId: String(x.keywordId), campaignId: String(x.campaignId), adGroupId: x.adGroupId ? String(x.adGroupId) : null, text: x.keywordText, matchType: x.matchType, state: x.state });
+      return json({ tenant_id: tenantId, negatives: [...ag.daten.map((x: any) => m(x, "adgroup")), ...ck.daten.map((x: any) => m(x, "campaign"))] });
+    }
+
+    // SP-Keyword anlegen: {campaignId, adGroupId?, keywordText, matchType, bid}
+    if (action === "keyword_anlegen") {
+      if (!bestaetigt()) return json({ error: "bestaetigung=true fehlt. Es wurde NICHTS geschrieben." }, 400);
+      const cid = str(body.campaignId); const text = str(body.keywordText); const mt = str(body.matchType) ?? "EXACT"; const bid = Number(body.bid);
+      if (!cid || !text || !Number.isFinite(bid) || bid < MIN_GEBOT) return json({ error: "campaignId, keywordText und bid nötig." }, 400);
+      const agId = await ads.anzeigengruppe(cid, str(body.adGroupId));
+      if (!agId.ok) return json({ error: agId.detail }, 400);
+      // Duplikat-Schutz: gleiches Keyword + Match in der Kampagne?
+      const vorhanden = await ads.alle("/sp/keywords/list", CT.keyword, { campaignIdFilter: { include: [cid] }, matchTypeFilter: { include: [mt] } }, "keywords");
+      if (!vorhanden.ok) return json({ error: "Keywords prüfen fehlgeschlagen", detail: vorhanden.detail }, 502);
+      const dup = vorhanden.daten.find((k: any) => String(k.keywordText).toLowerCase() === text.toLowerCase());
+      if (dup) {
+        await spur([{ aktion: "keyword_anlegen", objekt_art: "keyword", objekt_id: String(dup.keywordId), campaign_id: cid, nachher: { keywordText: text, matchType: mt, bid }, ergebnis: "uebersprungen", detail: `existiert schon (state ${dup.state}, bid ${dup.bid})` }]);
+        return json({ ergebnis: "uebersprungen", detail: "Keyword existiert schon in dieser Kampagne", keyword: { keywordId: String(dup.keywordId), state: dup.state, bid: dup.bid, matchType: dup.matchType } });
+      }
+      const r = await ads.post("/sp/keywords", CT.keyword, "keywords", [{ campaignId: cid, adGroupId: agId.id, keywordText: text, matchType: mt, state: "ENABLED", bid }]);
+      const e = r[0] ?? { ok: false, detail: "keine Antwort" };
+      const logErr = await spur([{ aktion: "keyword_anlegen", objekt_art: "keyword", objekt_id: e.id ?? null, campaign_id: cid, nachher: { adGroupId: agId.id, keywordText: text, matchType: mt, bid }, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : JSON.stringify(e.detail).slice(0, 1000) }]);
+      return json({ ergebnis: e.ok ? "ok" : "fehler", keywordId: e.id ?? null, adGroupId: agId.id, detail: e.ok ? null : e.detail, ...(logErr ? { log_fehler: logErr } : {}) });
+    }
+
+    // SP-Negative (Anzeigengruppen-Ebene) anlegen: {campaignId, adGroupId?, keywordText, matchType NEGATIVE_EXACT|NEGATIVE_PHRASE}
+    if (action === "negative_anlegen") {
+      if (!bestaetigt()) return json({ error: "bestaetigung=true fehlt. Es wurde NICHTS geschrieben." }, 400);
+      const cid = str(body.campaignId); const text = str(body.keywordText); const mt = str(body.matchType) ?? "NEGATIVE_EXACT";
+      if (!cid || !text) return json({ error: "campaignId und keywordText nötig." }, 400);
+      const agId = await ads.anzeigengruppe(cid, str(body.adGroupId));
+      if (!agId.ok) return json({ error: agId.detail }, 400);
+      const vorhanden = await ads.alle("/sp/negativeKeywords/list", CT.negKeyword, { campaignIdFilter: { include: [cid] } }, "negativeKeywords");
+      if (!vorhanden.ok) return json({ error: "Negatives prüfen fehlgeschlagen", detail: vorhanden.detail }, 502);
+      const dup = vorhanden.daten.find((k: any) => String(k.keywordText).toLowerCase() === text.toLowerCase() && k.matchType === mt);
+      if (dup) {
+        await spur([{ aktion: "negative_anlegen", objekt_art: "negative_keyword", objekt_id: String(dup.keywordId), campaign_id: cid, nachher: { keywordText: text, matchType: mt }, ergebnis: "uebersprungen", detail: `existiert schon (state ${dup.state})` }]);
+        return json({ ergebnis: "uebersprungen", detail: "Negative existiert schon", keyword: { keywordId: String(dup.keywordId), state: dup.state, matchType: dup.matchType } });
+      }
+      const r = await ads.post("/sp/negativeKeywords", CT.negKeyword, "negativeKeywords", [{ campaignId: cid, adGroupId: agId.id, keywordText: text, matchType: mt, state: "ENABLED" }]);
+      const e = r[0] ?? { ok: false, detail: "keine Antwort" };
+      const logErr = await spur([{ aktion: "negative_anlegen", objekt_art: "negative_keyword", objekt_id: e.id ?? null, campaign_id: cid, nachher: { adGroupId: agId.id, keywordText: text, matchType: mt }, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : JSON.stringify(e.detail).slice(0, 1000) }]);
+      return json({ ergebnis: e.ok ? "ok" : "fehler", keywordId: e.id ?? null, adGroupId: agId.id, detail: e.ok ? null : e.detail, ...(logErr ? { log_fehler: logErr } : {}) });
+    }
+
+    // Sponsored Brands: Kampagnen lesen
+    if (action === "sb_kampagnen") {
+      const ids = liste(body.kampagnen, []);
+      const filter: Record<string, unknown> = ids.length ? { campaignIdFilter: { include: ids } } : { stateFilter: { include: liste(body.status, ["ENABLED", "PAUSED"]) } };
+      const r = await ads.alle("/sb/v4/campaigns/list", CT.sbCampaign, filter, "campaigns");
+      if (!r.ok) return json({ error: "SB-Kampagnen laden fehlgeschlagen", detail: r.detail }, 502);
+      return json({ tenant_id: tenantId, kampagnen: r.daten.map((c: any) => ({
+        campaignId: String(c.campaignId), name: c.name, state: c.state, budget: c.budget ?? null, budgetType: c.budgetType ?? null,
+        format: c.adFormat ?? c.creative?.type ?? null, start: c.startDate ?? null,
+      })) });
+    }
+
+    // Sponsored Brands: Kampagnen-Zustand setzen {campaignId, state}
+    if (action === "sb_kampagne_zustand") {
+      if (!bestaetigt()) return json({ error: "bestaetigung=true fehlt. Es wurde NICHTS geschrieben." }, 400);
+      const cid = str(body.campaignId); const state = str(body.state);
+      if (!cid || !(state === "PAUSED" || state === "ENABLED")) return json({ error: "campaignId und state (PAUSED|ENABLED) nötig." }, 400);
+      const r = await ads.alle("/sb/v4/campaigns/list", CT.sbCampaign, { campaignIdFilter: { include: [cid] } }, "campaigns");
+      if (!r.ok || !r.daten.length) return json({ error: "SB-Kampagne nicht gefunden", detail: r.ok ? null : r.detail }, 404);
+      const c = r.daten[0];
+      if (c.state === state) {
+        await spur([{ aktion: "sb_kampagne_zustand", objekt_art: "sb_campaign", objekt_id: cid, campaign_id: cid, vorher: { state: c.state }, nachher: { state }, ergebnis: "uebersprungen", detail: "schon so" }]);
+        return json({ campaignId: cid, name: c.name, ergebnis: "uebersprungen", detail: `Kampagne ist schon ${state}` });
+      }
+      const put = await ads.put("/sb/v4/campaigns", CT.sbCampaign, "campaigns", "campaignId", [{ campaignId: cid, state }]);
+      const e = put.get(cid) ?? { ok: false, detail: "keine Antwort" };
+      const logErr = await spur([{ aktion: "sb_kampagne_zustand", objekt_art: "sb_campaign", objekt_id: cid, campaign_id: cid, vorher: { state: c.state }, nachher: { state }, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : JSON.stringify(e.detail).slice(0, 1000) }]);
+      return json({ campaignId: cid, name: c.name, vorher: c.state, nachher: state, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : e.detail, ...(logErr ? { log_fehler: logErr } : {}) });
+    }
+
+    // Sponsored Brands: Negatives einer Kampagne lesen
+    if (action === "sb_negatives") {
+      const cid = str(body.campaignId);
+      if (!cid) return json({ error: "campaignId fehlt." }, 400);
+      const r = await ads.get(`/sb/negativeKeywords?campaignIdFilter=${encodeURIComponent(cid)}`);
+      if (!r.ok) return json({ error: "SB-Negatives laden fehlgeschlagen", detail: r.detail }, 502);
+      const list = Array.isArray(r.data) ? r.data : [];
+      return json({ tenant_id: tenantId, negatives: list.map((k: any) => ({ keywordId: String(k.keywordId), campaignId: String(k.campaignId), adGroupId: String(k.adGroupId), text: k.keywordText, matchType: k.matchType, state: k.state })) });
+    }
+
+    // Sponsored Brands: Negatives anlegen {campaignId, keywords:[{text, matchType}]}
+    if (action === "sb_negatives_anlegen") {
+      if (!bestaetigt()) return json({ error: "bestaetigung=true fehlt. Es wurde NICHTS geschrieben." }, 400);
+      const cid = str(body.campaignId);
+      const kws = (Array.isArray(body.keywords) ? body.keywords : []).map((k: any) => ({ text: str(k?.text), matchType: str(k?.matchType) ?? "negativeExact" })).filter((k: any) => k.text);
+      if (!cid || !kws.length) return json({ error: "campaignId und keywords nötig." }, 400);
+      const ag = await ads.alle("/sb/v4/adGroups/list", CT.sbAdGroup, { campaignIdFilter: { include: [cid] } }, "adGroups");
+      if (!ag.ok || !ag.daten.length) return json({ error: "SB-Anzeigengruppe nicht gefunden", detail: ag.ok ? null : ag.detail }, 404);
+      const agId = String(ag.daten[0].adGroupId);
+      const vorhanden = await ads.get(`/sb/negativeKeywords?campaignIdFilter=${encodeURIComponent(cid)}`);
+      if (!vorhanden.ok) return json({ error: "SB-Negatives prüfen fehlgeschlagen", detail: vorhanden.detail }, 502);
+      const alt = new Set((Array.isArray(vorhanden.data) ? vorhanden.data : []).map((k: any) => `${String(k.keywordText).toLowerCase()}|${k.matchType}`));
+      const neu = kws.filter((k: any) => !alt.has(`${k.text.toLowerCase()}|${k.matchType}`));
+      const dup = kws.filter((k: any) => alt.has(`${k.text.toLowerCase()}|${k.matchType}`));
+      const ergebnisse: any[] = dup.map((k: any) => ({ ...k, ergebnis: "uebersprungen", detail: "existiert schon" }));
+      if (neu.length) {
+        const r = await ads.postRaw("/sb/negativeKeywords", neu.map((k: any) => ({ campaignId: cid, adGroupId: agId, keywordText: k.text, matchType: k.matchType })));
+        if (!r.ok) { for (const k of neu) ergebnisse.push({ ...k, ergebnis: "fehler", detail: r.detail }); }
+        else {
+          const arr = Array.isArray(r.data) ? r.data : [];
+          neu.forEach((k: any, i: number) => {
+            const a = arr[i] ?? {};
+            const ok = a.code === "SUCCESS" || a.keywordId !== undefined;
+            ergebnisse.push({ ...k, keywordId: a.keywordId ? String(a.keywordId) : null, ergebnis: ok ? "ok" : "fehler", detail: ok ? null : (a.description ?? a.details ?? a) });
+          });
+        }
+      }
+      const logErr = await spur(ergebnisse.map((e) => ({ aktion: "sb_negatives_anlegen", objekt_art: "sb_negative_keyword", objekt_id: e.keywordId ?? null, campaign_id: cid, nachher: { adGroupId: agId, keywordText: e.text, matchType: e.matchType }, ergebnis: e.ergebnis, detail: e.detail ? String(typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail)).slice(0, 1000) : null })));
+      return json({ campaignId: cid, adGroupId: agId, angelegt: ergebnisse.filter((e) => e.ergebnis === "ok").length, uebersprungen: dup.length, fehler: ergebnisse.filter((e) => e.ergebnis === "fehler").length, ergebnisse, ...(logErr ? { log_fehler: logErr } : {}) });
+    }
+
+    return json({ error: "Unbekannte action. Erlaubt: firmen, kampagnen, gebote, vorschau, pruefen, setzen, platzierung, platzierung_setzen, negatives, keyword_anlegen, negative_anlegen, sb_kampagnen, sb_kampagne_zustand, sb_negatives, sb_negatives_anlegen" }, 400);
   } catch (e) {
     return json({ error: "Ausnahme", detail: String(e) }, 500);
   }
@@ -275,8 +445,55 @@ class AdsClient {
     return { ok: false, detail: "429 auch nach mehreren Versuchen" };
   }
 
+  /** GET mit JSON (ältere SB-Endpunkte wie /sb/negativeKeywords). */
+  async get(pfad: string): Promise<{ ok: true; data: any } | { ok: false; detail: unknown }> {
+    const resp = await fetch(`${ADS_ENDPOINT}${pfad}`, { method: "GET", headers: { ...this.headers, "Accept": "application/json" } });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) return { ok: false, detail: { status: resp.status, ...(typeof data === "object" ? data : { body: data }) } };
+    return { ok: true, data };
+  }
+
+  /** POST mit application/json und Array-Body (ältere SB-Endpunkte). */
+  async postRaw(pfad: string, body: unknown): Promise<{ ok: true; data: any } | { ok: false; detail: unknown }> {
+    const r = await this.call("POST", pfad, "application/json", body);
+    return r.ok ? { ok: true, data: r.data } : r;
+  }
+
+  /** SP-Kampagnen roh (inkl. dynamicBidding) nach IDs. */
+  async kampagnenRoh(ids: string[]) {
+    return this.alle("/sp/campaigns/list", CT.campaign, { campaignIdFilter: { include: ids } }, "campaigns");
+  }
+
+  /** Anzeigengruppe einer Kampagne auflösen: angegebene prüfen oder die einzige nehmen. */
+  async anzeigengruppe(campaignId: string, adGroupId: string | null): Promise<{ ok: true; id: string } | { ok: false; detail: string }> {
+    const ag = await this.alle("/sp/adGroups/list", CT.adGroup, { campaignIdFilter: { include: [campaignId] } }, "adGroups");
+    if (!ag.ok) return { ok: false, detail: `Anzeigengruppen laden fehlgeschlagen: ${JSON.stringify(ag.detail)}` };
+    const aktiv = ag.daten.filter((g: any) => g.state !== "ARCHIVED");
+    if (adGroupId) {
+      return aktiv.some((g: any) => String(g.adGroupId) === adGroupId) ? { ok: true, id: adGroupId } : { ok: false, detail: "adGroupId gehört nicht zu dieser Kampagne" };
+    }
+    if (aktiv.length === 1) return { ok: true, id: String(aktiv[0].adGroupId) };
+    return { ok: false, detail: `Kampagne hat ${aktiv.length} Anzeigengruppen, bitte adGroupId angeben: ${aktiv.map((g: any) => `${g.adGroupId} (${g.name})`).join(", ")}` };
+  }
+
+  /** Generisches Anlegen (POST /sp/keywords, /sp/negativeKeywords): Ergebnis je Index. */
+  async post(pfad: string, ct: string, feld: string, items: any[]): Promise<{ ok: boolean; id?: string; detail?: unknown }[]> {
+    const r = await this.call("POST", pfad, ct, { [feld]: items });
+    if (!r.ok) return items.map(() => ({ ok: false, detail: r.detail }));
+    const erg = r.data?.[feld] ?? {};
+    const out: { ok: boolean; id?: string; detail?: unknown }[] = items.map(() => ({ ok: false, detail: "keine Antwort" }));
+    for (const s of erg.success ?? []) out[s.index] = { ok: true, id: String(s.keywordId ?? s.targetId ?? s.campaignId ?? "") };
+    for (const e of erg.error ?? []) out[e.index] = { ok: false, detail: e.errors ?? e };
+    return out;
+  }
+
+  /** Generisches Update (PUT) mit Ergebnis je ID. */
+  async put(pfad: string, ct: string, feld: string, idFeld: string, items: any[]) {
+    return this.setze(pfad, ct, feld, idFeld, items);
+  }
+
   /** Alle Seiten einer /list-Abfrage einsammeln. */
-  private async alle(pfad: string, ct: string, body: Record<string, unknown>, feld: string): Promise<{ ok: true; daten: any[] } | { ok: false; detail: unknown }> {
+  async alle(pfad: string, ct: string, body: Record<string, unknown>, feld: string): Promise<{ ok: true; daten: any[] } | { ok: false; detail: unknown }> {
     const out: any[] = [];
     let nextToken: string | undefined;
     for (let i = 0; i < 50; i++) {

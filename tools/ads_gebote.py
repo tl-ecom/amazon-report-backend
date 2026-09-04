@@ -417,6 +417,132 @@ def cmd_setzen(args):
     os.remove(VORSCHAU_DATEI)
 
 
+# ----------------------------------------------------------------- Weitere Aktionen
+# (Platzierungs-Modifier, Keywords/Negatives anlegen, Sponsored Brands). Jede
+# Schreibaktion zeigt erst den Ist-Stand, fragt nach (ausser --ja) und schreibt dann.
+
+def _ja(args, frage):
+    if getattr(args, "ja", False):
+        return
+    if input(frage + " (ja/nein): ").strip().lower() != "ja":
+        sys.exit("Abgebrochen. Nichts geschrieben.")
+
+
+def _eine_kampagne(tenant, auswahl):
+    ids, namen, _ = kampagnen_ids(tenant, [auswahl], ["ENABLED", "PAUSED", "ARCHIVED"])
+    if len(ids) != 1:
+        sys.exit(f"'{auswahl}' trifft {len(ids)} Kampagnen: {', '.join(namen)}. Bitte eindeutiger (oder die ID).")
+    return ids[0], namen[0]
+
+
+def cmd_platzierung(args):
+    tenant, name = firma_id(args.firma)
+    ids, namen, _ = kampagnen_ids(tenant, args.kampagne, ["ENABLED", "PAUSED"])
+    d = ruf({"action": "platzierung", "company_id": tenant, "kampagnen": ids})
+    print(f"Firma: {name}")
+    rows = []
+    for k in d["kampagnen"]:
+        for pz in k["platzierungen"] or [{"placement": "(keine)", "percentage": ""}]:
+            rows.append({"kampagne": k["name"], "state": k["state"], "strategie": k["strategie"], "platzierung": pz["placement"], "prozent": pz["percentage"], "campaignId": k["campaignId"]})
+    tabelle(rows, ["kampagne", "state", "strategie", "platzierung", "prozent", "campaignId"])
+
+
+def cmd_platzierung_setzen(args):
+    tenant, name = firma_id(args.firma)
+    cid, kname = _eine_kampagne(tenant, args.kampagne)
+    d = ruf({"action": "platzierung", "company_id": tenant, "kampagnen": [cid]})["kampagnen"][0]
+    ist = next((p["percentage"] for p in d["platzierungen"] if p["placement"] == args.placement), None)
+    print(f"Firma: {name}   Kampagne: {kname} ({cid})")
+    print(f"{args.placement}: aktuell {ist if ist is not None else 'nicht gesetzt'} % -> neu {args.prozent} %")
+    if ist == args.prozent:
+        sys.exit("Schon so. Nichts zu tun.")
+    _ja(args, "Modifier bei Amazon setzen?")
+    r = ruf({"action": "platzierung_setzen", "company_id": tenant, "campaignId": cid, "placement": args.placement,
+             "prozent": args.prozent, "bestaetigung": True, "grund": args.grund})
+    print(f"Ergebnis: {r['ergebnis']}   vorher: {r['vorher']}   nachher: {r['nachher']}")
+    if r.get("detail"):
+        print("Detail:", json.dumps(r["detail"], ensure_ascii=False)[:600])
+
+
+def cmd_negatives(args):
+    tenant, name = firma_id(args.firma)
+    ids, namen, kname = kampagnen_ids(tenant, args.kampagne, ["ENABLED", "PAUSED"])
+    d = ruf({"action": "negatives", "company_id": tenant, "kampagnen": ids})
+    for n in d["negatives"]:
+        n["kampagne"] = kname.get(n["campaignId"], n["campaignId"])
+    print(f"Firma: {name}   Kampagnen: {', '.join(namen)}   Negatives: {len(d['negatives'])}")
+    tabelle(sorted(d["negatives"], key=lambda n: (n["kampagne"], n["ebene"], n["text"])), ["kampagne", "ebene", "text", "matchType", "state", "keywordId"])
+
+
+def cmd_keyword_anlegen(args):
+    tenant, name = firma_id(args.firma)
+    cid, kname = _eine_kampagne(tenant, args.kampagne)
+    print(f"Firma: {name}   Kampagne: {kname} ({cid})")
+    print(f"Neues Keyword: '{args.text}'  {args.match}  Gebot {args.gebot}")
+    _ja(args, "Keyword bei Amazon anlegen?")
+    r = ruf({"action": "keyword_anlegen", "company_id": tenant, "campaignId": cid, "adGroupId": args.adgroup,
+             "keywordText": args.text, "matchType": args.match, "bid": args.gebot, "bestaetigung": True, "grund": args.grund})
+    print(f"Ergebnis: {r['ergebnis']}   keywordId: {r.get('keywordId')}   " + (f"Detail: {json.dumps(r.get('detail') or r.get('keyword'), ensure_ascii=False)[:600]}" if r['ergebnis'] != 'ok' else ""))
+
+
+def cmd_negative_anlegen(args):
+    tenant, name = firma_id(args.firma)
+    cid, kname = _eine_kampagne(tenant, args.kampagne)
+    print(f"Firma: {name}   Kampagne: {kname} ({cid})")
+    print(f"Neues Negative (Anzeigengruppe): '{args.text}'  {args.match}")
+    _ja(args, "Negative bei Amazon anlegen?")
+    r = ruf({"action": "negative_anlegen", "company_id": tenant, "campaignId": cid, "adGroupId": args.adgroup,
+             "keywordText": args.text, "matchType": args.match, "bestaetigung": True, "grund": args.grund})
+    print(f"Ergebnis: {r['ergebnis']}   keywordId: {r.get('keywordId')}   " + (f"Detail: {json.dumps(r.get('detail') or r.get('keyword'), ensure_ascii=False)[:600]}" if r['ergebnis'] != 'ok' else ""))
+
+
+def cmd_sb_kampagnen(args):
+    tenant, name = firma_id(args.firma)
+    d = ruf({"action": "sb_kampagnen", "company_id": tenant, "kampagnen": args.kampagne or [], "status": args.status.split(",")})
+    print(f"Firma: {name}   SB-Kampagnen: {len(d['kampagnen'])}")
+    tabelle(d["kampagnen"], ["campaignId", "name", "state", "format", "budget", "budgetType"])
+
+
+def cmd_sb_zustand(args):
+    tenant, name = firma_id(args.firma)
+    d = ruf({"action": "sb_kampagnen", "company_id": tenant, "kampagnen": [args.kampagne]})["kampagnen"]
+    if not d:
+        sys.exit("SB-Kampagne nicht gefunden.")
+    k = d[0]
+    print(f"Firma: {name}   SB-Kampagne: {k['name']} ({k['campaignId']})   Zustand: {k['state']} -> {args.state}")
+    if k["state"] == args.state:
+        sys.exit("Schon so. Nichts zu tun.")
+    _ja(args, "Zustand bei Amazon setzen?")
+    r = ruf({"action": "sb_kampagne_zustand", "company_id": tenant, "campaignId": args.kampagne, "state": args.state, "bestaetigung": True, "grund": args.grund})
+    print(f"Ergebnis: {r['ergebnis']}   {r.get('vorher')} -> {r.get('nachher')}" + (f"   Detail: {json.dumps(r.get('detail'), ensure_ascii=False)[:600]}" if r.get('detail') else ""))
+
+
+def cmd_sb_negatives(args):
+    tenant, name = firma_id(args.firma)
+    d = ruf({"action": "sb_negatives", "company_id": tenant, "campaignId": args.kampagne})
+    print(f"Firma: {name}   SB-Kampagne {args.kampagne}   Negatives: {len(d['negatives'])}")
+    tabelle(sorted(d["negatives"], key=lambda n: n["text"]), ["text", "matchType", "state", "keywordId"])
+
+
+def cmd_sb_negatives_anlegen(args):
+    tenant, name = firma_id(args.firma)
+    vorhanden = ruf({"action": "sb_negatives", "company_id": tenant, "campaignId": args.kampagne})["negatives"]
+    alt = {(n["text"].lower(), n["matchType"]) for n in vorhanden}
+    neu = [t for t in args.text if (t.lower(), args.match) not in alt]
+    dup = [t for t in args.text if (t.lower(), args.match) in alt]
+    print(f"Firma: {name}   SB-Kampagne {args.kampagne}   bestehende Negatives: {len(vorhanden)}")
+    print(f"Neu anzulegen ({args.match}): {neu}")
+    if dup:
+        print(f"Schon vorhanden, werden uebersprungen: {dup}")
+    if not neu:
+        sys.exit("Nichts anzulegen.")
+    _ja(args, "Negatives bei Amazon anlegen?")
+    r = ruf({"action": "sb_negatives_anlegen", "company_id": tenant, "campaignId": args.kampagne,
+             "keywords": [{"text": t, "matchType": args.match} for t in neu], "bestaetigung": True, "grund": args.grund})
+    print(f"Angelegt: {r['angelegt']}   uebersprungen: {r['uebersprungen']}   Fehler: {r['fehler']}")
+    tabelle(r["ergebnisse"], ["text", "matchType", "ergebnis", "keywordId", "detail"])
+
+
 # ----------------------------------------------------------------- main
 
 def main():
@@ -462,6 +588,69 @@ def main():
     s.add_argument("--datei", default=None, help="Pfad zur .xlsx (Standard: neueste in tools/eingang)")
     s.add_argument("--blatt", default="Gebotsänderungen", help="Blattname (Standard: Gebotsänderungen)")
     s.set_defaults(fn=cmd_tabelle)
+
+    def schreib(s):
+        s.add_argument("--firma", required=True)
+        s.add_argument("--grund", default=None, help="kurze Begruendung fuers Log")
+        s.add_argument("--ja", action="store_true", help="ohne Rueckfrage")
+
+    s = sub.add_parser("platzierung", help="Platzierungs-Modifier von SP-Kampagnen ansehen")
+    s.add_argument("--firma", required=True)
+    s.add_argument("--kampagne", action="append", required=True)
+    s.set_defaults(fn=cmd_platzierung)
+
+    s = sub.add_parser("platzierung-setzen", help="Platzierungs-Modifier einer SP-Kampagne setzen")
+    schreib(s)
+    s.add_argument("--kampagne", required=True, help="campaignId oder eindeutiger Namensteil")
+    s.add_argument("--placement", default="PLACEMENT_TOP", choices=["PLACEMENT_TOP", "PLACEMENT_PRODUCT_PAGE", "PLACEMENT_REST_OF_SEARCH"])
+    s.add_argument("--prozent", type=int, required=True, help="0-900")
+    s.set_defaults(fn=cmd_platzierung_setzen)
+
+    s = sub.add_parser("negatives", help="SP-Negatives (Anzeigengruppe + Kampagne) ansehen")
+    s.add_argument("--firma", required=True)
+    s.add_argument("--kampagne", action="append", required=True)
+    s.set_defaults(fn=cmd_negatives)
+
+    s = sub.add_parser("keyword-anlegen", help="SP-Keyword anlegen")
+    schreib(s)
+    s.add_argument("--kampagne", required=True)
+    s.add_argument("--adgroup", default=None, help="adGroupId, noetig wenn die Kampagne mehrere hat")
+    s.add_argument("--text", required=True)
+    s.add_argument("--match", default="EXACT", choices=["EXACT", "PHRASE", "BROAD"])
+    s.add_argument("--gebot", type=float, required=True)
+    s.set_defaults(fn=cmd_keyword_anlegen)
+
+    s = sub.add_parser("negative-anlegen", help="SP-Negative (Anzeigengruppe) anlegen")
+    schreib(s)
+    s.add_argument("--kampagne", required=True)
+    s.add_argument("--adgroup", default=None)
+    s.add_argument("--text", required=True)
+    s.add_argument("--match", default="NEGATIVE_EXACT", choices=["NEGATIVE_EXACT", "NEGATIVE_PHRASE"])
+    s.set_defaults(fn=cmd_negative_anlegen)
+
+    s = sub.add_parser("sb-kampagnen", help="Sponsored-Brands-Kampagnen ansehen")
+    s.add_argument("--firma", required=True)
+    s.add_argument("--kampagne", action="append", default=None, help="campaignId, optional")
+    s.add_argument("--status", default="ENABLED,PAUSED")
+    s.set_defaults(fn=cmd_sb_kampagnen)
+
+    s = sub.add_parser("sb-zustand", help="SB-Kampagne pausieren/aktivieren")
+    schreib(s)
+    s.add_argument("--kampagne", required=True, help="SB campaignId")
+    s.add_argument("--state", required=True, choices=["PAUSED", "ENABLED"])
+    s.set_defaults(fn=cmd_sb_zustand)
+
+    s = sub.add_parser("sb-negatives", help="Negatives einer SB-Kampagne ansehen")
+    s.add_argument("--firma", required=True)
+    s.add_argument("--kampagne", required=True, help="SB campaignId")
+    s.set_defaults(fn=cmd_sb_negatives)
+
+    s = sub.add_parser("sb-negatives-anlegen", help="Negatives in einer SB-Kampagne anlegen")
+    schreib(s)
+    s.add_argument("--kampagne", required=True, help="SB campaignId")
+    s.add_argument("--text", action="append", required=True, help="Keyword-Text, mehrfach moeglich")
+    s.add_argument("--match", default="negativeExact", choices=["negativeExact", "negativePhrase"])
+    s.set_defaults(fn=cmd_sb_negatives_anlegen)
 
     s = sub.add_parser("setzen", help="die letzte Vorschau bei Amazon anwenden")
     s.add_argument("--firma", required=True)
