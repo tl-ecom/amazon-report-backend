@@ -253,8 +253,8 @@ const TOOLS: ToolDef[] = [
       "je Platzierung — Top of Search, Produktseite, Rest der Suche — gesamt und je Kampagne, " +
       "mit Spend, Umsatz, ACOS, CTR und CVR. Die aktuell gesetzten Platzierungs-Modifier " +
       "stehen in get_ads_struktur; zusammen sagen beide, ob ein Modifier hoch oder runter " +
-      "sollte. Zeitraum via von/bis, Default letzte 30 Tage. Sponsored Products und Brands; " +
-      "ad_product schränkt auf einen Typ ein.",
+      "sollte. Zeitraum via von/bis, Default letzte 30 Tage. NUR Sponsored Products: für " +
+      "Sponsored Brands gibt Amazon keinen Platzierungsbericht her.",
     inputSchema: {
       type: "object",
       properties: {

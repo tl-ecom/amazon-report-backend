@@ -400,7 +400,7 @@ Deno.test("Suchbegriff-Zeilen SB: keywordText als Zieltext, ad_product SB", () =
 });
 
 Deno.test("Registry: jeder Typ hat Tabelle, adProduct und Bauplan; istReportTyp", () => {
-  assertEquals(ALLE_REPORT_TYPEN.length, 8);
+  assertEquals(ALLE_REPORT_TYPEN.length, 7);
   for (const [typ, def] of Object.entries(ADS_REPORTS)) {
     const req = baueReportRequest(typ, "2026-08-01", "2026-08-02")!;
     assertEquals(req.configuration.reportTypeId, def.reportTypeId);

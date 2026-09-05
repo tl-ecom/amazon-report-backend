@@ -432,8 +432,16 @@ export function baueAdsDailyRows(
 // Wahlrecht — die Leser weisen es aus, damit niemand SP- und SB-ACOS als
 // gleichartig liest.
 //
-// Die Spaltensätze sind gegen die Ads-API verifiziert: Amazon lehnt unbekannte
-// Spalten mit 400 ab und nennt in der Meldung die gültigen.
+// Die Spaltensätze sind gegen die Ads-API verifiziert (2026-09-06): Amazon
+// lehnt unbekannte Spalten mit 400 ab und nennt in der Meldung die gültigen.
+//
+// KEIN Platzierungsbericht für Sponsored Brands: sbCampaigns erlaubt in v3 nur
+// groupBy campaign, keine Platzierung (Amazon: „invalid groupBy values:
+// (campaignPlacement). Allowed values: (campaign)"). Es gibt dort nur die
+// Spalte topOfSearchImpressionShare. Placement bleibt SP-only.
+//
+// Sponsored Display liefert im Targeting-Bericht kein Gebot und keinen Zustand
+// — die Spalten bleiben dort leer, nicht 0.
 
 export type AdProduct = "SP" | "SB" | "SD";
 
@@ -443,7 +451,6 @@ export type AdsReportTyp =
   | "sp-placement"
   | "sp-targeting"
   | "sb-search-term"
-  | "sb-placement"
   | "sb-targeting"
   | "sd-targeting";
 
@@ -709,11 +716,6 @@ export const ADS_REPORTS: Record<Exclude<AdsReportTyp, "sp-advertised-product">,
     adProduct: "SB", reportTypeId: "sbSearchTerm", groupBy: ["searchTerm"],
     columns: ["date", "campaignId", "campaignName", "adGroupId", "adGroupName", "keywordId", "keywordText", "matchType", "searchTerm", ...METRIKEN_SB],
     ...SUCHBEGRIFFE, rows: (t, r) => baueSuchbegriffRows(t, r, "SB"),
-  },
-  "sb-placement": {
-    adProduct: "SB", reportTypeId: "sbCampaigns", groupBy: ["campaign", "campaignPlacement"],
-    columns: ["date", "campaignId", "campaignName", "placementClassification", ...METRIKEN_SB],
-    ...PLACEMENT, rows: (t, r) => bauePlacementRows(t, r, "SB"),
   },
   "sb-targeting": {
     adProduct: "SB", reportTypeId: "sbTargeting", groupBy: ["targeting"],
