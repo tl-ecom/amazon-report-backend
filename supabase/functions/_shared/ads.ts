@@ -219,12 +219,14 @@ class AdsAkku {
   einheiten = 0;
 
   add(r: Record<string, any>): void {
-    this.impressions += num(r.impressions);
-    this.clicks += num(r.clicks);
-    this.spendCents += Math.round(num(r.cost) * 100);
-    this.salesCents += Math.round(num(r.sales7d) * 100);
-    this.orders += num(r.purchases7d);
-    this.einheiten += num(r.unitsSoldClicks7d);
+    // metriken() kennt die 7d-Namen von SP und die 14d-Namen von SB/SD.
+    const m = metriken(r);
+    this.impressions += m.impressions;
+    this.clicks += m.clicks;
+    this.spendCents += Math.round(m.cost * 100);
+    this.salesCents += Math.round(m.sales * 100);
+    this.orders += m.orders;
+    this.einheiten += m.einheiten;
   }
 
   finish(): AdsKennzahlen {
@@ -418,98 +420,101 @@ export function baueAdsDailyRows(
   }));
 }
 
-// --- Suchbegriffe und Platzierungen ---
+// --- Berichte je Anzeigentyp: Suchbegriffe, Platzierungen, Ziele ---
 //
-// Die zwei Berichte, die man bisher als Bulk-Datei aus der Konsole zog. Beide
-// laufen über denselben v3-Reporting-Weg wie spAdvertisedProduct, nur mit
-// anderem reportTypeId/groupBy. Die Spaltennamen sind gegen die Ads-API
-// verifiziert (Amazon lehnt unbekannte Spalten mit 400 ab, die Meldung nennt
-// die gültigen).
+// Die Berichte, die man bisher als Bulk-Datei aus der Konsole zog — für
+// Sponsored Products, Brands und Display. Alle laufen über denselben
+// v3-Reporting-Weg wie spAdvertisedProduct, nur mit anderem adProduct,
+// reportTypeId und groupBy.
+//
+// ATTRIBUTION: SP-Berichte rechnen 7 Tage (purchases7d/sales7d), SB und SD
+// liefern in v3 nur 14 Tage (purchases/sales). Das ist Amazons Vorgabe, kein
+// Wahlrecht — die Leser weisen es aus, damit niemand SP- und SB-ACOS als
+// gleichartig liest.
+//
+// Die Spaltensätze sind gegen die Ads-API verifiziert: Amazon lehnt unbekannte
+// Spalten mit 400 ab und nennt in der Meldung die gültigen.
 
-export type AdsReportTyp = "sp-advertised-product" | "sp-search-term" | "sp-placement";
+export type AdProduct = "SP" | "SB" | "SD";
 
-export const SP_SEARCH_TERM_COLUMNS = [
-  "date",
-  "campaignId",
-  "campaignName",
-  "adGroupId",
-  "adGroupName",
-  "keywordId",
-  "keyword",
-  "matchType",
-  "targeting",
-  "searchTerm",
-  "impressions",
-  "clicks",
-  "cost",
-  "purchases7d",
-  "unitsSoldClicks7d",
-  "sales7d",
-];
+export type AdsReportTyp =
+  | "sp-advertised-product"
+  | "sp-search-term"
+  | "sp-placement"
+  | "sp-targeting"
+  | "sb-search-term"
+  | "sb-placement"
+  | "sb-targeting"
+  | "sd-targeting";
 
-export const SP_PLACEMENT_COLUMNS = [
-  "date",
-  "campaignId",
-  "campaignName",
-  "placementClassification",
-  "impressions",
-  "clicks",
-  "cost",
-  "purchases7d",
-  "unitsSoldClicks7d",
-  "sales7d",
-];
+/** Attributionsfenster in Tagen je Anzeigentyp — siehe Kopfkommentar. */
+export const ATTRIBUTION_TAGE: Record<AdProduct, number> = { SP: 7, SB: 14, SD: 14 };
 
-export function baueSuchbegriffReportRequest(startDate: string, endDate: string): AdsReportRequest {
-  return {
-    name: `sp-search-term ${startDate}..${endDate}`,
-    startDate,
-    endDate,
-    configuration: {
-      adProduct: "SPONSORED_PRODUCTS",
-      groupBy: ["searchTerm"],
-      columns: SP_SEARCH_TERM_COLUMNS,
-      reportTypeId: "spSearchTerm",
-      timeUnit: "DAILY",
-      format: "GZIP_JSON",
-    },
-  };
-}
+const AD_PRODUCT_API: Record<AdProduct, string> = {
+  SP: "SPONSORED_PRODUCTS",
+  SB: "SPONSORED_BRANDS",
+  SD: "SPONSORED_DISPLAY",
+};
 
-export function bauePlacementReportRequest(startDate: string, endDate: string): AdsReportRequest {
-  return {
-    name: `sp-placement ${startDate}..${endDate}`,
-    startDate,
-    endDate,
-    configuration: {
-      adProduct: "SPONSORED_PRODUCTS",
-      groupBy: ["campaign", "campaignPlacement"],
-      columns: SP_PLACEMENT_COLUMNS,
-      reportTypeId: "spCampaigns",
-      timeUnit: "DAILY",
-      format: "GZIP_JSON",
-    },
-  };
-}
+const METRIKEN_SP = ["impressions", "clicks", "cost", "purchases7d", "unitsSoldClicks7d", "sales7d"];
+const METRIKEN_SB = ["impressions", "clicks", "cost", "purchases", "unitsSold", "sales"];
+const METRIKEN_SD = ["impressions", "clicks", "cost", "purchases", "unitsSold", "sales"];
 
-/** Report-Anfrage je Typ. Unbekannter Typ → null, damit der Aufrufer sauber
- *  mit 400 antworten kann statt einen falschen Report anzufordern. */
-export function baueReportRequest(typ: string, startDate: string, endDate: string): AdsReportRequest | null {
-  switch (typ) {
-    case "sp-advertised-product": return baueSpReportRequest(startDate, endDate);
-    case "sp-search-term": return baueSuchbegriffReportRequest(startDate, endDate);
-    case "sp-placement": return bauePlacementReportRequest(startDate, endDate);
-    default: return null;
-  }
+interface ReportDef {
+  adProduct: AdProduct;
+  reportTypeId: string;
+  groupBy: string[];
+  columns: string[];
+  /** Zieltabelle und Konfliktspalten fuer den Upsert. */
+  tabelle: string;
+  onConflict: string;
+  rows: (tenant_id: string, rows: Record<string, any>[]) => Record<string, unknown>[];
 }
 
 /**
- * Suchbegriff-Zeilen → ads_suchbegriffe_daily. Schlüssel: Tag, Kampagne,
- * Anzeigengruppe, Ziel (Keyword- oder Target-ID) und der Suchbegriff selbst.
- * Bei Auto- und Product-Targeting-Kampagnen liefert Amazon die Zielangabe im
- * Feld `targeting` statt `keyword` — beides landet in ziel_text.
+ * Rohmetriken einer Report-Zeile, egal welcher Anzeigentyp. SP zuerst (7d),
+ * dann die 14d-Namen von SB/SD. Fehlt alles, ist es 0 — eine Zeile ohne
+ * Metriken hat der Report nicht geliefert.
  */
-export function baueSuchbegriffRows(tenant_id: string, rows: Record<string, any>[]): Record<string, unknown>[] {
+export function metriken(r: Record<string, any>): {
+  impressions: number; clicks: number; cost: number; sales: number; orders: number; einheiten: number;
+} {
+  const erste = (...namen: string[]) => {
+    for (const n of namen) if (typeof r[n] === "number" && Number.isFinite(r[n])) return r[n];
+    return 0;
+  };
+  return {
+    impressions: erste("impressions"),
+    clicks: erste("clicks"),
+    cost: erste("cost"),
+    sales: erste("sales7d", "sales14d", "sales", "salesClicks"),
+    orders: erste("purchases7d", "purchases14d", "purchases", "purchasesClicks"),
+    einheiten: erste("unitsSoldClicks7d", "unitsSoldClicks14d", "unitsSold", "unitsSoldClicks"),
+  };
+}
+
+function s(x: unknown): string {
+  return x === null || x === undefined ? "" : String(x).trim();
+}
+function erstesFeld(r: Record<string, any>, ...namen: string[]): string {
+  for (const n of namen) { const v = s(r[n]); if (v) return v; }
+  return "";
+}
+function istTag(d: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(d);
+}
+function centsOderNull(x: unknown): number | null {
+  const n = Number(x);
+  return x === null || x === undefined || x === "" || !Number.isFinite(n) ? null : Math.round(n * 100);
+}
+
+/**
+ * Suchbegriff-Zeilen → ads_suchbegriffe_daily. Schlüssel: Anzeigentyp, Tag,
+ * Kampagne, Anzeigengruppe, Ziel (Keyword- oder Target-ID) und der Suchbegriff.
+ * Bei Auto- und Product-Targeting liefert Amazon die Zielangabe in `targeting`
+ * statt `keyword`; SB nennt das Feld `keywordText`. Alles landet in ziel_text.
+ */
+export function baueSuchbegriffRows(tenant_id: string, rows: Record<string, any>[], adProduct: AdProduct = "SP"): Record<string, unknown>[] {
   interface Eintrag {
     datum: string; campaign_id: string; ad_group_id: string; ziel_id: string; suchbegriff: string;
     campaign_name: string | null; ad_group_name: string | null; ziel_text: string | null; match_type: string | null;
@@ -518,25 +523,24 @@ export function baueSuchbegriffRows(tenant_id: string, rows: Record<string, any>
   const proSchluessel = new Map<string, Eintrag>();
 
   for (const r of rows) {
-    const datum = String(r.date ?? "").trim().slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(datum)) continue;
-    const campaign_id = String(r.campaignId ?? "").trim();
-    const suchbegriff = String(r.searchTerm ?? "").trim();
+    const datum = s(r.date).slice(0, 10);
+    if (!istTag(datum)) continue;
+    const campaign_id = s(r.campaignId);
+    const suchbegriff = s(r.searchTerm);
     if (!campaign_id || !suchbegriff) continue;
 
-    const ad_group_id = String(r.adGroupId ?? "").trim();
-    const ziel_id = String(r.keywordId ?? "").trim();
+    const ad_group_id = s(r.adGroupId);
+    const ziel_id = erstesFeld(r, "keywordId", "targetId", "targetingId");
     const schluessel = JSON.stringify([datum, campaign_id, ad_group_id, ziel_id, suchbegriff]);
 
     let e = proSchluessel.get(schluessel);
     if (!e) {
-      const zielText = String(r.keyword ?? "").trim() || String(r.targeting ?? "").trim();
       e = {
         datum, campaign_id, ad_group_id, ziel_id, suchbegriff,
-        campaign_name: String(r.campaignName ?? "").trim() || null,
-        ad_group_name: String(r.adGroupName ?? "").trim() || null,
-        ziel_text: zielText || null,
-        match_type: String(r.matchType ?? "").trim() || null,
+        campaign_name: s(r.campaignName) || null,
+        ad_group_name: s(r.adGroupName) || null,
+        ziel_text: erstesFeld(r, "keyword", "keywordText", "targeting", "targetingText", "targetingExpression") || null,
+        match_type: erstesFeld(r, "matchType", "targetingType") || null,
         akku: new AdsAkku(),
       };
       proSchluessel.set(schluessel, e);
@@ -547,6 +551,7 @@ export function baueSuchbegriffRows(tenant_id: string, rows: Record<string, any>
   const jetzt = new Date().toISOString();
   return [...proSchluessel.values()].map((e) => ({
     tenant_id,
+    ad_product: adProduct,
     datum: e.datum,
     campaign_id: e.campaign_id,
     ad_group_id: e.ad_group_id,
@@ -566,24 +571,24 @@ export function baueSuchbegriffRows(tenant_id: string, rows: Record<string, any>
   }));
 }
 
-/** Platzierungs-Zeilen → ads_placement_daily. Schlüssel: Tag, Kampagne, Platzierung. */
-export function bauePlacementRows(tenant_id: string, rows: Record<string, any>[]): Record<string, unknown>[] {
+/** Platzierungs-Zeilen → ads_placement_daily. Schlüssel: Anzeigentyp, Tag, Kampagne, Platzierung. */
+export function bauePlacementRows(tenant_id: string, rows: Record<string, any>[], adProduct: AdProduct = "SP"): Record<string, unknown>[] {
   interface Eintrag {
     datum: string; campaign_id: string; platzierung: string; campaign_name: string | null; akku: AdsAkku;
   }
   const proSchluessel = new Map<string, Eintrag>();
 
   for (const r of rows) {
-    const datum = String(r.date ?? "").trim().slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(datum)) continue;
-    const campaign_id = String(r.campaignId ?? "").trim();
-    const platzierung = String(r.placementClassification ?? "").trim();
+    const datum = s(r.date).slice(0, 10);
+    if (!istTag(datum)) continue;
+    const campaign_id = s(r.campaignId);
+    const platzierung = s(r.placementClassification);
     if (!campaign_id || !platzierung) continue;
 
     const schluessel = JSON.stringify([datum, campaign_id, platzierung]);
     let e = proSchluessel.get(schluessel);
     if (!e) {
-      e = { datum, campaign_id, platzierung, campaign_name: String(r.campaignName ?? "").trim() || null, akku: new AdsAkku() };
+      e = { datum, campaign_id, platzierung, campaign_name: s(r.campaignName) || null, akku: new AdsAkku() };
       proSchluessel.set(schluessel, e);
     }
     e.akku.add(r);
@@ -592,6 +597,7 @@ export function bauePlacementRows(tenant_id: string, rows: Record<string, any>[]
   const jetzt = new Date().toISOString();
   return [...proSchluessel.values()].map((e) => ({
     tenant_id,
+    ad_product: adProduct,
     datum: e.datum,
     campaign_id: e.campaign_id,
     platzierung: e.platzierung,
@@ -604,6 +610,171 @@ export function bauePlacementRows(tenant_id: string, rows: Record<string, any>[]
     einheiten: e.akku.einheiten,
     updated_at: jetzt,
   }));
+}
+
+/**
+ * Ziel-Zeilen (Keyword / Product-Target) → ads_ziele_daily. Das ist die Ebene,
+ * die in der Bulk-Datei als „Keyword" und „Produkt-Targeting" steht: Leistung
+ * je Ziel und Tag, dazu das an dem Tag gültige Gebot und der Zustand. Damit
+ * lässt sich nachvollziehen, welches Gebot welche Leistung brachte.
+ *
+ * Gebot und Zustand sind Momentaufnahmen aus dem Report, kein Summenwert —
+ * bei mehreren Zeilen je Schlüssel gewinnt die zuletzt gesehene.
+ */
+export function baueZieleRows(tenant_id: string, rows: Record<string, any>[], adProduct: AdProduct = "SP"): Record<string, unknown>[] {
+  interface Eintrag {
+    datum: string; campaign_id: string; ad_group_id: string; ziel_id: string;
+    campaign_name: string | null; ad_group_name: string | null; text: string | null; match_type: string | null;
+    gebot_cents: number | null; state: string | null; akku: AdsAkku;
+  }
+  const proSchluessel = new Map<string, Eintrag>();
+
+  for (const r of rows) {
+    const datum = s(r.date).slice(0, 10);
+    if (!istTag(datum)) continue;
+    const campaign_id = s(r.campaignId);
+    const ziel_id = erstesFeld(r, "keywordId", "targetId", "targetingId");
+    if (!campaign_id || !ziel_id) continue;
+
+    const ad_group_id = s(r.adGroupId);
+    const schluessel = JSON.stringify([datum, campaign_id, ad_group_id, ziel_id]);
+    let e = proSchluessel.get(schluessel);
+    if (!e) {
+      e = {
+        datum, campaign_id, ad_group_id, ziel_id,
+        campaign_name: s(r.campaignName) || null,
+        ad_group_name: s(r.adGroupName) || null,
+        text: erstesFeld(r, "keyword", "keywordText", "targeting", "targetingText", "targetingExpression") || null,
+        match_type: erstesFeld(r, "matchType", "targetingType", "keywordType") || null,
+        gebot_cents: null, state: null, akku: new AdsAkku(),
+      };
+      proSchluessel.set(schluessel, e);
+    }
+    const gebot = centsOderNull(r.keywordBid ?? r.targetingBid ?? r.bid);
+    if (gebot !== null) e.gebot_cents = gebot;
+    const state = erstesFeld(r, "adKeywordStatus", "targetingStatus", "keywordStatus", "status");
+    if (state) e.state = state;
+    e.akku.add(r);
+  }
+
+  const jetzt = new Date().toISOString();
+  return [...proSchluessel.values()].map((e) => ({
+    tenant_id,
+    ad_product: adProduct,
+    datum: e.datum,
+    campaign_id: e.campaign_id,
+    ad_group_id: e.ad_group_id,
+    ziel_id: e.ziel_id,
+    campaign_name: e.campaign_name,
+    ad_group_name: e.ad_group_name,
+    text: e.text,
+    match_type: e.match_type,
+    gebot_cents: e.gebot_cents,
+    state: e.state,
+    impressions: e.akku.impressions,
+    clicks: e.akku.clicks,
+    spend_cents: e.akku.spendCents,
+    sales_cents: e.akku.salesCents,
+    orders: e.akku.orders,
+    einheiten: e.akku.einheiten,
+    updated_at: jetzt,
+  }));
+}
+
+const SUCHBEGRIFFE = { tabelle: "ads_suchbegriffe_daily", onConflict: "tenant_id,ad_product,datum,campaign_id,ad_group_id,ziel_id,suchbegriff" };
+const PLACEMENT = { tabelle: "ads_placement_daily", onConflict: "tenant_id,ad_product,datum,campaign_id,platzierung" };
+const ZIELE = { tabelle: "ads_ziele_daily", onConflict: "tenant_id,ad_product,datum,campaign_id,ad_group_id,ziel_id" };
+
+/**
+ * Bauplan je Report-Typ. sp-advertised-product steht NICHT hier: es hat einen
+ * eigenen Weg (report_data-Blob + ads_daily), siehe sync-ads-report.
+ */
+export const ADS_REPORTS: Record<Exclude<AdsReportTyp, "sp-advertised-product">, ReportDef> = {
+  "sp-search-term": {
+    adProduct: "SP", reportTypeId: "spSearchTerm", groupBy: ["searchTerm"],
+    columns: ["date", "campaignId", "campaignName", "adGroupId", "adGroupName", "keywordId", "keyword", "matchType", "targeting", "searchTerm", ...METRIKEN_SP],
+    ...SUCHBEGRIFFE, rows: (t, r) => baueSuchbegriffRows(t, r, "SP"),
+  },
+  "sp-placement": {
+    adProduct: "SP", reportTypeId: "spCampaigns", groupBy: ["campaign", "campaignPlacement"],
+    columns: ["date", "campaignId", "campaignName", "placementClassification", ...METRIKEN_SP],
+    ...PLACEMENT, rows: (t, r) => bauePlacementRows(t, r, "SP"),
+  },
+  "sp-targeting": {
+    adProduct: "SP", reportTypeId: "spTargeting", groupBy: ["targeting"],
+    columns: ["date", "campaignId", "campaignName", "adGroupId", "adGroupName", "keywordId", "keyword", "matchType", "targeting", "keywordType", "keywordBid", "adKeywordStatus", ...METRIKEN_SP],
+    ...ZIELE, rows: (t, r) => baueZieleRows(t, r, "SP"),
+  },
+  "sb-search-term": {
+    adProduct: "SB", reportTypeId: "sbSearchTerm", groupBy: ["searchTerm"],
+    columns: ["date", "campaignId", "campaignName", "adGroupId", "adGroupName", "keywordId", "keywordText", "matchType", "searchTerm", ...METRIKEN_SB],
+    ...SUCHBEGRIFFE, rows: (t, r) => baueSuchbegriffRows(t, r, "SB"),
+  },
+  "sb-placement": {
+    adProduct: "SB", reportTypeId: "sbCampaigns", groupBy: ["campaign", "campaignPlacement"],
+    columns: ["date", "campaignId", "campaignName", "placementClassification", ...METRIKEN_SB],
+    ...PLACEMENT, rows: (t, r) => bauePlacementRows(t, r, "SB"),
+  },
+  "sb-targeting": {
+    adProduct: "SB", reportTypeId: "sbTargeting", groupBy: ["targeting"],
+    columns: ["date", "campaignId", "campaignName", "adGroupId", "adGroupName", "keywordId", "keywordText", "matchType", "keywordBid", "adKeywordStatus", ...METRIKEN_SB],
+    ...ZIELE, rows: (t, r) => baueZieleRows(t, r, "SB"),
+  },
+  "sd-targeting": {
+    adProduct: "SD", reportTypeId: "sdTargeting", groupBy: ["targeting"],
+    columns: ["date", "campaignId", "campaignName", "adGroupId", "adGroupName", "targetingId", "targetingText", "targetingExpression", ...METRIKEN_SD],
+    ...ZIELE, rows: (t, r) => baueZieleRows(t, r, "SD"),
+  },
+};
+
+export const ALLE_REPORT_TYPEN: AdsReportTyp[] = ["sp-advertised-product", ...(Object.keys(ADS_REPORTS) as AdsReportTyp[])];
+
+export function istReportTyp(x: unknown): x is AdsReportTyp {
+  return typeof x === "string" && (ALLE_REPORT_TYPEN as string[]).includes(x);
+}
+
+/** Report-Anfrage je Typ. Unbekannter Typ → null, damit der Aufrufer sauber
+ *  mit 400 antworten kann statt einen falschen Report anzufordern. */
+export function baueReportRequest(typ: string, startDate: string, endDate: string): AdsReportRequest | null {
+  if (typ === "sp-advertised-product") return baueSpReportRequest(startDate, endDate);
+  const def = (ADS_REPORTS as Record<string, ReportDef>)[typ];
+  if (!def) return null;
+  return {
+    name: `${typ} ${startDate}..${endDate}`,
+    startDate,
+    endDate,
+    configuration: {
+      adProduct: AD_PRODUCT_API[def.adProduct],
+      groupBy: def.groupBy,
+      columns: def.columns,
+      reportTypeId: def.reportTypeId,
+      timeUnit: "DAILY",
+      format: "GZIP_JSON",
+    },
+  };
+}
+
+/** Rückwärtskompatible Einzelbauer — Tests und ältere Aufrufer. */
+export function baueSuchbegriffReportRequest(startDate: string, endDate: string): AdsReportRequest {
+  return baueReportRequest("sp-search-term", startDate, endDate)!;
+}
+export function bauePlacementReportRequest(startDate: string, endDate: string): AdsReportRequest {
+  return baueReportRequest("sp-placement", startDate, endDate)!;
+}
+
+/**
+ * Schreibt die Zeilen eines Berichts in seine Tagestabelle. Für alle Typen
+ * außer sp-advertised-product der einzige Speicherweg.
+ */
+export async function schreibeBericht(
+  supabase: any,
+  typ: string,
+  tenant_id: string,
+  rows: Record<string, any>[],
+): Promise<AdsVerlaufErgebnis> {
+  const def = (ADS_REPORTS as Record<string, ReportDef>)[typ];
+  if (!def) return { zeilen: 0, fehler: `Kein Speicherweg fuer ${typ}` };
+  return schreibeTageszeilen(supabase, def.tabelle, def.onConflict, def.rows(tenant_id, rows));
 }
 
 /** Batchweiser Upsert in eine der Tagestabellen. */

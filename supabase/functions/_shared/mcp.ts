@@ -228,7 +228,7 @@ const TOOLS: ToolDef[] = [
     name: "get_ads_suchbegriffe",
     description:
       "Suchbegriff-Bericht (Sponsored Products) über einen FREI WÄHLBAREN Zeitraum: welche " +
-      "Suchanfragen der Kunden über welches Keyword/Target Impressions, Klicks, Spend, " +
+      "Suchanfragen der Kunden über welches Keyword/Target (Sponsored Products und Brands) Impressions, Klicks, Spend, " +
       "Bestellungen und Umsatz brachten — mit ACOS, CTR, CVR und CPC je Suchbegriff. Nach " +
       "Spend sortiert, Default 500 Einträge (limit bis 5000), optional auf eine campaign_id " +
       "eingeschränkt. Grundlage für Negatives (Klicks ohne Bestellung) und Keyword-Ernte " +
@@ -240,6 +240,7 @@ const TOOLS: ToolDef[] = [
         bis: { type: "string", description: "Enddatum 'YYYY-MM-DD' (inklusiv). Default: heute." },
         campaign_id: { type: "string", description: "Nur Suchbegriffe dieser Kampagne." },
         limit: { type: "number", description: "Max. Einträge (nach Spend), Default 500, höchstens 5000." },
+        ad_product: { type: "string", enum: ["SP", "SB", "SD"], description: "Nur ein Anzeigentyp: SP (Sponsored Products, 7-Tage-Attribution), SB (Brands, 14 Tage) oder SD (Display, 14 Tage). Ohne Angabe alle." },
       },
       additionalProperties: false,
     },
@@ -252,9 +253,42 @@ const TOOLS: ToolDef[] = [
       "je Platzierung — Top of Search, Produktseite, Rest der Suche — gesamt und je Kampagne, " +
       "mit Spend, Umsatz, ACOS, CTR und CVR. Die aktuell gesetzten Platzierungs-Modifier " +
       "stehen in get_ads_struktur; zusammen sagen beide, ob ein Modifier hoch oder runter " +
-      "sollte. Zeitraum via von/bis, Default letzte 30 Tage.",
-    inputSchema: ZEITRAUM_SCHEMA,
+      "sollte. Zeitraum via von/bis, Default letzte 30 Tage. Sponsored Products und Brands; " +
+      "ad_product schränkt auf einen Typ ein.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        von: { type: "string", description: "Startdatum 'YYYY-MM-DD' (inklusiv). Default: vor 30 Tagen." },
+        bis: { type: "string", description: "Enddatum 'YYYY-MM-DD' (inklusiv). Default: heute." },
+        ad_product: { type: "string", enum: ["SP", "SB", "SD"], description: "Nur ein Anzeigentyp: SP (Sponsored Products, 7-Tage-Attribution), SB (Brands, 14 Tage) oder SD (Display, 14 Tage). Ohne Angabe alle." },
+      },
+      additionalProperties: false,
+    },
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_platzierungen", args) : pulseNichtVerfuegbar()),
+  },
+  {
+    name: "get_ads_ziele",
+    description:
+      "Ziel-Ebene mit Leistung über einen FREI WÄHLBAREN Zeitraum: jedes Keyword und jedes " +
+      "Product-Target (Sponsored Products, Brands und Display) mit Impressions, Klicks, Spend, " +
+      "Bestellungen, Umsatz, ACOS, CTR, CVR, CPC — dazu Gebot und Zustand vom jüngsten Tag im " +
+      "Zeitraum. Das ist die Ebene, auf der Gebote entschieden werden (Bulk-Datei: Blätter " +
+      "Keyword und Produkt-Targeting). Nach Spend sortiert, Default 500 Einträge (limit bis " +
+      "5000), optional auf campaign_id und/oder ad_product eingeschränkt. Zeitraum via von/bis, " +
+      "Default letzte 30 Tage. UNTERSCHIED zu get_ads_struktur: dort steht der aktuelle Aufbau " +
+      "ohne Leistung; hier die Leistung je Ziel im Zeitraum.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        von: { type: "string", description: "Startdatum 'YYYY-MM-DD' (inklusiv). Default: vor 30 Tagen." },
+        bis: { type: "string", description: "Enddatum 'YYYY-MM-DD' (inklusiv). Default: heute." },
+        campaign_id: { type: "string", description: "Nur Ziele dieser Kampagne." },
+        limit: { type: "number", description: "Max. Einträge (nach Spend), Default 500, höchstens 5000." },
+        ad_product: { type: "string", enum: ["SP", "SB", "SD"], description: "Nur ein Anzeigentyp: SP (Sponsored Products, 7-Tage-Attribution), SB (Brands, 14 Tage) oder SD (Display, 14 Tage). Ohne Angabe alle." },
+      },
+      additionalProperties: false,
+    },
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_ziele", args) : pulseNichtVerfuegbar()),
   },
   {
     name: "get_sales_history",

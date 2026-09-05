@@ -351,3 +351,63 @@ Deno.test("Platzierungs-Zeilen: Schluessel Tag+Kampagne+Platzierung", () => {
   assertEquals(top.sales_cents, 4000);
   assertEquals(top.orders, 2);
 });
+
+// --- Ziel-Ebene, SB/SD, Registry ---
+
+import { ADS_REPORTS, ALLE_REPORT_TYPEN, baueZieleRows, istReportTyp, metriken } from "./ads.ts";
+
+Deno.test("metriken: SP-Namen (7d) vor SB/SD-Namen (14d), fehlend = 0", () => {
+  assertEquals(metriken({ impressions: 10, clicks: 2, cost: 1.5, purchases7d: 1, sales7d: 20, unitsSoldClicks7d: 1 }),
+    { impressions: 10, clicks: 2, cost: 1.5, sales: 20, orders: 1, einheiten: 1 });
+  assertEquals(metriken({ impressions: 10, clicks: 2, cost: 1.5, purchases: 3, sales: 60, unitsSold: 4 }),
+    { impressions: 10, clicks: 2, cost: 1.5, sales: 60, orders: 3, einheiten: 4 });
+  assertEquals(metriken({}), { impressions: 0, clicks: 0, cost: 0, sales: 0, orders: 0, einheiten: 0 });
+});
+
+Deno.test("Ziel-Zeilen: Gebot und Zustand als Momentaufnahme, Leistung summiert", () => {
+  const rows = baueZieleRows("t", [
+    { date: "2026-08-01", campaignId: 1, adGroupId: 2, keywordId: 3, keyword: "beutel", matchType: "EXACT", keywordBid: 0.42, adKeywordStatus: "ENABLED", impressions: 100, clicks: 5, cost: 1, purchases7d: 1, sales7d: 10, unitsSoldClicks7d: 1 },
+    { date: "2026-08-01", campaignId: 1, adGroupId: 2, keywordId: 3, keyword: "beutel", matchType: "EXACT", keywordBid: 0.5, adKeywordStatus: "ENABLED", impressions: 50, clicks: 1, cost: 0.2, purchases7d: 0, sales7d: 0, unitsSoldClicks7d: 0 },
+  ]);
+  assertEquals(rows.length, 1);
+  assertEquals(rows[0].ad_product, "SP");
+  assertEquals(rows[0].ziel_id, "3");
+  assertEquals(rows[0].text, "beutel");
+  assertEquals(rows[0].gebot_cents, 50);   // zuletzt gesehen, nicht summiert
+  assertEquals(rows[0].state, "ENABLED");
+  assertEquals(rows[0].impressions, 150);
+  assertEquals(rows[0].spend_cents, 120);
+});
+
+Deno.test("Ziel-Zeilen SD: targetingId/targetingText, 14d-Metriken, ad_product SD", () => {
+  const rows = baueZieleRows("t", [
+    { date: "2026-08-01", campaignId: 9, adGroupId: 8, targetingId: 77, targetingText: "asin=\"B0X\"", impressions: 10, clicks: 1, cost: 0.3, purchases: 1, sales: 15, unitsSold: 1 },
+  ], "SD");
+  assertEquals(rows[0].ad_product, "SD");
+  assertEquals(rows[0].ziel_id, "77");
+  assertEquals(rows[0].text, "asin=\"B0X\"");
+  assertEquals(rows[0].sales_cents, 1500);
+  assertEquals(rows[0].gebot_cents, null);
+});
+
+Deno.test("Suchbegriff-Zeilen SB: keywordText als Zieltext, ad_product SB", () => {
+  const rows = baueSuchbegriffRows("t", [
+    { date: "2026-08-01", campaignId: 1, adGroupId: 2, keywordId: 3, keywordText: "obstschale", matchType: "BROAD", searchTerm: "obstschale holz", impressions: 10, clicks: 2, cost: 1, purchases: 1, sales: 30, unitsSold: 1 },
+  ], "SB");
+  assertEquals(rows[0].ad_product, "SB");
+  assertEquals(rows[0].ziel_text, "obstschale");
+  assertEquals(rows[0].sales_cents, 3000);
+});
+
+Deno.test("Registry: jeder Typ hat Tabelle, adProduct und Bauplan; istReportTyp", () => {
+  assertEquals(ALLE_REPORT_TYPEN.length, 8);
+  for (const [typ, def] of Object.entries(ADS_REPORTS)) {
+    const req = baueReportRequest(typ, "2026-08-01", "2026-08-02")!;
+    assertEquals(req.configuration.reportTypeId, def.reportTypeId);
+    assertEquals(req.configuration.columns.includes("date"), true);
+    assertEquals(typeof def.tabelle, "string");
+  }
+  assertEquals(baueReportRequest("sb-targeting", "2026-08-01", "2026-08-02")?.configuration.adProduct, "SPONSORED_BRANDS");
+  assertEquals(istReportTyp("sd-targeting"), true);
+  assertEquals(istReportTyp("sp-daily"), false);
+});

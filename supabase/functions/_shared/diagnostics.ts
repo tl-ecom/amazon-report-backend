@@ -41,6 +41,72 @@ export function fingerprintOf(d: Pick<Diagnose, "typ" | "asin">): string {
   return `${d.typ}:${d.asin ?? "-"}`;
 }
 
+export interface Selbstblockade {
+  campaign_id: string;
+  campaign_name: string | null;
+  ad_group_id: string;
+  keyword_id: string;
+  keyword: string;
+  keyword_match: string | null;
+  gebot_cents: number | string | null;
+  negative_id: string;
+  negative: string;
+  negative_match: string | null;
+  negative_ebene: string;
+}
+
+/**
+ * Selbstblockade: ein aktives Keyword, dem ein aktives Negative derselben
+ * Kampagne JEDE Suchanfrage nimmt — Exact-Keyword gegen Negative Exact
+ * gleichen Texts, oder Exact-/Phrase-Keyword gegen eine Negative Phrase, die
+ * im Keyword steckt. Das Keyword bekommt dann keine Impressions, ohne dass
+ * irgendwo ein Fehler steht.
+ *
+ * NICHT gemeldet: Broad-/Phrase-Keyword mit Negative Exact gleichen Texts.
+ * Das ist gewollte Isolation (die exakte Anfrage soll in die Exact-Kampagne).
+ * Die Auswahl trifft die SQL-Funktion ads_selbstblockaden; hier wird nur
+ * formuliert.
+ *
+ * EINE Diagnose je Kampagne (fingerprint typ:asin traegt die campaignId im
+ * asin-Feld — es ist der stabile Schluessel, den das Modul hat). Die
+ * betroffenen Paare stehen in der Datenbasis.
+ */
+export function baueAdsDiagnosen(blockaden: Selbstblockade[], stand: string | null): Diagnose[] {
+  const proKampagne = new Map<string, Selbstblockade[]>();
+  for (const b of blockaden) {
+    const l = proKampagne.get(b.campaign_id) ?? [];
+    l.push(b);
+    proKampagne.set(b.campaign_id, l);
+  }
+  const out: Diagnose[] = [];
+  for (const [campaignId, paare] of proKampagne) {
+    const name = paare[0].campaign_name || campaignId;
+    const ebene = (e: string) => (e === "kampagne" ? "Kampagnenebene" : "Gruppenebene");
+    const beispiele = paare.slice(0, 3).map((p) =>
+      `\u201e${p.keyword}\u201c (${p.keyword_match ?? "?"}) gegen ${p.negative_match ?? "Negative"} \u201e${p.negative}\u201c auf ${ebene(p.negative_ebene)}`
+    );
+    out.push({
+      typ: "ads_selbstblockade",
+      asin: campaignId,
+      beobachtung: `Kampagne \u201e${name}\u201c: ${paare.length} aktive${paare.length === 1 ? "s Keyword wird" : " Keywords werden"} von eigenen Negatives blockiert \u2014 ${beispiele.join("; ")}${paare.length > 3 ? "; \u2026" : ""}.`,
+      begruendung: "Ein Negative Exact mit demselben Text wie ein Exact-Keyword \u2014 oder eine Negative Phrase, die im Keyword steckt \u2014 unterdr\u00fcckt jede Suchanfrage, die dieses Keyword ausl\u00f6sen k\u00f6nnte. Es bleibt aktiv, sammelt aber keine Impressions. Die Bulk-Datei zeigt das nicht, weil Keyword und Negative in getrennten Bl\u00e4ttern stehen. (Broad/Phrase mit Negative Exact gleichen Texts ist gewollte Isolation und wird nicht gemeldet.)",
+      datenbasis: {
+        quelle: "Ads-Struktur-Snapshot",
+        stand,
+        campaign_id: campaignId,
+        paare: paare.map((p) => ({
+          ad_group_id: p.ad_group_id, keyword_id: p.keyword_id, keyword: p.keyword, keyword_match: p.keyword_match,
+          gebot: p.gebot_cents === null || p.gebot_cents === undefined ? null : Number(p.gebot_cents) / 100,
+          negative_id: p.negative_id, negative: p.negative, negative_match: p.negative_match, negative_ebene: p.negative_ebene,
+        })),
+      },
+      konfidenz: "hoch",
+      prioritaet: "hoch",
+    });
+  }
+  return out;
+}
+
 /** Leitet aus Sales-Overview + Listings-Overview deterministische Diagnosen ab. */
 export function baueDiagnosen(sales: any, listings: any): Diagnose[] {
   const out: Diagnose[] = [];
@@ -160,7 +226,7 @@ export async function diagnosenLauf(supabase: any, tenant_id: string): Promise<{
   const sales = salesRow ? baueOverview(salesRow.payload, salesRow.data_timestamp, salesRow.is_provisional) as any : null;
   const listings = listingsRow ? baueListingsOverview(listingsRow.payload, listingsRow.data_timestamp) as any : null;
 
-  const computed = baueDiagnosen(sales, listings);
+  const computed = [...baueDiagnosen(sales, listings), ...(await ladeAdsDiagnosen(supabase, tenant_id))];
   const fps = computed.map((d) => fingerprintOf(d));
   const now = new Date().toISOString();
 
@@ -191,6 +257,16 @@ export async function diagnosenLauf(supabase: any, tenant_id: string): Promise<{
 
   const offen = computed.length; // frisch berechnete gelten als offen/aktiv
   return { anzahl: computed.length, offen };
+}
+
+/** Selbstblockaden aus dem juengsten Struktur-Snapshot. Ohne Snapshot: keine. */
+async function ladeAdsDiagnosen(supabase: any, tenant_id: string): Promise<Diagnose[]> {
+  const { data: standRow } = await supabase.from("ads_kampagnen").select("gesehen_am")
+    .eq("tenant_id", tenant_id).order("gesehen_am", { ascending: false }).limit(1).maybeSingle();
+  if (!standRow?.gesehen_am) return [];
+  const { data, error } = await supabase.rpc("ads_selbstblockaden", { p_tenant: tenant_id, p_stand: standRow.gesehen_am });
+  if (error) throw new Error(`ads_selbstblockaden: ${error.message}`);
+  return baueAdsDiagnosen((data ?? []) as Selbstblockade[], standRow.gesehen_am);
 }
 
 /** Gespeicherte Diagnosen lesen (offene zuerst, dann nach Priorität). */

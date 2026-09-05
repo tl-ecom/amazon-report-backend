@@ -51,6 +51,8 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   get_ads_suchbegriffe: "ads",
   ads_platzierungen: "ads",
   get_ads_platzierungen: "ads",
+  ads_ziele: "ads",
+  get_ads_ziele: "ads",
   get_returns_overview: "returns",
   returns_uebersicht: "returns",
   get_product_performance: "products",

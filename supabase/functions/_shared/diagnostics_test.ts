@@ -88,3 +88,30 @@ Deno.test("fingerprintOf: stabil über Typ+ASIN, null wird zu '-'", () => {
 Deno.test("leere Daten kippen nicht um", () => {
   assertEquals(baueDiagnosen(null, null), []);
 });
+
+// --- Selbstblockade (Ads) ---
+
+import { baueAdsDiagnosen } from "./diagnostics.ts";
+
+Deno.test("Selbstblockade: eine Diagnose je Kampagne, Paare in der Datenbasis", () => {
+  const d = baueAdsDiagnosen([
+    { campaign_id: "1", campaign_name: "SP Exact Etagere", ad_group_id: "a", keyword_id: "k1", keyword: "etagere obst", keyword_match: "EXACT", gebot_cents: 55, negative_id: "n1", negative: "etagere obst", negative_match: "NEGATIVE_EXACT", negative_ebene: "anzeigengruppe" },
+    { campaign_id: "1", campaign_name: "SP Exact Etagere", ad_group_id: "a", keyword_id: "k2", keyword: "obstschale etagere", keyword_match: "EXACT", gebot_cents: null, negative_id: "n2", negative: "obstschale", negative_match: "NEGATIVE_PHRASE", negative_ebene: "kampagne" },
+    { campaign_id: "2", campaign_name: null, ad_group_id: "b", keyword_id: "k3", keyword: "x", keyword_match: "BROAD", gebot_cents: "10", negative_id: "n3", negative: "x", negative_match: "NEGATIVE_EXACT", negative_ebene: "anzeigengruppe" },
+  ], "2026-09-05T04:05:00Z");
+  assertEquals(d.length, 2);
+  assertEquals(d[0].typ, "ads_selbstblockade");
+  assertEquals(d[0].asin, "1");
+  assertEquals(d[0].beobachtung.includes("2 aktive Keywords"), true);
+  assertEquals(d[0].beobachtung.includes("Kampagnenebene"), true);
+  assertEquals((d[0].datenbasis as any).paare.length, 2);
+  assertEquals((d[0].datenbasis as any).paare[0].gebot, 0.55);
+  assertEquals((d[0].datenbasis as any).paare[1].gebot, null);
+  assertEquals(d[0].prioritaet, "hoch");
+  // Ohne Namen steht die ID, und die Zahl 1 wird richtig gebeugt.
+  assertEquals(d[1].beobachtung.startsWith("Kampagne \u201e2\u201c: 1 aktives Keyword wird"), true);
+});
+
+Deno.test("Selbstblockade: ohne Treffer keine Diagnose", () => {
+  assertEquals(baueAdsDiagnosen([], null), []);
+});

@@ -76,7 +76,7 @@ Deno.test("tools/list nennt alle Tools mit Schema", async () => {
   assertEquals(tools.map((t: any) => t.name), [
     "get_sales_overview", "get_orders_overview", "get_listings_overview", "get_product_performance",
     "get_returns_overview", "get_ads_overview", "get_ads_verlauf",
-    "get_ads_struktur", "get_ads_suchbegriffe", "get_ads_platzierungen",
+    "get_ads_struktur", "get_ads_suchbegriffe", "get_ads_platzierungen", "get_ads_ziele",
     "get_sales_history", "get_orders_history", "get_orders_revenue",
     "get_returns_history",
     "get_products", "get_kpi_history", "get_profit_history", "get_search_query_performance",
@@ -87,7 +87,7 @@ Deno.test("tools/list nennt alle Tools mit Schema", async () => {
 });
 
 Deno.test("toolListe ist stabil", () => {
-  assertEquals(toolListe().length, 21);
+  assertEquals(toolListe().length, 22);
 });
 
 Deno.test("Pulse-Tools rufen ladePulse mit der richtigen Datenart", async () => {
@@ -102,7 +102,7 @@ Deno.test("Pulse-Tools rufen ladePulse mit der richtigen Datenart", async () => 
     ["get_change_log", "aenderungen"], ["get_strategy_overview", "strategie"],
     ["get_ads_verlauf", "ads_verlauf"],
     ["get_ads_struktur", "ads_struktur"], ["get_ads_suchbegriffe", "ads_suchbegriffe"],
-    ["get_ads_platzierungen", "ads_platzierungen"],
+    ["get_ads_platzierungen", "ads_platzierungen"], ["get_ads_ziele", "ads_ziele"],
   ];
   for (const [tool, art] of paare) {
     await dispatch({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: {} } }, ctx);

@@ -17,13 +17,13 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
   type AdsReportTyp,
+  ALLE_REPORT_TYPEN,
   baueFenster,
-  bauePlacementRows,
   baueReportRequest,
-  baueSuchbegriffRows,
+  istReportTyp,
   istVorlaeufig,
   schreibeAdsVerlauf,
-  schreibeTageszeilen,
+  schreibeBericht,
   ymd,
 } from "../_shared/ads.ts";
 
@@ -35,7 +35,6 @@ const V3_CONTENT_TYPE = "application/vnd.createasyncreportrequest.v3+json";
 // Platzierungen landen nur in ihren Tagestabellen — ein 14-Tage-Blob mit
 // Zehntausenden Suchbegriffen braeuchte niemand.
 const STANDARD_TYP: AdsReportTyp = "sp-advertised-product";
-const ERLAUBTE_TYPEN: AdsReportTyp[] = ["sp-advertised-product", "sp-search-term", "sp-placement"];
 
 const DEFAULT_DAYS = 14;
 const POLL_BUDGET_MS = 90_000;
@@ -58,8 +57,8 @@ Deno.serve(async (req) => {
     let istBackfill: boolean = body.backfill === true;
     let reportTyp: AdsReportTyp = STANDARD_TYP;
     if (body.report_type !== undefined) {
-      if (!ERLAUBTE_TYPEN.includes(body.report_type)) {
-        return json({ error: `Unbekannter report_type. Erlaubt: ${ERLAUBTE_TYPEN.join(", ")}` }, 400);
+      if (!istReportTyp(body.report_type)) {
+        return json({ error: `Unbekannter report_type. Erlaubt: ${ALLE_REPORT_TYPEN.join(", ")}` }, 400);
       }
       reportTyp = body.report_type;
     }
@@ -127,7 +126,7 @@ Deno.serve(async (req) => {
       // ein Backfill-Chunk beim Fortsetzen doch den aktuellen Stand ueberschreiben.
       istBackfill = job.config?.backfill === true;
       // Der Typ steht am Job, nicht am Aufruf — die Wiederaufnahme kennt ihn nicht.
-      if (ERLAUBTE_TYPEN.includes(job.report_type)) reportTyp = job.report_type;
+      if (istReportTyp(job.report_type)) reportTyp = job.report_type;
     } else {
       const f = baueFenster({
         days: body.days === undefined ? DEFAULT_DAYS : Number(body.days),
@@ -216,16 +215,8 @@ Deno.serve(async (req) => {
     // ---- Stufe 4: speichern — je nach Typ in Blob + Tagesreihe oder nur Tagesreihe.
     let verlauf: { zeilen: number; fehler?: string };
 
-    if (reportTyp === "sp-search-term") {
-      verlauf = await schreibeTageszeilen(supabase, "ads_suchbegriffe_daily",
-        "tenant_id,datum,campaign_id,ad_group_id,ziel_id,suchbegriff", baueSuchbegriffRows(tenant_id, rows));
-      if (verlauf.fehler) {
-        await markJobFatal(supabase, tenant_id, reportId, verlauf.fehler);
-        return json({ error: "Speichern fehlgeschlagen", detail: verlauf.fehler }, 500);
-      }
-    } else if (reportTyp === "sp-placement") {
-      verlauf = await schreibeTageszeilen(supabase, "ads_placement_daily",
-        "tenant_id,datum,campaign_id,platzierung", bauePlacementRows(tenant_id, rows));
+    if (reportTyp !== STANDARD_TYP) {
+      verlauf = await schreibeBericht(supabase, reportTyp, tenant_id, rows);
       if (verlauf.fehler) {
         await markJobFatal(supabase, tenant_id, reportId, verlauf.fehler);
         return json({ error: "Speichern fehlgeschlagen", detail: verlauf.fehler }, 500);
