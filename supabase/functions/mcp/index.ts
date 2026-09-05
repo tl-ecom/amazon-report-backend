@@ -21,6 +21,8 @@ import { ladeVerlaufFactory } from "../_shared/verlauf.ts";
 import { produktUebersicht } from "../_shared/produkte.ts";
 import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
 import { adsVerlauf } from "../_shared/ads_verlauf.ts";
+import { adsStruktur } from "../_shared/ads_struktur.ts";
+import { adsPlatzierungen, adsSuchbegriffe } from "../_shared/ads_berichte.ts";
 import { ertragVerlauf } from "../_shared/ertrag.ts";
 import { listeSqp, sqpAsins } from "../_shared/sqp.ts";
 import { listeDiagnosen } from "../_shared/diagnostics.ts";
@@ -146,6 +148,9 @@ Deno.serve(async (req) => {
         case "produkte": return await produktUebersicht(supabase, tenant_id, pulseArgs);
         case "kpi": return await kpiVerlauf(supabase, tenant_id);
         case "ads_verlauf": return await adsVerlauf(supabase, tenant_id, pulseArgs);
+        case "ads_struktur": return await adsStruktur(supabase, tenant_id, pulseArgs);
+        case "ads_suchbegriffe": return await adsSuchbegriffe(supabase, tenant_id, pulseArgs);
+        case "ads_platzierungen": return await adsPlatzierungen(supabase, tenant_id, pulseArgs);
         case "ertrag": return await ertragVerlauf(supabase, tenant_id);
         case "sqp": {
           const asin = String((pulseArgs?.asin as string) ?? "").trim();

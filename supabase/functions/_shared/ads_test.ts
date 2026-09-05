@@ -275,3 +275,79 @@ Deno.test("Fenster: halbes oder verdrehtes Datumspaar wird abgelehnt", () => {
   assertEquals(baueFenster({ startDate: "2026-08-01", endDate: "2026-07-01" }).ok, false);
   assertEquals(baueFenster({ startDate: "01.07.2026", endDate: "14.07.2026" }).ok, false);
 });
+
+// --- Suchbegriff- und Platzierungs-Report ---
+
+import {
+  bauePlacementReportRequest,
+  bauePlacementRows,
+  baueReportRequest,
+  baueSuchbegriffReportRequest,
+  baueSuchbegriffRows,
+} from "./ads.ts";
+
+Deno.test("Suchbegriff-Report: spSearchTerm nach searchTerm gruppiert, taeglich", () => {
+  const r = baueSuchbegriffReportRequest("2026-08-01", "2026-08-14");
+  assertEquals(r.configuration.reportTypeId, "spSearchTerm");
+  assertEquals(r.configuration.groupBy, ["searchTerm"]);
+  assertEquals(r.configuration.timeUnit, "DAILY");
+  assertEquals(r.configuration.columns.includes("searchTerm"), true);
+  assertEquals(r.configuration.columns.includes("keywordId"), true);
+});
+
+Deno.test("Platzierungs-Report: spCampaigns mit campaignPlacement", () => {
+  const r = bauePlacementReportRequest("2026-08-01", "2026-08-14");
+  assertEquals(r.configuration.reportTypeId, "spCampaigns");
+  assertEquals(r.configuration.groupBy, ["campaign", "campaignPlacement"]);
+  assertEquals(r.configuration.columns.includes("placementClassification"), true);
+});
+
+Deno.test("baueReportRequest: bekannte Typen liefern Anfrage, unbekannter null", () => {
+  assertEquals(baueReportRequest("sp-advertised-product", "2026-08-01", "2026-08-02")?.configuration.reportTypeId, "spAdvertisedProduct");
+  assertEquals(baueReportRequest("sp-search-term", "2026-08-01", "2026-08-02")?.configuration.reportTypeId, "spSearchTerm");
+  assertEquals(baueReportRequest("sp-placement", "2026-08-01", "2026-08-02")?.configuration.reportTypeId, "spCampaigns");
+  assertEquals(baueReportRequest("gibt-es-nicht", "2026-08-01", "2026-08-02"), null);
+});
+
+Deno.test("Suchbegriff-Zeilen: Schluessel bis zum Suchbegriff, Geld in Cent, keyword vor targeting", () => {
+  const rows = baueSuchbegriffRows("t", [
+    { date: "2026-08-01", campaignId: 1, campaignName: "K", adGroupId: 2, adGroupName: "G", keywordId: 3, keyword: "beutel", matchType: "BROAD", searchTerm: "staubsauger beutel", impressions: 100, clicks: 5, cost: 1.23, purchases7d: 1, unitsSoldClicks7d: 1, sales7d: 19.99 },
+    // Zweite Zeile mit demselben Schluessel wird addiert, nicht ersetzt.
+    { date: "2026-08-01", campaignId: 1, adGroupId: 2, keywordId: 3, keyword: "beutel", matchType: "BROAD", searchTerm: "staubsauger beutel", impressions: 50, clicks: 1, cost: 0.1, purchases7d: 0, unitsSoldClicks7d: 0, sales7d: 0 },
+    // Auto-Kampagne: kein keyword, dafuer targeting.
+    { date: "2026-08-01", campaignId: 9, adGroupId: 8, keywordId: 7, targeting: "close-match", searchTerm: "beutel", impressions: 10, clicks: 0, cost: 0, purchases7d: 0, unitsSoldClicks7d: 0, sales7d: 0 },
+  ]);
+  assertEquals(rows.length, 2);
+  const a = rows.find((r) => r.campaign_id === "1")!;
+  assertEquals(a.suchbegriff, "staubsauger beutel");
+  assertEquals(a.ziel_id, "3");
+  assertEquals(a.ziel_text, "beutel");
+  assertEquals(a.impressions, 150);
+  assertEquals(a.clicks, 6);
+  assertEquals(a.spend_cents, 133);
+  assertEquals(a.sales_cents, 1999);
+  const b = rows.find((r) => r.campaign_id === "9")!;
+  assertEquals(b.ziel_text, "close-match");
+});
+
+Deno.test("Suchbegriff-Zeilen: ohne Datum, Kampagne oder Suchbegriff verworfen", () => {
+  const rows = baueSuchbegriffRows("t", [
+    { campaignId: 1, searchTerm: "x", cost: 1 },
+    { date: "2026-08-01", searchTerm: "x", cost: 1 },
+    { date: "2026-08-01", campaignId: 1, cost: 1 },
+  ]);
+  assertEquals(rows, []);
+});
+
+Deno.test("Platzierungs-Zeilen: Schluessel Tag+Kampagne+Platzierung", () => {
+  const rows = bauePlacementRows("t", [
+    { date: "2026-08-01", campaignId: 1, campaignName: "K", placementClassification: "Top of Search on-Amazon", impressions: 100, clicks: 10, cost: 5, purchases7d: 2, unitsSoldClicks7d: 2, sales7d: 40 },
+    { date: "2026-08-01", campaignId: 1, campaignName: "K", placementClassification: "Detail Page on-Amazon", impressions: 200, clicks: 4, cost: 1, purchases7d: 0, unitsSoldClicks7d: 0, sales7d: 0 },
+    { date: "2026-08-02", campaignId: 1, campaignName: "K", placementClassification: "Top of Search on-Amazon", impressions: 1, clicks: 1, cost: 0.5, purchases7d: 0, unitsSoldClicks7d: 0, sales7d: 0 },
+  ]);
+  assertEquals(rows.length, 3);
+  const top = rows.find((r) => r.datum === "2026-08-01" && r.platzierung === "Top of Search on-Amazon")!;
+  assertEquals(top.spend_cents, 500);
+  assertEquals(top.sales_cents, 4000);
+  assertEquals(top.orders, 2);
+});

@@ -44,6 +44,13 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   // KI-Name derselben Sache.
   ads_verlauf: "ads",
   get_ads_verlauf: "ads",
+  // Struktur, Suchbegriffe und Platzierungen: dieselbe Quelle, dasselbe Feature.
+  ads_struktur: "ads",
+  get_ads_struktur: "ads",
+  ads_suchbegriffe: "ads",
+  get_ads_suchbegriffe: "ads",
+  ads_platzierungen: "ads",
+  get_ads_platzierungen: "ads",
   get_returns_overview: "returns",
   returns_uebersicht: "returns",
   get_product_performance: "products",

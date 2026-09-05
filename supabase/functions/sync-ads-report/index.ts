@@ -15,12 +15,27 @@
 // Die Rechen-/Parselogik ist in _shared/ads.ts voll unit-getestet.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { baueFenster, baueSpReportRequest, istVorlaeufig, schreibeAdsVerlauf, ymd } from "../_shared/ads.ts";
+import {
+  type AdsReportTyp,
+  baueFenster,
+  bauePlacementRows,
+  baueReportRequest,
+  baueSuchbegriffRows,
+  istVorlaeufig,
+  schreibeAdsVerlauf,
+  schreibeTageszeilen,
+  ymd,
+} from "../_shared/ads.ts";
 
 const ADS_ENDPOINT = "https://advertising-api-eu.amazon.com";
 const LWA_TOKEN_URL = "https://api.amazon.com/auth/o2/token";
 const V3_CONTENT_TYPE = "application/vnd.createasyncreportrequest.v3+json";
-const REPORT_TYPE = "sp-advertised-product"; // interner report_type-Schlüssel
+// Interne report_type-Schluessel. Advertised Product ist der Standard und der
+// einzige mit report_data-Blob (get_ads_overview liest ihn). Suchbegriffe und
+// Platzierungen landen nur in ihren Tagestabellen — ein 14-Tage-Blob mit
+// Zehntausenden Suchbegriffen braeuchte niemand.
+const STANDARD_TYP: AdsReportTyp = "sp-advertised-product";
+const ERLAUBTE_TYPEN: AdsReportTyp[] = ["sp-advertised-product", "sp-search-term", "sp-placement"];
 
 const DEFAULT_DAYS = 14;
 const POLL_BUDGET_MS = 90_000;
@@ -41,6 +56,13 @@ Deno.serve(async (req) => {
     const includeVolatile: boolean = body.include_volatile === true;
     // Backfill: aelteres Fenster nachholen, ohne den aktuellen Stand zu ueberschreiben.
     let istBackfill: boolean = body.backfill === true;
+    let reportTyp: AdsReportTyp = STANDARD_TYP;
+    if (body.report_type !== undefined) {
+      if (!ERLAUBTE_TYPEN.includes(body.report_type)) {
+        return json({ error: `Unbekannter report_type. Erlaubt: ${ERLAUBTE_TYPEN.join(", ")}` }, 400);
+      }
+      reportTyp = body.report_type;
+    }
 
     if (!tenant_id) return json({ error: "tenant_id fehlt" }, 400);
 
@@ -92,7 +114,7 @@ Deno.serve(async (req) => {
     if (resumeReportId) {
       const { data: job, error: jobErr } = await supabase
         .from("report_jobs")
-        .select("amazon_report_id, config")
+        .select("amazon_report_id, config, report_type")
         .eq("tenant_id", tenant_id)
         .eq("source", "ads")
         .eq("amazon_report_id", resumeReportId)
@@ -104,6 +126,8 @@ Deno.serve(async (req) => {
       // Beim Wiederaufnehmen zaehlt, wie der Job angelegt wurde — sonst wuerde
       // ein Backfill-Chunk beim Fortsetzen doch den aktuellen Stand ueberschreiben.
       istBackfill = job.config?.backfill === true;
+      // Der Typ steht am Job, nicht am Aufruf — die Wiederaufnahme kennt ihn nicht.
+      if (ERLAUBTE_TYPEN.includes(job.report_type)) reportTyp = job.report_type;
     } else {
       const f = baueFenster({
         days: body.days === undefined ? DEFAULT_DAYS : Number(body.days),
@@ -115,14 +139,16 @@ Deno.serve(async (req) => {
       const { startDate } = f.fenster;
       endDate = f.fenster.endDate;
 
-      const created = await erstelleReport(adsHeaders, baueSpReportRequest(startDate, endDate), deadline);
+      const anfrage = baueReportRequest(reportTyp, startDate, endDate);
+      if (!anfrage) return json({ error: `Kein Report-Bauplan fuer ${reportTyp}` }, 400);
+      const created = await erstelleReport(adsHeaders, anfrage, deadline);
       if (!created.ok) return json({ error: "Ads-Report anfordern fehlgeschlagen", detail: created.detail }, 502);
       reportId = created.reportId!;
 
       const { error: insErr } = await supabase.from("report_jobs").insert({
         tenant_id,
         source: "ads",
-        report_type: REPORT_TYPE,
+        report_type: reportTyp,
         status: "PROCESSING",
         amazon_report_id: reportId,
         config: { startDate, endDate, include_volatile: includeVolatile, backfill: istBackfill },
@@ -187,47 +213,66 @@ Deno.serve(async (req) => {
     const isProvisional = istVorlaeufig(endDate);
     const dataTimestamp = new Date().toISOString();
 
-    // Ein Backfill holt ein ALTES Fenster nach und darf den aktuellen Stand
-    // nicht verdraengen — sonst zeigte der Ads-Tab nach dem Nachholen z.B. den
-    // Mai als „aktuell". Er wandert deshalb mit is_latest=false in die Ablage;
-    // die Kennzahlen landen trotzdem ueber ads_daily im Verlauf.
-    if (!istBackfill) {
-      // Reihenfolge Pflicht (Unique-Index one_latest_per_report): erst altes
-      // is_latest zurücksetzen, dann einfügen.
-      const { error: updErr } = await supabase
-        .from("report_data")
-        .update({ is_latest: false })
-        .eq("tenant_id", tenant_id)
-        .eq("source", "ads")
-        .eq("report_type", REPORT_TYPE)
-        .eq("is_latest", true);
-      if (updErr) {
-        await markJobFatal(supabase, tenant_id, reportId, updErr.message);
-        return json({ error: "is_latest zurücksetzen fehlgeschlagen", detail: updErr.message }, 500);
+    // ---- Stufe 4: speichern — je nach Typ in Blob + Tagesreihe oder nur Tagesreihe.
+    let verlauf: { zeilen: number; fehler?: string };
+
+    if (reportTyp === "sp-search-term") {
+      verlauf = await schreibeTageszeilen(supabase, "ads_suchbegriffe_daily",
+        "tenant_id,datum,campaign_id,ad_group_id,ziel_id,suchbegriff", baueSuchbegriffRows(tenant_id, rows));
+      if (verlauf.fehler) {
+        await markJobFatal(supabase, tenant_id, reportId, verlauf.fehler);
+        return json({ error: "Speichern fehlgeschlagen", detail: verlauf.fehler }, 500);
       }
-    }
+    } else if (reportTyp === "sp-placement") {
+      verlauf = await schreibeTageszeilen(supabase, "ads_placement_daily",
+        "tenant_id,datum,campaign_id,platzierung", bauePlacementRows(tenant_id, rows));
+      if (verlauf.fehler) {
+        await markJobFatal(supabase, tenant_id, reportId, verlauf.fehler);
+        return json({ error: "Speichern fehlgeschlagen", detail: verlauf.fehler }, 500);
+      }
+    } else {
+      // Ein Backfill holt ein ALTES Fenster nach und darf den aktuellen Stand
+      // nicht verdraengen — sonst zeigte der Ads-Tab nach dem Nachholen z.B. den
+      // Mai als „aktuell". Er wandert deshalb mit is_latest=false in die Ablage;
+      // die Kennzahlen landen trotzdem ueber ads_daily im Verlauf.
+      if (!istBackfill) {
+        // Reihenfolge Pflicht (Unique-Index one_latest_per_report): erst altes
+        // is_latest zurücksetzen, dann einfügen.
+        const { error: updErr } = await supabase
+          .from("report_data")
+          .update({ is_latest: false })
+          .eq("tenant_id", tenant_id)
+          .eq("source", "ads")
+          .eq("report_type", reportTyp)
+          .eq("is_latest", true);
+        if (updErr) {
+          await markJobFatal(supabase, tenant_id, reportId, updErr.message);
+          return json({ error: "is_latest zurücksetzen fehlgeschlagen", detail: updErr.message }, 500);
+        }
+      }
 
-    const { error: insErr } = await supabase.from("report_data").insert({
-      tenant_id,
-      source: "ads",
-      report_type: REPORT_TYPE,
-      payload: { format: "ads_v3", rows },
-      data_timestamp: dataTimestamp,
-      is_provisional: isProvisional,
-      is_latest: !istBackfill,
-    });
-    if (insErr) {
-      await markJobFatal(supabase, tenant_id, reportId, insErr.message);
-      return json({ error: "Speichern fehlgeschlagen", detail: insErr.message }, 500);
-    }
+      const { error: insErr } = await supabase.from("report_data").insert({
+        tenant_id,
+        source: "ads",
+        report_type: reportTyp,
+        payload: { format: "ads_v3", rows },
+        data_timestamp: dataTimestamp,
+        is_provisional: isProvisional,
+        is_latest: !istBackfill,
+      });
+      if (insErr) {
+        await markJobFatal(supabase, tenant_id, reportId, insErr.message);
+        return json({ error: "Speichern fehlgeschlagen", detail: insErr.message }, 500);
+      }
 
-    // Tagesreihe fortschreiben. Amazon haelt Ads-Daten nur ~95 Tage vor — was
-    // hier nicht landet, ist danach unwiederbringlich weg.
-    //
-    // Bewusst NICHT blockierend: Der Rohreport liegt bereits in report_data, ein
-    // Fehler beim Verdichten darf den Job nicht auf FATAL setzen. Das Sync-Fenster
-    // ueberlappt taeglich, der naechste Lauf holt dieselben Tage ohnehin erneut.
-    const verlauf = await schreibeAdsVerlauf(supabase, tenant_id, rows);
+      // Tagesreihe fortschreiben. Amazon haelt Ads-Daten nur ~95 Tage vor — was
+      // hier nicht landet, ist danach unwiederbringlich weg.
+      //
+      // Bewusst NICHT blockierend: Der Rohreport liegt bereits in report_data, ein
+      // Fehler beim Verdichten darf den Job nicht auf FATAL setzen. Das Sync-Fenster
+      // ueberlappt taeglich, der naechste Lauf holt dieselben Tage ohnehin erneut.
+      verlauf = await schreibeAdsVerlauf(supabase, tenant_id, rows);
+    }
 
     await supabase
       .from("report_jobs")
@@ -239,13 +284,15 @@ Deno.serve(async (req) => {
       ok: true,
       status: "DONE",
       report_id: reportId,
-      report_type: REPORT_TYPE,
+      report_type: reportTyp,
       zeilen: rows.length,
       verlauf_zeilen: verlauf.zeilen,
       ...(verlauf.fehler ? { verlauf_fehler: verlauf.fehler } : {}),
       is_provisional: isProvisional,
       dauer_s: Math.round((Date.now() - startedAt) / 1000),
-      hinweis: "Ads-Report abgeholt und gespeichert. Kennzahlen über MCP-Tool get_ads_overview.",
+      hinweis: reportTyp === STANDARD_TYP
+        ? "Ads-Report abgeholt und gespeichert. Kennzahlen über MCP-Tool get_ads_overview."
+        : `${reportTyp} in die Tagesreihe geschrieben.`,
     });
   } catch (e) {
     return json({ error: "Ausnahme", detail: String(e) }, 500);

@@ -30,6 +30,8 @@ import { ladeFeatures, zugriffErlaubt } from "../_shared/entitlements.ts";
 import { erstelleNote, listeNotes, loescheNote, setzeNoteSichtbarkeit } from "../_shared/notes.ts";
 import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
 import { adsVerlauf } from "../_shared/ads_verlauf.ts";
+import { adsStruktur } from "../_shared/ads_struktur.ts";
+import { adsPlatzierungen, adsSuchbegriffe } from "../_shared/ads_berichte.ts";
 import { betriebskosten } from "../_shared/betriebskosten.ts";
 import { produktUebersicht } from "../_shared/produkte.ts";
 import { anstossenSqp, listeSqp, sqpAsins } from "../_shared/sqp.ts";
@@ -537,6 +539,17 @@ Deno.serve(async (req) => {
     }
     if (resource === "ads_verlauf") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await adsVerlauf(service, tenantId, args as any) });
+    }
+    // Aufbau des Werbekontos (Snapshot) sowie Suchbegriff- und Platzierungsbericht
+    // — der Ersatz fuer die Bulk-Datei aus der Konsole.
+    if (resource === "ads_struktur") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsStruktur(service, tenantId, args as any) });
+    }
+    if (resource === "ads_suchbegriffe") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsSuchbegriffe(service, tenantId, args as any) });
+    }
+    if (resource === "ads_platzierungen") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsPlatzierungen(service, tenantId, args as any) });
     }
     if (resource === "produkt_uebersicht") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await produktUebersicht(service, tenantId, args as any) });

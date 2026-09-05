@@ -418,6 +418,210 @@ export function baueAdsDailyRows(
   }));
 }
 
+// --- Suchbegriffe und Platzierungen ---
+//
+// Die zwei Berichte, die man bisher als Bulk-Datei aus der Konsole zog. Beide
+// laufen über denselben v3-Reporting-Weg wie spAdvertisedProduct, nur mit
+// anderem reportTypeId/groupBy. Die Spaltennamen sind gegen die Ads-API
+// verifiziert (Amazon lehnt unbekannte Spalten mit 400 ab, die Meldung nennt
+// die gültigen).
+
+export type AdsReportTyp = "sp-advertised-product" | "sp-search-term" | "sp-placement";
+
+export const SP_SEARCH_TERM_COLUMNS = [
+  "date",
+  "campaignId",
+  "campaignName",
+  "adGroupId",
+  "adGroupName",
+  "keywordId",
+  "keyword",
+  "matchType",
+  "targeting",
+  "searchTerm",
+  "impressions",
+  "clicks",
+  "cost",
+  "purchases7d",
+  "unitsSoldClicks7d",
+  "sales7d",
+];
+
+export const SP_PLACEMENT_COLUMNS = [
+  "date",
+  "campaignId",
+  "campaignName",
+  "placementClassification",
+  "impressions",
+  "clicks",
+  "cost",
+  "purchases7d",
+  "unitsSoldClicks7d",
+  "sales7d",
+];
+
+export function baueSuchbegriffReportRequest(startDate: string, endDate: string): AdsReportRequest {
+  return {
+    name: `sp-search-term ${startDate}..${endDate}`,
+    startDate,
+    endDate,
+    configuration: {
+      adProduct: "SPONSORED_PRODUCTS",
+      groupBy: ["searchTerm"],
+      columns: SP_SEARCH_TERM_COLUMNS,
+      reportTypeId: "spSearchTerm",
+      timeUnit: "DAILY",
+      format: "GZIP_JSON",
+    },
+  };
+}
+
+export function bauePlacementReportRequest(startDate: string, endDate: string): AdsReportRequest {
+  return {
+    name: `sp-placement ${startDate}..${endDate}`,
+    startDate,
+    endDate,
+    configuration: {
+      adProduct: "SPONSORED_PRODUCTS",
+      groupBy: ["campaign", "campaignPlacement"],
+      columns: SP_PLACEMENT_COLUMNS,
+      reportTypeId: "spCampaigns",
+      timeUnit: "DAILY",
+      format: "GZIP_JSON",
+    },
+  };
+}
+
+/** Report-Anfrage je Typ. Unbekannter Typ → null, damit der Aufrufer sauber
+ *  mit 400 antworten kann statt einen falschen Report anzufordern. */
+export function baueReportRequest(typ: string, startDate: string, endDate: string): AdsReportRequest | null {
+  switch (typ) {
+    case "sp-advertised-product": return baueSpReportRequest(startDate, endDate);
+    case "sp-search-term": return baueSuchbegriffReportRequest(startDate, endDate);
+    case "sp-placement": return bauePlacementReportRequest(startDate, endDate);
+    default: return null;
+  }
+}
+
+/**
+ * Suchbegriff-Zeilen → ads_suchbegriffe_daily. Schlüssel: Tag, Kampagne,
+ * Anzeigengruppe, Ziel (Keyword- oder Target-ID) und der Suchbegriff selbst.
+ * Bei Auto- und Product-Targeting-Kampagnen liefert Amazon die Zielangabe im
+ * Feld `targeting` statt `keyword` — beides landet in ziel_text.
+ */
+export function baueSuchbegriffRows(tenant_id: string, rows: Record<string, any>[]): Record<string, unknown>[] {
+  interface Eintrag {
+    datum: string; campaign_id: string; ad_group_id: string; ziel_id: string; suchbegriff: string;
+    campaign_name: string | null; ad_group_name: string | null; ziel_text: string | null; match_type: string | null;
+    akku: AdsAkku;
+  }
+  const proSchluessel = new Map<string, Eintrag>();
+
+  for (const r of rows) {
+    const datum = String(r.date ?? "").trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(datum)) continue;
+    const campaign_id = String(r.campaignId ?? "").trim();
+    const suchbegriff = String(r.searchTerm ?? "").trim();
+    if (!campaign_id || !suchbegriff) continue;
+
+    const ad_group_id = String(r.adGroupId ?? "").trim();
+    const ziel_id = String(r.keywordId ?? "").trim();
+    const schluessel = JSON.stringify([datum, campaign_id, ad_group_id, ziel_id, suchbegriff]);
+
+    let e = proSchluessel.get(schluessel);
+    if (!e) {
+      const zielText = String(r.keyword ?? "").trim() || String(r.targeting ?? "").trim();
+      e = {
+        datum, campaign_id, ad_group_id, ziel_id, suchbegriff,
+        campaign_name: String(r.campaignName ?? "").trim() || null,
+        ad_group_name: String(r.adGroupName ?? "").trim() || null,
+        ziel_text: zielText || null,
+        match_type: String(r.matchType ?? "").trim() || null,
+        akku: new AdsAkku(),
+      };
+      proSchluessel.set(schluessel, e);
+    }
+    e.akku.add(r);
+  }
+
+  const jetzt = new Date().toISOString();
+  return [...proSchluessel.values()].map((e) => ({
+    tenant_id,
+    datum: e.datum,
+    campaign_id: e.campaign_id,
+    ad_group_id: e.ad_group_id,
+    ziel_id: e.ziel_id,
+    suchbegriff: e.suchbegriff,
+    campaign_name: e.campaign_name,
+    ad_group_name: e.ad_group_name,
+    ziel_text: e.ziel_text,
+    match_type: e.match_type,
+    impressions: e.akku.impressions,
+    clicks: e.akku.clicks,
+    spend_cents: e.akku.spendCents,
+    sales_cents: e.akku.salesCents,
+    orders: e.akku.orders,
+    einheiten: e.akku.einheiten,
+    updated_at: jetzt,
+  }));
+}
+
+/** Platzierungs-Zeilen → ads_placement_daily. Schlüssel: Tag, Kampagne, Platzierung. */
+export function bauePlacementRows(tenant_id: string, rows: Record<string, any>[]): Record<string, unknown>[] {
+  interface Eintrag {
+    datum: string; campaign_id: string; platzierung: string; campaign_name: string | null; akku: AdsAkku;
+  }
+  const proSchluessel = new Map<string, Eintrag>();
+
+  for (const r of rows) {
+    const datum = String(r.date ?? "").trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(datum)) continue;
+    const campaign_id = String(r.campaignId ?? "").trim();
+    const platzierung = String(r.placementClassification ?? "").trim();
+    if (!campaign_id || !platzierung) continue;
+
+    const schluessel = JSON.stringify([datum, campaign_id, platzierung]);
+    let e = proSchluessel.get(schluessel);
+    if (!e) {
+      e = { datum, campaign_id, platzierung, campaign_name: String(r.campaignName ?? "").trim() || null, akku: new AdsAkku() };
+      proSchluessel.set(schluessel, e);
+    }
+    e.akku.add(r);
+  }
+
+  const jetzt = new Date().toISOString();
+  return [...proSchluessel.values()].map((e) => ({
+    tenant_id,
+    datum: e.datum,
+    campaign_id: e.campaign_id,
+    platzierung: e.platzierung,
+    campaign_name: e.campaign_name,
+    impressions: e.akku.impressions,
+    clicks: e.akku.clicks,
+    spend_cents: e.akku.spendCents,
+    sales_cents: e.akku.salesCents,
+    orders: e.akku.orders,
+    einheiten: e.akku.einheiten,
+    updated_at: jetzt,
+  }));
+}
+
+/** Batchweiser Upsert in eine der Tagestabellen. */
+export async function schreibeTageszeilen(
+  supabase: any,
+  tabelle: string,
+  onConflict: string,
+  zeilen: Record<string, unknown>[],
+): Promise<AdsVerlaufErgebnis> {
+  if (zeilen.length === 0) return { zeilen: 0 };
+  const BATCH = 500;
+  for (let i = 0; i < zeilen.length; i += BATCH) {
+    const { error } = await supabase.from(tabelle).upsert(zeilen.slice(i, i + BATCH), { onConflict });
+    if (error) return { zeilen: 0, fehler: `${tabelle}: ${error.message}` };
+  }
+  return { zeilen: zeilen.length };
+}
+
 /**
  * Schreibt die Tagesreihe per UPSERT. Einziger Teil dieses Moduls, der die DB
  * anfasst. Batchweise, weil ein 30-Tage-Fenster bei vielen ASINs schnell

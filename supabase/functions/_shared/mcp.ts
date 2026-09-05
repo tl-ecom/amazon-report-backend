@@ -205,6 +205,58 @@ const TOOLS: ToolDef[] = [
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_verlauf", args) : pulseNichtVerfuegbar()),
   },
   {
+    name: "get_ads_struktur",
+    description:
+      "Aufbau des Werbekontos (Sponsored Products) aus dem letzten Struktur-Snapshot: " +
+      "Kampagnen mit Tagesbudget, Gebotsstrategie und Platzierungs-Modifiern (Top of " +
+      "Search / Produktseite / Rest in %), Anzeigengruppen mit Standardgebot, und je " +
+      "Kampagne die Zahl der Keywords, Targets und Negatives. Mit campaign_id kommen " +
+      "zusätzlich alle Keywords/Targets dieser Kampagne mit Gebot (effektiv; `geerbt` " +
+      "= erbt das Standardgebot der Gruppe), Match-Type und Zustand sowie alle Negatives. " +
+      "Ersetzt die Bulk-Datei aus der Konsole. `stand` sagt, wann der Snapshot gezogen wurde.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        campaign_id: { type: "string", description: "Kampagnen-ID — dann mit allen Zielen und Negatives dieser Kampagne." },
+        nur_aktive: { type: "boolean", description: "Default true: archivierte Kampagnen ausblenden." },
+      },
+      additionalProperties: false,
+    },
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_struktur", args) : pulseNichtVerfuegbar()),
+  },
+  {
+    name: "get_ads_suchbegriffe",
+    description:
+      "Suchbegriff-Bericht (Sponsored Products) über einen FREI WÄHLBAREN Zeitraum: welche " +
+      "Suchanfragen der Kunden über welches Keyword/Target Impressions, Klicks, Spend, " +
+      "Bestellungen und Umsatz brachten — mit ACOS, CTR, CVR und CPC je Suchbegriff. Nach " +
+      "Spend sortiert, Default 500 Einträge (limit bis 5000), optional auf eine campaign_id " +
+      "eingeschränkt. Grundlage für Negatives (Klicks ohne Bestellung) und Keyword-Ernte " +
+      "(Bestellungen ohne eigenes Exact-Keyword). Zeitraum via von/bis, Default letzte 30 Tage.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        von: { type: "string", description: "Startdatum 'YYYY-MM-DD' (inklusiv). Default: vor 30 Tagen." },
+        bis: { type: "string", description: "Enddatum 'YYYY-MM-DD' (inklusiv). Default: heute." },
+        campaign_id: { type: "string", description: "Nur Suchbegriffe dieser Kampagne." },
+        limit: { type: "number", description: "Max. Einträge (nach Spend), Default 500, höchstens 5000." },
+      },
+      additionalProperties: false,
+    },
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_suchbegriffe", args) : pulseNichtVerfuegbar()),
+  },
+  {
+    name: "get_ads_platzierungen",
+    description:
+      "Platzierungsbericht (Sponsored Products) über einen FREI WÄHLBAREN Zeitraum: Leistung " +
+      "je Platzierung — Top of Search, Produktseite, Rest der Suche — gesamt und je Kampagne, " +
+      "mit Spend, Umsatz, ACOS, CTR und CVR. Die aktuell gesetzten Platzierungs-Modifier " +
+      "stehen in get_ads_struktur; zusammen sagen beide, ob ein Modifier hoch oder runter " +
+      "sollte. Zeitraum via von/bis, Default letzte 30 Tage.",
+    inputSchema: ZEITRAUM_SCHEMA,
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_platzierungen", args) : pulseNichtVerfuegbar()),
+  },
+  {
     name: "get_sales_history",
     description:
       "Sales-&-Traffic-Kennzahlen über einen FREI WÄHLBAREN Zeitraum aus der " +
