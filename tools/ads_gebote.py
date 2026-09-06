@@ -33,6 +33,11 @@ Ablauf:
         python tools/ads_gebote.py tabelle --firma Vaneja --datei "Massnahmen.xlsx" --blatt Gebotsänderungen
      Ohne --datei wird die neueste .xlsx aus tools/eingang/ genommen.
 
+  Kampagnen-Ebene (Sponsored Products):
+        python tools/ads_gebote.py budget-setzen  --firma Vaneja --kampagne 12345 --budget 12 --grund "..."
+        python tools/ads_gebote.py zustand-setzen --firma Vaneja --kampagne 12345 --state PAUSED --grund "..."
+     Beide zeigen erst den Ist-Stand, fragen nach (ausser --ja) und schreiben dann.
+
 Wo ausfuehren: auf dem PC (nicht VPS). Braucht nur Python 3 + requests.
 """
 
@@ -543,6 +548,45 @@ def cmd_sb_negatives_anlegen(args):
     tabelle(r["ergebnisse"], ["text", "matchType", "ergebnis", "keywordId", "detail"])
 
 
+def _kampagne_ist(tenant, cid):
+    alle = ruf({"action": "kampagnen", "company_id": tenant, "status": ["ENABLED", "PAUSED", "ARCHIVED"]})["kampagnen"]
+    return next((k for k in alle if k["campaignId"] == cid), None)
+
+
+def cmd_budget_setzen(args):
+    tenant, name = firma_id(args.firma)
+    cid, kname = _eine_kampagne(tenant, args.kampagne)
+    k = _kampagne_ist(tenant, cid)
+    ist = k.get("budget") if k else None
+    print(f"Firma: {name}   Kampagne: {kname} ({cid})   Zustand: {k.get('state') if k else '?'}")
+    print(f"Tagesbudget: aktuell {ist if ist is not None else 'unbekannt'} -> neu {args.budget}")
+    if ist is not None and abs(float(ist) - args.budget) < 0.005:
+        sys.exit("Schon so. Nichts zu tun.")
+    _ja(args, "Budget bei Amazon setzen?")
+    r = ruf({"action": "budget_setzen", "company_id": tenant, "campaignId": cid, "budget": args.budget,
+             "bestaetigung": True, "grund": args.grund})
+    print(f"Ergebnis: {r['ergebnis']}   vorher: {r.get('vorher')}   nachher: {r.get('nachher')} ({r.get('budgetType')})")
+    if r.get("detail"):
+        print("Detail:", json.dumps(r["detail"], ensure_ascii=False)[:600])
+
+
+def cmd_zustand_setzen(args):
+    tenant, name = firma_id(args.firma)
+    cid, kname = _eine_kampagne(tenant, args.kampagne)
+    k = _kampagne_ist(tenant, cid)
+    ist = k.get("state") if k else None
+    print(f"Firma: {name}   Kampagne: {kname} ({cid})")
+    print(f"Zustand: aktuell {ist or 'unbekannt'} -> neu {args.state}")
+    if ist == args.state:
+        sys.exit("Schon so. Nichts zu tun.")
+    _ja(args, "Zustand bei Amazon setzen?")
+    r = ruf({"action": "kampagne_zustand", "company_id": tenant, "campaignId": cid, "state": args.state,
+             "bestaetigung": True, "grund": args.grund})
+    print(f"Ergebnis: {r['ergebnis']}   {r.get('vorher')} -> {r.get('nachher')}")
+    if r.get("detail"):
+        print("Detail:", json.dumps(r["detail"], ensure_ascii=False)[:600])
+
+
 # ----------------------------------------------------------------- main
 
 def main():
@@ -651,6 +695,18 @@ def main():
     s.add_argument("--text", action="append", required=True, help="Keyword-Text, mehrfach moeglich")
     s.add_argument("--match", default="negativeExact", choices=["negativeExact", "negativePhrase"])
     s.set_defaults(fn=cmd_sb_negatives_anlegen)
+
+    s = sub.add_parser("budget-setzen", help="Tagesbudget einer SP-Kampagne setzen")
+    schreib(s)
+    s.add_argument("--kampagne", required=True, help="campaignId oder eindeutiger Namensteil")
+    s.add_argument("--budget", type=float, required=True, help="neues Tagesbudget in Profil-Waehrung (Amazon-Minimum 1)")
+    s.set_defaults(fn=cmd_budget_setzen)
+
+    s = sub.add_parser("zustand-setzen", help="SP-Kampagne pausieren/aktivieren")
+    schreib(s)
+    s.add_argument("--kampagne", required=True, help="campaignId oder eindeutiger Namensteil")
+    s.add_argument("--state", required=True, choices=["PAUSED", "ENABLED"])
+    s.set_defaults(fn=cmd_zustand_setzen)
 
     s = sub.add_parser("setzen", help="die letzte Vorschau bei Amazon anwenden")
     s.add_argument("--firma", required=True)
