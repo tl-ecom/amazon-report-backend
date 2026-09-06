@@ -67,6 +67,44 @@ export function zeitraumAus(opts?: { tage?: unknown; von?: unknown; bis?: unknow
   return { von: von.toISOString().slice(0, 10), bis: bis.toISOString().slice(0, 10) };
 }
 
+// --- Sicht: Coach oder Teilnehmer ---
+//
+// Teilnehmer sehen Ads-Daten nur fuer die letzten 30 Tage; der Coach darf
+// beliebig weit zurueck (so weit die Tagesreihe reicht). Serverseitig
+// durchgesetzt, weil der Zeitraum ein freies Argument ist — im Frontend
+// die Presets zu kuerzen wuerde einen Direktaufruf nicht hindern.
+//
+// Die Sicht kommt IMMER aus der Authentifizierung (Session-Nutzer bzw.
+// Token-Ersteller), nie aus den Argumenten. Sonst waere sie ein Argument.
+
+export const TEILNEHMER_MAX_TAGE = 30;
+
+export interface Sicht {
+  coach: boolean;
+}
+
+export const TEILNEHMER: Sicht = { coach: false };
+
+/**
+ * Begrenzt einen Zeitraum auf die Teilnehmer-Reichweite. Der Coach bekommt
+ * ihn unveraendert. Wird gekuerzt, sagt `hinweis` es — ein still gekuerzter
+ * Zeitraum saehe aus wie fehlende Daten.
+ */
+export function begrenzeZeitraum(
+  zeitraum: { von: string; bis: string },
+  sicht: Sicht | undefined,
+  heute: Date = new Date(),
+): { von: string; bis: string; hinweis: string | null } {
+  if (sicht?.coach) return { ...zeitraum, hinweis: null };
+  const grenze = new Date(heute.getTime() - TEILNEHMER_MAX_TAGE * 86_400_000).toISOString().slice(0, 10);
+  if (zeitraum.von >= grenze) return { ...zeitraum, hinweis: null };
+  return {
+    von: grenze,
+    bis: zeitraum.bis < grenze ? grenze : zeitraum.bis,
+    hinweis: `Zeitraum auf die letzten ${TEILNEHMER_MAX_TAGE} Tage begrenzt (ab ${grenze}) — weiter zurueck reicht nur die Coach-Sicht.`,
+  };
+}
+
 export interface AdsVerlaufTag extends AdsKennzahlen {
   datum: string;
 }
@@ -75,8 +113,9 @@ export async function adsVerlauf(
   supabase: any,
   tenant_id: string,
   opts?: { tage?: unknown; von?: unknown; bis?: unknown },
+  sicht: Sicht = TEILNEHMER,
 ): Promise<unknown> {
-  const { von, bis } = zeitraumAus(opts);
+  const { von, bis, hinweis: sichtHinweis } = begrenzeZeitraum(zeitraumAus(opts), sicht);
 
   const { data, error } = await supabase.rpc("ads_summen", {
     p_tenant: tenant_id,
@@ -112,6 +151,7 @@ export async function adsVerlauf(
   const vorlaeufig = istVorlaeufig(bis);
 
   const warnungen: string[] = [];
+  if (sichtHinweis) warnungen.push(sichtHinweis);
   if (vorlaeufig) {
     warnungen.push(
       `Zeitraum reicht in die letzten ${VOLATIL_TAGE} Tage — Ads-Zahlen (Spend/Sales) ` +

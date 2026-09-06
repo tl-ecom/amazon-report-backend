@@ -44,15 +44,18 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   // KI-Name derselben Sache.
   ads_verlauf: "ads",
   get_ads_verlauf: "ads",
-  // Struktur, Suchbegriffe und Platzierungen: dieselbe Quelle, dasselbe Feature.
-  ads_struktur: "ads",
-  get_ads_struktur: "ads",
-  ads_suchbegriffe: "ads",
-  get_ads_suchbegriffe: "ads",
-  ads_platzierungen: "ads",
-  get_ads_platzierungen: "ads",
-  ads_ziele: "ads",
-  get_ads_ziele: "ads",
+  // Die Rohberichte aus der Ads-API sind eigene Schalter in der Tarif-Matrix:
+  // Leistung (ads) kann im Tarif sein, ohne dass die Berichte dabei sind. Die
+  // Ziel-Ebene (Gebote je Keyword) haengt an der Struktur — es ist dieselbe
+  // Frage: was ist eingestellt, und was bringt es.
+  ads_suchbegriffe: "ads_suchbegriffe",
+  get_ads_suchbegriffe: "ads_suchbegriffe",
+  ads_platzierungen: "ads_platzierungen",
+  get_ads_platzierungen: "ads_platzierungen",
+  ads_struktur: "ads_struktur",
+  get_ads_struktur: "ads_struktur",
+  ads_ziele: "ads_struktur",
+  get_ads_ziele: "ads_struktur",
   get_returns_overview: "returns",
   returns_uebersicht: "returns",
   get_product_performance: "products",

@@ -11,7 +11,7 @@
 // die Antwort sagt das, statt es zu verstecken.
 
 import { type AdProduct, ATTRIBUTION_TAGE, FORMELN, istVorlaeufig, kennzahlenAusSummen, VOLATIL_TAGE } from "./ads.ts";
-import { zeitraumAus } from "./ads_verlauf.ts";
+import { begrenzeZeitraum, type Sicht, TEILNEHMER, zeitraumAus } from "./ads_verlauf.ts";
 
 interface Summen {
   impressions: number | string;
@@ -98,8 +98,9 @@ export async function adsSuchbegriffe(
   supabase: any,
   tenant_id: string,
   opts?: { tage?: unknown; von?: unknown; bis?: unknown; campaign_id?: unknown; limit?: unknown; ad_product?: unknown },
+  sicht: Sicht = TEILNEHMER,
 ): Promise<unknown> {
-  const { von, bis } = zeitraumAus(opts);
+  const { von, bis, hinweis: sichtHinweis } = begrenzeZeitraum(zeitraumAus(opts), sicht);
   const campaign = typeof opts?.campaign_id === "string" && opts.campaign_id.trim() ? opts.campaign_id.trim() : null;
   const limit = Number(opts?.limit) > 0 ? Math.min(Number(opts?.limit), 5000) : 500;
   const adProduct = adProductAus(opts?.ad_product);
@@ -143,6 +144,7 @@ export async function adsSuchbegriffe(
     suchbegriffe,
     formeln: FORMELN,
     hinweise: [
+      ...(sichtHinweis ? [sichtHinweis] : []),
       ...abdeckungsHinweise(abdeckungen, "suchbegriffe", von, bis, "Suchbegriff-Daten", adProduct),
       ...attributionsHinweis(new Set(suchbegriffe.map((s) => s.adProduct))),
       ...(suchbegriffe.length >= limit ? [`Liste auf ${limit} Einträge (nach Spend) gedeckelt — limit erhöhen oder campaign_id setzen.`] : []),
@@ -160,8 +162,9 @@ export async function adsPlatzierungen(
   supabase: any,
   tenant_id: string,
   opts?: { tage?: unknown; von?: unknown; bis?: unknown; ad_product?: unknown },
+  sicht: Sicht = TEILNEHMER,
 ): Promise<unknown> {
-  const { von, bis } = zeitraumAus(opts);
+  const { von, bis, hinweis: sichtHinweis } = begrenzeZeitraum(zeitraumAus(opts), sicht);
   const adProduct = adProductAus(opts?.ad_product);
 
   const [summenRes, abdeckungRes] = await Promise.all([
@@ -204,6 +207,7 @@ export async function adsPlatzierungen(
     proKampagne: kampagnen,
     formeln: FORMELN,
     hinweise: [
+      ...(sichtHinweis ? [sichtHinweis] : []),
       ...abdeckungsHinweise(abdeckungen, "placement", von, bis, "Platzierungs-Daten", adProduct),
       ...attributionsHinweis(new Set(gesamt.map((g) => g.adProduct))),
       "Die aktuell gesetzten Modifier stehen im Struktur-Snapshot (get_ads_struktur) — dort vergleichen, " +
@@ -222,8 +226,9 @@ export async function adsZiele(
   supabase: any,
   tenant_id: string,
   opts?: { tage?: unknown; von?: unknown; bis?: unknown; campaign_id?: unknown; limit?: unknown; ad_product?: unknown },
+  sicht: Sicht = TEILNEHMER,
 ): Promise<unknown> {
-  const { von, bis } = zeitraumAus(opts);
+  const { von, bis, hinweis: sichtHinweis } = begrenzeZeitraum(zeitraumAus(opts), sicht);
   const campaign = typeof opts?.campaign_id === "string" && opts.campaign_id.trim() ? opts.campaign_id.trim() : null;
   const limit = Number(opts?.limit) > 0 ? Math.min(Number(opts?.limit), 5000) : 500;
   const adProduct = adProductAus(opts?.ad_product);
@@ -268,6 +273,7 @@ export async function adsZiele(
     ziele,
     formeln: FORMELN,
     hinweise: [
+      ...(sichtHinweis ? [sichtHinweis] : []),
       ...abdeckungsHinweise(abdeckungen, "ziele", von, bis, "Ziel-Daten", adProduct),
       ...attributionsHinweis(new Set(ziele.map((z) => z.adProduct))),
       ...(ziele.length >= limit ? [`Liste auf ${limit} Einträge (nach Spend) gedeckelt — limit erhöhen oder campaign_id setzen.`] : []),

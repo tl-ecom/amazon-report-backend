@@ -21,6 +21,7 @@ import { ladeVerlaufFactory } from "../_shared/verlauf.ts";
 import { produktUebersicht } from "../_shared/produkte.ts";
 import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
 import { adsVerlauf } from "../_shared/ads_verlauf.ts";
+import { istPlattformAdmin } from "../_shared/admin.ts";
 import { adsStruktur } from "../_shared/ads_struktur.ts";
 import { adsPlatzierungen, adsSuchbegriffe, adsZiele } from "../_shared/ads_berichte.ts";
 import { ertragVerlauf } from "../_shared/ertrag.ts";
@@ -93,7 +94,11 @@ Deno.serve(async (req) => {
   );
 
   // --- Auth: Bearer-Token → Tenant ---
-  const tenant_id = await tenantAusToken(req, supabase);
+  const zugang = await tenantAusToken(req, supabase);
+  const tenant_id = zugang?.tenant_id ?? null;
+  // Sicht kommt aus dem Token-Ersteller, nie aus dem Body: ein Coach-Token
+  // darf weiter zurueck als ein Teilnehmer-Token.
+  const sicht = { coach: zugang?.coach === true };
   if (!tenant_id) {
     // 401 mit WWW-Authenticate + resource_metadata (RFC 9728), damit MCP-Clients
     // den OAuth-Flow finden. Der statische Bearer-Token (mcp_tokens) bleibt gültig.
@@ -147,11 +152,11 @@ Deno.serve(async (req) => {
       switch (art) {
         case "produkte": return await produktUebersicht(supabase, tenant_id, pulseArgs);
         case "kpi": return await kpiVerlauf(supabase, tenant_id);
-        case "ads_verlauf": return await adsVerlauf(supabase, tenant_id, pulseArgs);
+        case "ads_verlauf": return await adsVerlauf(supabase, tenant_id, pulseArgs, sicht);
         case "ads_struktur": return await adsStruktur(supabase, tenant_id, pulseArgs);
-        case "ads_suchbegriffe": return await adsSuchbegriffe(supabase, tenant_id, pulseArgs);
-        case "ads_platzierungen": return await adsPlatzierungen(supabase, tenant_id, pulseArgs);
-        case "ads_ziele": return await adsZiele(supabase, tenant_id, pulseArgs);
+        case "ads_suchbegriffe": return await adsSuchbegriffe(supabase, tenant_id, pulseArgs, sicht);
+        case "ads_platzierungen": return await adsPlatzierungen(supabase, tenant_id, pulseArgs, sicht);
+        case "ads_ziele": return await adsZiele(supabase, tenant_id, pulseArgs, sicht);
         case "ertrag": return await ertragVerlauf(supabase, tenant_id);
         case "sqp": {
           const asin = String((pulseArgs?.asin as string) ?? "").trim();
@@ -200,7 +205,13 @@ Deno.serve(async (req) => {
  * Löst den Bearer-Token zu einer tenant_id auf.
  * Der Token wird HIER gehasht (SHA-256); die DB sieht nur den Hash.
  */
-async function tenantAusToken(req: Request, supabase: any): Promise<string | null> {
+interface Zugang {
+  tenant_id: string;
+  /** true, wenn der Ersteller des Tokens Plattform-Admin (Coach) ist. */
+  coach: boolean;
+}
+
+async function tenantAusToken(req: Request, supabase: any): Promise<Zugang | null> {
   const auth = req.headers.get("Authorization") ?? "";
   const m = auth.match(/^Bearer\s+(.+)$/i);
   if (!m) return null;
@@ -213,26 +224,28 @@ async function tenantAusToken(req: Request, supabase: any): Promise<string | nul
   // 1) Statischer Token (mcp_tokens) — der bestehende „einfache" Weg.
   const { data: statisch } = await supabase
     .from("mcp_tokens")
-    .select("id, tenant_id")
+    .select("id, tenant_id, created_by")
     .eq("token_hash", hash)
     .eq("revoked", false)
     .maybeSingle();
   if (statisch) {
     supabase.from("mcp_tokens").update({ last_used_at: new Date().toISOString() }).eq("id", statisch.id).then(() => {}, () => {});
-    return statisch.tenant_id as string;
+    const coach = statisch.created_by ? await istPlattformAdmin(supabase, statisch.created_by) : false;
+    return { tenant_id: statisch.tenant_id as string, coach };
   }
 
   // 2) OAuth-Access-Token (oauth_tokens) — Self-Serve-Weg. Muss gültig, nicht
   //    widerrufen und nicht abgelaufen sein.
   const { data: oauth } = await supabase
     .from("oauth_tokens")
-    .select("id, tenant_id, access_expires_at")
+    .select("id, tenant_id, access_expires_at, user_id")
     .eq("access_hash", hash)
     .eq("revoked", false)
     .maybeSingle();
   if (oauth && new Date(oauth.access_expires_at).getTime() > Date.now()) {
     supabase.from("oauth_tokens").update({ last_used_at: new Date().toISOString() }).eq("id", oauth.id).then(() => {}, () => {});
-    return oauth.tenant_id as string;
+    const coach = oauth.user_id ? await istPlattformAdmin(supabase, oauth.user_id) : false;
+    return { tenant_id: oauth.tenant_id as string, coach };
   }
 
   return null;

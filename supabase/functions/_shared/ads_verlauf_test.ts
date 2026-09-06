@@ -6,7 +6,7 @@
 // Warnungen bei Datenlücken.
 
 import { assertEquals } from "jsr:@std/assert@1";
-import { adsVerlauf, zeitraumAus } from "./ads_verlauf.ts";
+import { adsVerlauf, begrenzeZeitraum, TEILNEHMER_MAX_TAGE, zeitraumAus } from "./ads_verlauf.ts";
 
 function client(rows: unknown[]) {
   const calls: any[] = [];
@@ -74,7 +74,7 @@ Deno.test("Verlauf: Ebenen werden getrennt und Geld in Euro gerechnet", async ()
     summe({ ebene: "kampagne", schluessel: "C1", bezeichnung: "Kampagne A", spend: 2500, sales: 10000 }),
     summe({ ebene: "asin", schluessel: "B001", spend: 2500, sales: 10000 }),
   ]);
-  const r = await adsVerlauf(c.client, "t", ZEITRAUM) as any;
+  const r = await adsVerlauf(c.client, "t", ZEITRAUM, { coach: true }) as any;
 
   assertEquals(r.zeitraum, ZEITRAUM);
   assertEquals(r.gesamt.spend, 25);
@@ -96,14 +96,14 @@ Deno.test("Verlauf: Kampagnen und ASINs nach Spend sortiert", async () => {
     summe({ ebene: "asin", schluessel: "B-klein", spend: 1000 }),
     summe({ ebene: "asin", schluessel: "B-gross", spend: 2000 }),
   ]);
-  const r = await adsVerlauf(c.client, "t", ZEITRAUM) as any;
+  const r = await adsVerlauf(c.client, "t", ZEITRAUM, { coach: true }) as any;
   assertEquals(r.proKampagne.map((k: any) => k.campaignId), ["gross", "klein"]);
   assertEquals(r.proAsin.map((a: any) => a.asin), ["B-gross", "B-klein"]);
 });
 
 Deno.test("Verlauf: leerer Zeitraum ergibt Nullen und eine Warnung", async () => {
   const c = client([summe({ ebene: "gesamt" })]);
-  const r = await adsVerlauf(c.client, "t", ZEITRAUM) as any;
+  const r = await adsVerlauf(c.client, "t", ZEITRAUM, { coach: true }) as any;
   assertEquals(r.tage_mit_daten, 0);
   assertEquals(r.gesamt.spend, 0);
   // Kein Umsatz -> ACOS ist unbekannt, nicht 0.
@@ -117,7 +117,7 @@ Deno.test("Verlauf: Datenluecken am Rand werden benannt, nicht als 0 ausgegeben"
     summe({ ebene: "gesamt", spend: 1000 }),
     summe({ ebene: "tag", schluessel: "2026-06-02", spend: 1000 }),
   ]);
-  const r = await adsVerlauf(c.client, "t", ZEITRAUM) as any;
+  const r = await adsVerlauf(c.client, "t", ZEITRAUM, { coach: true }) as any;
   assertEquals(r.proTag.length, 1);
   assertEquals(r.warnungen.some((w: string) => w.includes("beginnen erst am 2026-06-02")), true);
   assertEquals(r.warnungen.some((w: string) => w.includes("enden am 2026-06-02")), true);
@@ -125,7 +125,37 @@ Deno.test("Verlauf: Datenluecken am Rand werden benannt, nicht als 0 ausgegeben"
 
 Deno.test("Verlauf: fragt ads_summen mit dem aufgeloesten Zeitraum", async () => {
   const c = client([summe({ ebene: "gesamt" })]);
-  await adsVerlauf(c.client, "tenant-1", ZEITRAUM);
+  await adsVerlauf(c.client, "tenant-1", ZEITRAUM, { coach: true });
   assertEquals(c.calls[0].name, "ads_summen");
   assertEquals(c.calls[0].args, { p_tenant: "tenant-1", p_von: "2026-06-01", p_bis: "2026-06-03" });
+});
+
+// --- Sicht: Teilnehmer 30 Tage, Coach unbegrenzt ---
+
+Deno.test("begrenzeZeitraum: Coach bekommt den Zeitraum unveraendert", () => {
+  const r = begrenzeZeitraum({ von: "2026-01-01", bis: "2026-09-01" }, { coach: true }, new Date("2026-09-06T12:00:00Z"));
+  assertEquals(r, { von: "2026-01-01", bis: "2026-09-01", hinweis: null });
+});
+
+Deno.test("begrenzeZeitraum: Teilnehmer wird auf 30 Tage gekuerzt, mit Hinweis", () => {
+  const r = begrenzeZeitraum({ von: "2026-01-01", bis: "2026-09-01" }, { coach: false }, new Date("2026-09-06T12:00:00Z"));
+  assertEquals(r.von, "2026-08-07");
+  assertEquals(r.bis, "2026-09-01");
+  assertEquals(r.hinweis?.includes(String(TEILNEHMER_MAX_TAGE)), true);
+});
+
+Deno.test("begrenzeZeitraum: ohne Sicht gilt Teilnehmer (sicherer Default)", () => {
+  const r = begrenzeZeitraum({ von: "2026-01-01", bis: "2026-09-01" }, undefined, new Date("2026-09-06T12:00:00Z"));
+  assertEquals(r.von, "2026-08-07");
+});
+
+Deno.test("begrenzeZeitraum: Zeitraum innerhalb der 30 Tage bleibt ohne Hinweis", () => {
+  const r = begrenzeZeitraum({ von: "2026-08-20", bis: "2026-09-01" }, { coach: false }, new Date("2026-09-06T12:00:00Z"));
+  assertEquals(r, { von: "2026-08-20", bis: "2026-09-01", hinweis: null });
+});
+
+Deno.test("begrenzeZeitraum: Zeitraum komplett vor der Grenze wird auf die Grenze gezogen", () => {
+  const r = begrenzeZeitraum({ von: "2026-05-01", bis: "2026-06-01" }, { coach: false }, new Date("2026-09-06T12:00:00Z"));
+  assertEquals(r.von, "2026-08-07");
+  assertEquals(r.bis, "2026-08-07");
 });

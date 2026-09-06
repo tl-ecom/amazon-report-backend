@@ -538,7 +538,7 @@ Deno.serve(async (req) => {
       return json({ ok: true, resource, tenant_id: tenantId, data: await betriebskosten(service, tenantId, args as any) });
     }
     if (resource === "ads_verlauf") {
-      return json({ ok: true, resource, tenant_id: tenantId, data: await adsVerlauf(service, tenantId, args as any) });
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsVerlauf(service, tenantId, args as any, { coach: firma.is_admin }) });
     }
     // Aufbau des Werbekontos (Snapshot) sowie Suchbegriff- und Platzierungsbericht
     // — der Ersatz fuer die Bulk-Datei aus der Konsole.
@@ -546,13 +546,13 @@ Deno.serve(async (req) => {
       return json({ ok: true, resource, tenant_id: tenantId, data: await adsStruktur(service, tenantId, args as any) });
     }
     if (resource === "ads_suchbegriffe") {
-      return json({ ok: true, resource, tenant_id: tenantId, data: await adsSuchbegriffe(service, tenantId, args as any) });
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsSuchbegriffe(service, tenantId, args as any, { coach: firma.is_admin }) });
     }
     if (resource === "ads_platzierungen") {
-      return json({ ok: true, resource, tenant_id: tenantId, data: await adsPlatzierungen(service, tenantId, args as any) });
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsPlatzierungen(service, tenantId, args as any, { coach: firma.is_admin }) });
     }
     if (resource === "ads_ziele") {
-      return json({ ok: true, resource, tenant_id: tenantId, data: await adsZiele(service, tenantId, args as any) });
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsZiele(service, tenantId, args as any, { coach: firma.is_admin }) });
     }
     if (resource === "produkt_uebersicht") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await produktUebersicht(service, tenantId, args as any) });
