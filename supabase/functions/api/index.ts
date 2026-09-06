@@ -254,9 +254,12 @@ Deno.serve(async (req) => {
   // Feature-Gating: Kunden nur auf die in ihrem Tarif aktiven Ressourcen/Aktionen.
   // Admins/Coaches (is_admin) umgehen das. Serverseitig, damit nicht per Direktaufruf
   // umgehbar — nicht nur im Frontend versteckt.
+  const features = firma.is_admin ? null : await ladeFeatures(service, tenantId);
+  // Sicht fuer die Ads-Leser: Coach unbegrenzt, Teilnehmer 30 Tage — ausser der
+  // Tarif hat ads_historie. Kommt aus Session und Tarif, nie aus den Argumenten.
+  const sicht = { coach: firma.is_admin, historie: features?.ads_historie === true };
   if (!firma.is_admin) {
     const gateKey = (body?.resource ?? body?.action) as string | undefined;
-    const features = await ladeFeatures(service, tenantId);
     if (!zugriffErlaubt(gateKey, features, false)) {
       return json({ error: "In deinem Tarif nicht enthalten.", gesperrt: true }, 403);
     }
@@ -538,7 +541,7 @@ Deno.serve(async (req) => {
       return json({ ok: true, resource, tenant_id: tenantId, data: await betriebskosten(service, tenantId, args as any) });
     }
     if (resource === "ads_verlauf") {
-      return json({ ok: true, resource, tenant_id: tenantId, data: await adsVerlauf(service, tenantId, args as any, { coach: firma.is_admin }) });
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsVerlauf(service, tenantId, args as any, sicht) });
     }
     // Aufbau des Werbekontos (Snapshot) sowie Suchbegriff- und Platzierungsbericht
     // — der Ersatz fuer die Bulk-Datei aus der Konsole.
@@ -546,13 +549,13 @@ Deno.serve(async (req) => {
       return json({ ok: true, resource, tenant_id: tenantId, data: await adsStruktur(service, tenantId, args as any) });
     }
     if (resource === "ads_suchbegriffe") {
-      return json({ ok: true, resource, tenant_id: tenantId, data: await adsSuchbegriffe(service, tenantId, args as any, { coach: firma.is_admin }) });
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsSuchbegriffe(service, tenantId, args as any, sicht) });
     }
     if (resource === "ads_platzierungen") {
-      return json({ ok: true, resource, tenant_id: tenantId, data: await adsPlatzierungen(service, tenantId, args as any, { coach: firma.is_admin }) });
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsPlatzierungen(service, tenantId, args as any, sicht) });
     }
     if (resource === "ads_ziele") {
-      return json({ ok: true, resource, tenant_id: tenantId, data: await adsZiele(service, tenantId, args as any, { coach: firma.is_admin }) });
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsZiele(service, tenantId, args as any, sicht) });
     }
     if (resource === "produkt_uebersicht") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await produktUebersicht(service, tenantId, args as any) });

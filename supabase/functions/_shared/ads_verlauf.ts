@@ -69,18 +69,21 @@ export function zeitraumAus(opts?: { tage?: unknown; von?: unknown; bis?: unknow
 
 // --- Sicht: Coach oder Teilnehmer ---
 //
-// Teilnehmer sehen Ads-Daten nur fuer die letzten 30 Tage; der Coach darf
-// beliebig weit zurueck (so weit die Tagesreihe reicht). Serverseitig
-// durchgesetzt, weil der Zeitraum ein freies Argument ist — im Frontend
-// die Presets zu kuerzen wuerde einen Direktaufruf nicht hindern.
+// Teilnehmer sehen Ads-Daten nur fuer die letzten 30 Tage — es sei denn, ihr
+// Tarif hat den Schalter ads_historie. Der Coach darf immer beliebig weit
+// zurueck (so weit die Tagesreihe reicht). Serverseitig durchgesetzt, weil
+// der Zeitraum ein freies Argument ist — im Frontend die Presets zu kuerzen
+// wuerde einen Direktaufruf nicht hindern.
 //
-// Die Sicht kommt IMMER aus der Authentifizierung (Session-Nutzer bzw.
-// Token-Ersteller), nie aus den Argumenten. Sonst waere sie ein Argument.
+// Die Sicht kommt IMMER aus Authentifizierung und Tarif (Session-Nutzer bzw.
+// Token-Ersteller, tarif_features), nie aus den Argumenten.
 
 export const TEILNEHMER_MAX_TAGE = 30;
 
 export interface Sicht {
   coach: boolean;
+  /** Tarif-Schalter ads_historie: volle Historie auch fuer Teilnehmer. */
+  historie?: boolean;
 }
 
 export const TEILNEHMER: Sicht = { coach: false };
@@ -95,13 +98,13 @@ export function begrenzeZeitraum(
   sicht: Sicht | undefined,
   heute: Date = new Date(),
 ): { von: string; bis: string; hinweis: string | null } {
-  if (sicht?.coach) return { ...zeitraum, hinweis: null };
+  if (sicht?.coach || sicht?.historie) return { ...zeitraum, hinweis: null };
   const grenze = new Date(heute.getTime() - TEILNEHMER_MAX_TAGE * 86_400_000).toISOString().slice(0, 10);
   if (zeitraum.von >= grenze) return { ...zeitraum, hinweis: null };
   return {
     von: grenze,
     bis: zeitraum.bis < grenze ? grenze : zeitraum.bis,
-    hinweis: `Zeitraum auf die letzten ${TEILNEHMER_MAX_TAGE} Tage begrenzt (ab ${grenze}) — weiter zurueck reicht nur die Coach-Sicht.`,
+    hinweis: `Zeitraum auf die letzten ${TEILNEHMER_MAX_TAGE} Tage begrenzt (ab ${grenze}) — die volle Historie ist im Tarif nicht enthalten.`,
   };
 }
 

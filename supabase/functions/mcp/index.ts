@@ -22,6 +22,7 @@ import { produktUebersicht } from "../_shared/produkte.ts";
 import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
 import { adsVerlauf } from "../_shared/ads_verlauf.ts";
 import { istPlattformAdmin } from "../_shared/admin.ts";
+import { ladeFeatures } from "../_shared/entitlements.ts";
 import { adsStruktur } from "../_shared/ads_struktur.ts";
 import { adsPlatzierungen, adsSuchbegriffe, adsZiele } from "../_shared/ads_berichte.ts";
 import { ertragVerlauf } from "../_shared/ertrag.ts";
@@ -98,7 +99,7 @@ Deno.serve(async (req) => {
   const tenant_id = zugang?.tenant_id ?? null;
   // Sicht kommt aus dem Token-Ersteller, nie aus dem Body: ein Coach-Token
   // darf weiter zurueck als ein Teilnehmer-Token.
-  const sicht = { coach: zugang?.coach === true };
+  let sicht = { coach: zugang?.coach === true, historie: false };
   if (!tenant_id) {
     // 401 mit WWW-Authenticate + resource_metadata (RFC 9728), damit MCP-Clients
     // den OAuth-Flow finden. Der statische Bearer-Token (mcp_tokens) bleibt gültig.
@@ -122,6 +123,12 @@ Deno.serve(async (req) => {
         },
       }
     );
+  }
+
+  // Tarif-Schalter ads_historie: volle Ads-Historie auch fuer Teilnehmer-Token.
+  if (!sicht.coach) {
+    const features = await ladeFeatures(supabase, tenant_id);
+    sicht = { coach: false, historie: features?.ads_historie === true };
   }
 
   // --- Body parsen ---

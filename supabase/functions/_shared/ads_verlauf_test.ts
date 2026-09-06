@@ -144,6 +144,11 @@ Deno.test("begrenzeZeitraum: Teilnehmer wird auf 30 Tage gekuerzt, mit Hinweis",
   assertEquals(r.hinweis?.includes(String(TEILNEHMER_MAX_TAGE)), true);
 });
 
+Deno.test("begrenzeZeitraum: Tarif-Schalter historie hebt die Grenze auf", () => {
+  const r = begrenzeZeitraum({ von: "2026-01-01", bis: "2026-09-01" }, { coach: false, historie: true }, new Date("2026-09-06T12:00:00Z"));
+  assertEquals(r, { von: "2026-01-01", bis: "2026-09-01", hinweis: null });
+});
+
 Deno.test("begrenzeZeitraum: ohne Sicht gilt Teilnehmer (sicherer Default)", () => {
   const r = begrenzeZeitraum({ von: "2026-01-01", bis: "2026-09-01" }, undefined, new Date("2026-09-06T12:00:00Z"));
   assertEquals(r.von, "2026-08-07");
