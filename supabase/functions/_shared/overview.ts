@@ -3,24 +3,50 @@
 // jüngsten Change Events zu einer entscheidungsfokussierten Übersicht:
 // Ampel-Status, Top-KPIs, max. 3 priorisierte Prüfungen, auffällige ASINs.
 //
-// Die Hinweis-Ableitung (baueHinweise) und die Ampel (ampelStatus) sind rein und
-// unit-getestet. Sie behaupten KEINE Ursache — sie benennen Prüf-Kandidaten.
+// Dazu die Bewegung: letzte 30 Tage gegen die 30 Tage davor — Umsatz und
+// Ertrag gesamt, und je Produkt die drei größten Gewinner und Verlierer.
+// Eine Übersicht, die nur den Stand zeigt, beantwortet die eigentliche
+// Frage nicht: was hat sich bewegt, und wo?
+//
+// Die Hinweis-Ableitung (baueHinweise), die Ampel (ampelStatus) und die
+// Bewegungs-Rangliste (baueBewegungen) sind rein und unit-getestet. Sie
+// behaupten KEINE Ursache — sie benennen Prüf-Kandidaten.
 
 import { baueOverview } from "./metrics.ts";
 import { baueListingsOverview } from "./listings.ts";
+import { produktUebersicht } from "./produkte.ts";
 
 const SALES_TYPE = "GET_SALES_AND_TRAFFIC_REPORT";
 const LISTINGS_TYPE = "GET_MERCHANT_LISTINGS_ALL_DATA";
 const SESSIONS_MIN = 30; // Schwelle, ab der "Traffic" als aussagekräftig gilt
+
+/** Vergleichsfenster für die Bewegung: 30 Tage gegen die 30 davor. */
+export const BEWEGUNG_TAGE = 30;
+/** Produkte unter dieser Umsatzbasis (in beiden Fenstern) bleiben aus der
+ *  Rangliste: +300 % auf 12 € sind Rauschen, kein Gewinner. */
+export const BEWEGUNG_MIN_UMSATZ = 50;
+/** Produkttitel in Listen: abgekürzt, damit die Zeile lesbar bleibt. */
+export const TITEL_MAX = 85;
 
 export interface Hinweis {
   typ: string;
   prioritaet: "kritisch" | "hoch" | "mittel" | "niedrig";
   text: string;
   asin?: string;
+  produktname?: string | null;
 }
 
 const PRIO_RANG: Record<Hinweis["prioritaet"], number> = { kritisch: 0, hoch: 1, mittel: 2, niedrig: 3 };
+
+/** Titel auf TITEL_MAX Zeichen kürzen — am Wortende, mit Auslassungszeichen. */
+export function kuerzeTitel(titel: unknown, max = TITEL_MAX): string | null {
+  const t = typeof titel === "string" ? titel.trim().replace(/\s+/g, " ") : "";
+  if (!t) return null;
+  if (t.length <= max) return t;
+  const schnitt = t.slice(0, max - 1);
+  const leer = schnitt.lastIndexOf(" ");
+  return (leer > max * 0.6 ? schnitt.slice(0, leer) : schnitt).trimEnd() + "…";
+}
 
 /** Leitet aus Sales-Overview + Listings-Overview deterministische Prüf-Hinweise ab. */
 export function baueHinweise(sales: any, listings: any): Hinweis[] {
@@ -62,6 +88,139 @@ export function ampelStatus(hinweise: Hinweis[]): "rot" | "gelb" | "gruen" {
   return "gruen";
 }
 
+// --- Bewegung: 30 Tage gegen die 30 davor ---
+
+export interface BewegungProdukt {
+  asin: string;
+  produktname: string | null;
+  umsatz: number;
+  umsatz_vorher: number;
+  umsatz_delta: number;
+  umsatz_delta_prozent: number | null;
+  /** Deckungsbeitrag nach Werbung — null, wenn EK oder Gebühren fehlen. */
+  ertrag: number | null;
+  ertrag_vorher: number | null;
+  ertrag_delta: number | null;
+  nettomarge: number | null;
+  nettomarge_vorher: number | null;
+}
+
+export interface Bewegung {
+  zeitraum: { von: string; bis: string };
+  vergleich: { von: string; bis: string };
+  gesamt: {
+    umsatz: number; umsatz_vorher: number; umsatz_delta_prozent: number | null;
+    ertrag: number | null; ertrag_vorher: number | null; ertrag_delta_prozent: number | null;
+    produkte_mit_ertrag: number; produkte: number;
+  };
+  umsatz: { gewinner: BewegungProdukt[]; verlierer: BewegungProdukt[] };
+  ertrag: { gewinner: BewegungProdukt[]; verlierer: BewegungProdukt[] };
+  hinweise: string[];
+}
+
+function r2(x: number): number {
+  return Math.round(x * 100) / 100;
+}
+
+function deltaProzent(jetzt: number, vorher: number): number | null {
+  if (!Number.isFinite(vorher) || vorher === 0) return null;
+  return Math.round(((jetzt - vorher) / Math.abs(vorher)) * 1000) / 10;
+}
+
+interface ProduktZeile {
+  asin: string; produktname?: string | null; umsatz: number;
+  nettogewinn: number | null; nettomarge: number | null;
+}
+
+/**
+ * Gewinner und Verlierer aus zwei Produkt-Übersichten. Sortiert nach der
+ * Veränderung in EURO, nicht in Prozent: ein Produkt, das 2.000 € dazugewinnt,
+ * bewegt das Konto — eines, das von 10 auf 40 € geht, nicht. Der Prozentwert
+ * steht daneben. Produkte, die in beiden Fenstern unter BEWEGUNG_MIN_UMSATZ
+ * liegen, bleiben draußen.
+ *
+ * Ertrag nur, wo er in BEIDEN Fenstern bekannt ist (EK und Gebühren). Sonst
+ * verglichen wir eine Zahl mit einer Lücke.
+ */
+export function baueBewegungen(
+  aktuell: ProduktZeile[],
+  vorher: ProduktZeile[],
+  zeitraum: { von: string; bis: string },
+  vergleich: { von: string; bis: string },
+  titel: Map<string, string | null> = new Map(),
+  top = 3,
+): Bewegung {
+  const vorherMap = new Map(vorher.map((p) => [p.asin, p]));
+  const asins = new Set<string>([...aktuell.map((p) => p.asin), ...vorher.map((p) => p.asin)]);
+
+  const zeilen: BewegungProdukt[] = [];
+  for (const asin of asins) {
+    const a = aktuell.find((p) => p.asin === asin);
+    const v = vorherMap.get(asin);
+    const umsatz = r2(a?.umsatz ?? 0);
+    const umsatzVorher = r2(v?.umsatz ?? 0);
+    if (umsatz < BEWEGUNG_MIN_UMSATZ && umsatzVorher < BEWEGUNG_MIN_UMSATZ) continue;
+    const ertrag = a?.nettogewinn ?? null;
+    const ertragVorher = v?.nettogewinn ?? null;
+    zeilen.push({
+      asin,
+      produktname: kuerzeTitel(titel.get(asin) ?? a?.produktname ?? v?.produktname ?? null),
+      umsatz,
+      umsatz_vorher: umsatzVorher,
+      umsatz_delta: r2(umsatz - umsatzVorher),
+      umsatz_delta_prozent: deltaProzent(umsatz, umsatzVorher),
+      ertrag: ertrag == null ? null : r2(ertrag),
+      ertrag_vorher: ertragVorher == null ? null : r2(ertragVorher),
+      ertrag_delta: ertrag != null && ertragVorher != null ? r2(ertrag - ertragVorher) : null,
+      nettomarge: a?.nettomarge ?? null,
+      nettomarge_vorher: v?.nettomarge ?? null,
+    });
+  }
+
+  const nachUmsatz = [...zeilen].sort((x, y) => y.umsatz_delta - x.umsatz_delta);
+  const mitErtrag = zeilen.filter((z) => z.ertrag_delta != null);
+  const nachErtrag = [...mitErtrag].sort((x, y) => y.ertrag_delta! - x.ertrag_delta!);
+
+  const umsatzGesamt = r2(aktuell.reduce((s, p) => s + (p.umsatz || 0), 0));
+  const umsatzVorherGesamt = r2(vorher.reduce((s, p) => s + (p.umsatz || 0), 0));
+  const ertragBekannt = (l: ProduktZeile[]) => l.filter((p) => p.nettogewinn != null);
+  const ertragGesamt = ertragBekannt(aktuell).length ? r2(ertragBekannt(aktuell).reduce((s, p) => s + p.nettogewinn!, 0)) : null;
+  const ertragVorherGesamt = ertragBekannt(vorher).length ? r2(ertragBekannt(vorher).reduce((s, p) => s + p.nettogewinn!, 0)) : null;
+
+  const hinweise: string[] = [];
+  const ohneErtrag = aktuell.filter((p) => p.umsatz >= BEWEGUNG_MIN_UMSATZ && p.nettogewinn == null).length;
+  if (ohneErtrag > 0) {
+    hinweise.push(`${ohneErtrag} Produkt${ohneErtrag === 1 ? "" : "e"} ohne Ertragswert (Einkaufspreis oder Gebühren fehlen) — fehlt in der Ertrags-Rangliste und in der Ertragssumme.`);
+  }
+  if (zeilen.length === 0) hinweise.push("Kein Produkt über der Umsatzbasis in beiden Fenstern — noch keine Bewegung messbar.");
+
+  return {
+    zeitraum,
+    vergleich,
+    gesamt: {
+      umsatz: umsatzGesamt,
+      umsatz_vorher: umsatzVorherGesamt,
+      umsatz_delta_prozent: deltaProzent(umsatzGesamt, umsatzVorherGesamt),
+      ertrag: ertragGesamt,
+      ertrag_vorher: ertragVorherGesamt,
+      ertrag_delta_prozent: ertragGesamt != null && ertragVorherGesamt != null ? deltaProzent(ertragGesamt, ertragVorherGesamt) : null,
+      produkte_mit_ertrag: ertragBekannt(aktuell).length,
+      produkte: aktuell.length,
+    },
+    umsatz: {
+      gewinner: nachUmsatz.filter((z) => z.umsatz_delta > 0).slice(0, top),
+      verlierer: nachUmsatz.filter((z) => z.umsatz_delta < 0).reverse().slice(0, top),
+    },
+    ertrag: {
+      gewinner: nachErtrag.filter((z) => z.ertrag_delta! > 0).slice(0, top),
+      verlierer: nachErtrag.filter((z) => z.ertrag_delta! < 0).reverse().slice(0, top),
+    },
+    hinweise,
+  };
+}
+
+// --- DB ---
+
 async function ladeLatest(supabase: any, tenant_id: string, reportType: string): Promise<any | null> {
   const { data } = await supabase
     .from("report_data")
@@ -71,19 +230,60 @@ async function ladeLatest(supabase: any, tenant_id: string, reportType: string):
   return data ?? null;
 }
 
+function tagVor(tage: number, ab: Date = new Date()): string {
+  return new Date(ab.getTime() - tage * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** Produkttitel je ASIN aus dem Katalog — eine Abfrage, ein Map. */
+async function ladeTitel(supabase: any, tenant_id: string): Promise<Map<string, string | null>> {
+  const { data } = await supabase.from("asins").select("asin, produktname").eq("tenant_id", tenant_id);
+  const m = new Map<string, string | null>();
+  for (const r of data ?? []) m.set(String(r.asin), r.produktname ?? null);
+  return m;
+}
+
 export async function pulseOverview(supabase: any, tenant_id: string): Promise<unknown> {
-  const [salesRow, listingsRow, changesRes] = await Promise.all([
+  // Bewegungsfenster: gestern zurück, damit der angebrochene Tag nicht als
+  // Einbruch erscheint.
+  const bis = tagVor(1);
+  const von = tagVor(BEWEGUNG_TAGE);
+  const vBis = tagVor(BEWEGUNG_TAGE + 1);
+  const vVon = tagVor(2 * BEWEGUNG_TAGE);
+
+  const [salesRow, listingsRow, changesRes, titel, aktuell, vorher, adsRes, diagRes] = await Promise.all([
     ladeLatest(supabase, tenant_id, SALES_TYPE),
     ladeLatest(supabase, tenant_id, LISTINGS_TYPE),
     supabase.from("change_events").select("asin, event_type, previous_value, new_value, relevance, effective_at, status")
       .eq("tenant_id", tenant_id).order("detected_at", { ascending: false }).limit(5),
+    ladeTitel(supabase, tenant_id),
+    produktUebersicht(supabase, tenant_id, { von, bis }).catch(() => null) as Promise<any>,
+    produktUebersicht(supabase, tenant_id, { von: vVon, bis: vBis }).catch(() => null) as Promise<any>,
+    supabase.rpc("ads_summen", { p_tenant: tenant_id, p_von: von, p_bis: bis }),
+    supabase.from("diagnoses").select("id", { count: "exact", head: true }).eq("tenant_id", tenant_id).eq("status", "offen"),
   ]);
 
   const sales = salesRow ? baueOverview(salesRow.payload, salesRow.data_timestamp, salesRow.is_provisional) as any : null;
   const listings = listingsRow ? baueListingsOverview(listingsRow.payload, listingsRow.data_timestamp) as any : null;
 
-  const hinweise = baueHinweise(sales, listings);
+  const mitTitel = <T extends { asin?: string | null }>(x: T) => ({
+    ...x,
+    produktname: x.asin ? kuerzeTitel(titel.get(x.asin)) : null,
+  });
+
+  const hinweise = baueHinweise(sales, listings).map(mitTitel);
   const status = ampelStatus(hinweise);
+
+  const bewegung = aktuell && vorher
+    ? baueBewegungen(aktuell.produkte ?? [], vorher.produkte ?? [], { von, bis }, { von: vVon, bis: vBis }, titel)
+    : null;
+
+  // Werbung im Bewegungsfenster: Spend und TACOS (Werbung am Gesamtumsatz —
+  // die ehrlichere Größe, weil organische Verkäufe die Werbung mittragen).
+  const adsGesamt = ((adsRes?.data ?? []) as any[]).find((r) => r.ebene === "gesamt");
+  const werbung = adsGesamt ? r2(Number(adsGesamt.spend_cents) / 100) : null;
+  const tacos = werbung != null && bewegung && bewegung.gesamt.umsatz > 0
+    ? Math.round((werbung / bewegung.gesamt.umsatz) * 1000) / 10
+    : null;
 
   const g = sales?.gesamt ?? {};
   return {
@@ -108,12 +308,16 @@ export async function pulseOverview(supabase: any, tenant_id: string): Promise<u
       preis_min: listings.preis_aktiv?.min ?? null,
       preis_max: listings.preis_aktiv?.max ?? null,
     } : null,
+    bewegung,
+    werbung: { spend: werbung, tacos, zeitraum: { von, bis } },
+    diagnosen_offen: diagRes?.count ?? null,
     pruefungen: hinweise.slice(0, 3),
-    top_changes: changesRes.data ?? [],
+    top_changes: (changesRes.data ?? []).map(mitTitel),
     warnungen: sales?.konsistenz && !sales.konsistenz.ok ? ["Sales-Daten: byDate und byAsin weichen ab — Zahlen prüfen."] : [],
     datenqualitaet: {
       sales_vorhanden: Boolean(sales),
       listings_vorhanden: Boolean(listings),
+      bewegung_vorhanden: Boolean(bewegung),
     },
   };
 }
