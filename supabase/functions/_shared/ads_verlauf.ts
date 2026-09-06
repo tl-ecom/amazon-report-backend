@@ -104,7 +104,7 @@ export function begrenzeZeitraum(
   return {
     von: grenze,
     bis: zeitraum.bis < grenze ? grenze : zeitraum.bis,
-    hinweis: `Zeitraum auf die letzten ${TEILNEHMER_MAX_TAGE} Tage begrenzt (ab ${grenze}) — die volle Historie ist im Tarif nicht enthalten.`,
+    hinweis: `Zeitraum auf die letzten ${TEILNEHMER_MAX_TAGE} Tage begrenzt.`,
   };
 }
 
