@@ -22,6 +22,8 @@
 //                     Nur mit bestaetigung=true. Spur in ads_aenderungen_log.
 //   kampagne_zustand  SP-Kampagne pausieren/aktivieren {campaignId, state}.
 //                     Nur mit bestaetigung=true. Spur in ads_aenderungen_log.
+//   sb_budget_setzen  Tagesbudget einer SB-Kampagne setzen {campaignId, budget}.
+//                     Nur mit bestaetigung=true. Spur in ads_aenderungen_log.
 //
 // Spec (Advertising API v3, Sponsored Products, verifiziert 2026-09):
 //   POST /sp/campaigns/list   Content-Type/Accept application/vnd.spCampaign.v3+json
@@ -31,6 +33,7 @@
 //   PUT  /sp/keywords         { keywords: [{ keywordId, bid }] }
 //   PUT  /sp/targets          { targetingClauses: [{ targetId, bid }] }
 //   PUT  /sp/campaigns        { campaigns: [{ campaignId, budget: { budget, budgetType } | state }] }
+//   PUT  /sb/v4/campaigns     { campaigns: [{ campaignId, budget, budgetType | state }] }  (SB: budget flach)
 //   Listen paginieren über nextToken, max 1000 je Seite. Updates max 1000 je Aufruf.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -381,6 +384,26 @@ Deno.serve(async (req) => {
       return json({ campaignId: cid, name: c.name, vorher: c.state, nachher: state, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : e.detail, ...(logErr ? { log_fehler: logErr } : {}) });
     }
 
+    // Sponsored Brands: Tagesbudget setzen {campaignId, budget}
+    if (action === "sb_budget_setzen") {
+      if (!bestaetigt()) return json({ error: "bestaetigung=true fehlt. Es wurde NICHTS geschrieben." }, 400);
+      const cid = str(body.campaignId); const budget = Number(body.budget);
+      if (!cid || !Number.isFinite(budget) || budget < MIN_BUDGET) return json({ error: `campaignId und budget (>= ${MIN_BUDGET}) nötig.` }, 400);
+      const r = await ads.alle("/sb/v4/campaigns/list", CT.sbCampaign, { campaignIdFilter: { include: [cid] } }, "campaigns");
+      if (!r.ok || !r.daten.length) return json({ error: "SB-Kampagne nicht gefunden", detail: r.ok ? null : r.detail }, 404);
+      const c = r.daten[0];
+      const vorher = typeof c.budget === "number" ? c.budget : null;
+      const budgetType = c.budgetType ?? "DAILY";
+      if (vorher !== null && Math.abs(vorher - budget) < 0.005) {
+        await spur([{ aktion: "sb_budget_setzen", objekt_art: "sb_campaign", objekt_id: cid, campaign_id: cid, vorher: { budget: vorher, budgetType }, nachher: { budget, budgetType }, ergebnis: "uebersprungen", detail: "schon so" }]);
+        return json({ campaignId: cid, name: c.name, vorher, nachher: budget, budgetType, ergebnis: "uebersprungen", detail: `Budget ist schon ${budget}` });
+      }
+      const put = await ads.put("/sb/v4/campaigns", CT.sbCampaign, "campaigns", "campaignId", [{ campaignId: cid, budget, budgetType }]);
+      const e = put.get(cid) ?? { ok: false, detail: "keine Antwort" };
+      const logErr = await spur([{ aktion: "sb_budget_setzen", objekt_art: "sb_campaign", objekt_id: cid, campaign_id: cid, vorher: { budget: vorher, budgetType }, nachher: { budget, budgetType }, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : JSON.stringify(e.detail).slice(0, 1000) }]);
+      return json({ campaignId: cid, name: c.name, vorher, nachher: budget, budgetType, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : e.detail, ...(logErr ? { log_fehler: logErr } : {}) });
+    }
+
     // Sponsored Brands: Negatives einer Kampagne lesen
     if (action === "sb_negatives") {
       const cid = str(body.campaignId);
@@ -461,7 +484,7 @@ Deno.serve(async (req) => {
       return json({ campaignId: cid, name: c.name, vorher: c.state, nachher: state, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : e.detail, ...(logErr ? { log_fehler: logErr } : {}) });
     }
 
-    return json({ error: "Unbekannte action. Erlaubt: firmen, kampagnen, gebote, vorschau, pruefen, setzen, platzierung, platzierung_setzen, budget_setzen, kampagne_zustand, negatives, keyword_anlegen, negative_anlegen, sb_kampagnen, sb_kampagne_zustand, sb_negatives, sb_negatives_anlegen" }, 400);
+    return json({ error: "Unbekannte action. Erlaubt: firmen, kampagnen, gebote, vorschau, pruefen, setzen, platzierung, platzierung_setzen, budget_setzen, kampagne_zustand, negatives, keyword_anlegen, negative_anlegen, sb_kampagnen, sb_kampagne_zustand, sb_budget_setzen, sb_negatives, sb_negatives_anlegen" }, 400);
   } catch (e) {
     return json({ error: "Ausnahme", detail: String(e) }, 500);
   }

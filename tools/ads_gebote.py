@@ -36,6 +36,7 @@ Ablauf:
   Kampagnen-Ebene (Sponsored Products):
         python tools/ads_gebote.py budget-setzen  --firma Vaneja --kampagne 12345 --budget 12 --grund "..."
         python tools/ads_gebote.py zustand-setzen --firma Vaneja --kampagne 12345 --state PAUSED --grund "..."
+        python tools/ads_gebote.py sb-budget-setzen --firma Vaneja --kampagne 12345 --budget 17.5 --grund "..."
      Beide zeigen erst den Ist-Stand, fragen nach (ausser --ja) und schreiben dann.
 
 Wo ausfuehren: auf dem PC (nicht VPS). Braucht nur Python 3 + requests.
@@ -522,6 +523,25 @@ def cmd_sb_zustand(args):
     print(f"Ergebnis: {r['ergebnis']}   {r.get('vorher')} -> {r.get('nachher')}" + (f"   Detail: {json.dumps(r.get('detail'), ensure_ascii=False)[:600]}" if r.get('detail') else ""))
 
 
+def cmd_sb_budget_setzen(args):
+    tenant, name = firma_id(args.firma)
+    d = ruf({"action": "sb_kampagnen", "company_id": tenant, "kampagnen": [args.kampagne]})["kampagnen"]
+    if not d:
+        sys.exit("SB-Kampagne nicht gefunden.")
+    k = d[0]
+    ist = k.get("budget")
+    print(f"Firma: {name}   SB-Kampagne: {k['name']} ({k['campaignId']})   Zustand: {k['state']}")
+    print(f"Tagesbudget: aktuell {ist if ist is not None else 'unbekannt'} ({k.get('budgetType')}) -> neu {args.budget}")
+    if ist is not None and abs(float(ist) - args.budget) < 0.005:
+        sys.exit("Schon so. Nichts zu tun.")
+    _ja(args, "Budget bei Amazon setzen?")
+    r = ruf({"action": "sb_budget_setzen", "company_id": tenant, "campaignId": args.kampagne, "budget": args.budget,
+             "bestaetigung": True, "grund": args.grund})
+    print(f"Ergebnis: {r['ergebnis']}   vorher: {r.get('vorher')}   nachher: {r.get('nachher')} ({r.get('budgetType')})")
+    if r.get("detail"):
+        print("Detail:", json.dumps(r["detail"], ensure_ascii=False)[:600])
+
+
 def cmd_sb_negatives(args):
     tenant, name = firma_id(args.firma)
     d = ruf({"action": "sb_negatives", "company_id": tenant, "campaignId": args.kampagne})
@@ -683,6 +703,12 @@ def main():
     s.add_argument("--kampagne", required=True, help="SB campaignId")
     s.add_argument("--state", required=True, choices=["PAUSED", "ENABLED"])
     s.set_defaults(fn=cmd_sb_zustand)
+
+    s = sub.add_parser("sb-budget-setzen", help="Tagesbudget einer SB-Kampagne setzen")
+    schreib(s)
+    s.add_argument("--kampagne", required=True, help="SB campaignId")
+    s.add_argument("--budget", type=float, required=True, help="neues Tagesbudget in Profil-Waehrung (Amazon-Minimum 1)")
+    s.set_defaults(fn=cmd_sb_budget_setzen)
 
     s = sub.add_parser("sb-negatives", help="Negatives einer SB-Kampagne ansehen")
     s.add_argument("--firma", required=True)
