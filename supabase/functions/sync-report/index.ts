@@ -285,6 +285,11 @@ Deno.serve(async (req) => {
     //                  anfassen (sonst überschriebe ein altes Fenster den aktuellen Stand)
     const endDate: string | undefined = body.end_date;
     let historyOnly: boolean = body.history_only === true;
+    // Fenster-Report (Sales & Traffic ueber einen gewaehlten Zeitraum): landet
+    // in report_data mit is_latest=false und der Spalte fenster — der aktuelle
+    // Stand bleibt unberuehrt. Siehe _shared/sales_fenster.ts.
+    let fenster: { von: string; bis: string; schluessel: string } | null =
+      body.fenster && typeof body.fenster.schluessel === "string" ? body.fenster : null;
 
     // Bei Wiederaufnahme sind diese beiden NICHT aus dem Body zu nehmen, sondern
     // aus dem gespeicherten Job — sonst landen die Daten unter dem falschen
@@ -364,6 +369,7 @@ Deno.serve(async (req) => {
       reportType = job.report_type;
       isProvisional = job.config?.include_volatile === true;
       historyOnly = job.config?.history_only === true;
+      fenster = job.config?.fenster?.schluessel ? job.config.fenster : null;
       reportId = resumeReportId;
     } else {
       const konfig = konfigFuer(reportType);
@@ -452,6 +458,7 @@ Deno.serve(async (req) => {
           ...(konfig.snapshot ? { snapshot: true } : { days }),
           include_volatile: includeVolatile,
           history_only: historyOnly,
+          ...(fenster ? { fenster } : {}),
           ...(zeitfenster ?? {}),
         },
       });
@@ -584,7 +591,23 @@ Deno.serve(async (req) => {
     // report_data (aktueller Stand) NUR im Normalbetrieb schreiben. Beim Backfill
     // (history_only) würde ein altes Fenster den aktuellen is_latest-Stand
     // überschreiben — dort zählen ausschließlich die Verlaufs-Tabellen.
-    if (!historyOnly) {
+    if (fenster) {
+      // Fenster-Report: ablegen, ohne den aktuellen Stand anzufassen.
+      const { error: insErr } = await supabase.from("report_data").insert({
+        tenant_id,
+        source: "sp",
+        report_type: reportType,
+        payload: fetched.payload,
+        data_timestamp: dataTimestamp,
+        is_provisional: isProvisional,
+        is_latest: false,
+        fenster,
+      });
+      if (insErr) {
+        await markJobFatal(supabase, tenant_id, reportId, insErr.message);
+        return json({ error: "Fenster-Report speichern fehlgeschlagen", detail: insErr.message }, 500);
+      }
+    } else if (!historyOnly) {
       // Reihenfolge ist Pflicht: der Unique-Index one_latest_per_report erlaubt nur
       // EINE Zeile mit is_latest pro (tenant, source, report_type). Erst altes
       // is_latest zurücksetzen, dann neu einfügen — sonst kollidiert der Insert.

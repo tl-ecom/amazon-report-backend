@@ -35,6 +35,9 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   einstellungen: "verlauf",
   einstellungen_setzen: "verlauf",
   get_sales_overview: "sales",
+  // Derselbe Report ueber einen gewaehlten Zeitraum — dasselbe Feature.
+  sales_fenster: "sales",
+  sales_fenster_laden: "sales",
   get_orders_overview: "orders",
   get_listings_overview: "listings",
   get_ads_overview: "ads",

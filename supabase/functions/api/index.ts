@@ -31,6 +31,7 @@ import { erstelleNote, listeNotes, loescheNote, setzeNoteSichtbarkeit } from "..
 import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
 import { adsVerlauf } from "../_shared/ads_verlauf.ts";
 import { adsStruktur } from "../_shared/ads_struktur.ts";
+import { salesFenster, salesFensterLaden } from "../_shared/sales_fenster.ts";
 import { adsPlatzierungen, adsSuchbegriffe, adsZiele } from "../_shared/ads_berichte.ts";
 import { betriebskosten } from "../_shared/betriebskosten.ts";
 import { produktUebersicht } from "../_shared/produkte.ts";
@@ -329,6 +330,9 @@ Deno.serve(async (req) => {
         const r = await anstossenSqp(service, tenantId, (args ?? {}) as Record<string, unknown>);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
+      if (action === "sales_fenster_laden") {
+        return json({ ok: true, action, tenant_id: tenantId, data: await salesFensterLaden(service, tenantId, args as any) });
+      }
       if (action === "diagnosen_aktualisieren") {
         const r = await diagnosenLauf(service, tenantId);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
@@ -539,6 +543,10 @@ Deno.serve(async (req) => {
     // Entfernung, Erstattungen. Bewusst getrennt von den Verkaufsgebuehren.
     if (resource === "betriebskosten") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await betriebskosten(service, tenantId, args as any) });
+    }
+    // Sales & Traffic ueber einen gewaehlten Zeitraum (Fenster-Report).
+    if (resource === "sales_fenster") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await salesFenster(service, tenantId, args as any) });
     }
     if (resource === "ads_verlauf") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await adsVerlauf(service, tenantId, args as any, sicht) });
