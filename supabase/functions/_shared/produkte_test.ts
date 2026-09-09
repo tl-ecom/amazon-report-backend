@@ -32,6 +32,7 @@ function client(opts: {
   ads?: unknown[];
   einstellungen?: unknown;
   jeAsin?: unknown[];
+  lager?: unknown[];
 }) {
   const tabelle = (daten: unknown) => {
     const b: any = {
@@ -49,7 +50,11 @@ function client(opts: {
         : tabelle(opts.einstellungen === undefined ? STEUERPROFIL : opts.einstellungen),
     rpc: (name: string) =>
       Promise.resolve({
-        data: name === "ads_summen" ? (opts.ads ?? []) : (opts.produkte ?? []),
+        data: name === "ads_summen"
+          ? (opts.ads ?? [])
+          : name === "lager_abdeckung"
+          ? (opts.lager ?? [{ monat: "2026-07", hat_daten: true, betrag_cents: 56470 }])
+          : (opts.produkte ?? []),
         error: null,
       }),
   } as any;
@@ -216,4 +221,68 @@ Deno.test("hat_werbekosten sagt, ob das Endergebnis vollstaendig ist", async () 
     client({ produkte: [zeile()], ads: [] }), "t", ZEITRAUM) as any;
   assertEquals(ohne.hat_werbekosten, false);
   assertEquals(ohne.fehlt.length, 1);
+});
+
+// --- Fehlende Lagergebuehren ------------------------------------------------
+//
+// Amazon gibt den Lagergebuehrenbericht erst Wochen spaeter heraus. Fehlt ein
+// Monat, steht in der Ausgabe 0,00 EUR — und das liest sich wie „keine
+// Lagerkosten", nicht wie „unbekannt". Wer die Zahlen ueber MCP oder ChatGPT
+// abruft, sieht die Datenlage nicht; er sieht nur die Zahl. Also muss die
+// Antwort es selbst sagen.
+
+Deno.test("Warnung: fehlender Lagermonat wird benannt", async () => {
+  const r = await produktUebersicht(client({
+    produkte: [zeile()],
+    lager: [
+      { monat: "2026-07", hat_daten: true, betrag_cents: 56470 },
+      { monat: "2026-08", hat_daten: false, betrag_cents: 0 },
+    ],
+  }), "t", { von: "2026-07-01", bis: "2026-08-31" }) as any;
+
+  assertEquals(r.lagergebuehr_monate_fehlend, ["2026-08"]);
+  assertEquals(r.lagergebuehr_vollstaendig, false);
+  const w = (r.warnungen as string[]).join(" ");
+  assertEquals(w.includes("2026-08"), true);
+  // Der entscheidende Satz: nicht null, sondern unbekannt.
+  assertEquals(w.includes("unbekannt"), true);
+});
+
+Deno.test("Laufender Monat: eigene, ruhigere Warnung", async () => {
+  // Der laufende Monat kann noch keine Lagergebuehr haben. Das ist kein
+  // Datenproblem, sondern Amazons Abrechnungsrhythmus — und muss anders
+  // klingen als ein abgeschlossener Monat, der fehlt.
+  const laufend = new Date().toISOString().slice(0, 7);
+  const r = await produktUebersicht(client({
+    produkte: [zeile()],
+    lager: [{ monat: laufend, hat_daten: false, betrag_cents: 0 }],
+  }), "t", ZEITRAUM) as any;
+
+  const w = r.warnungen as string[];
+  assertEquals(w.length, 1);
+  assertEquals(w[0].includes("laufende Monat"), true);
+  assertEquals(w[0].includes("Verzug"), false);
+});
+
+Deno.test("Keine Warnung, wenn alle Lagermonate da sind", async () => {
+  const r = await produktUebersicht(client({
+    produkte: [zeile()],
+    lager: [{ monat: "2026-07", hat_daten: true, betrag_cents: 56470 }],
+  }), "t", ZEITRAUM) as any;
+
+  assertEquals(r.lagergebuehr_monate_fehlend, []);
+  assertEquals(r.lagergebuehr_vollstaendig, true);
+  assertEquals(r.warnungen, []);
+});
+
+Deno.test("Warnung: unvollstaendig abgerechnete Bestellungen", async () => {
+  // abdeckung 0.80 heisst: ein Fuenftel der Bestellungen ist noch nicht
+  // abgerechnet. Die Gebuehren sind dort unvollstaendig, nicht niedrig.
+  const r = await produktUebersicht(client({
+    produkte: [zeile({ gebuehren_abdeckung: 0.8 })],
+  }), "t", ZEITRAUM) as any;
+
+  const w = (r.warnungen as string[]).join(" ");
+  assertEquals(w.includes("nicht abgerechnete"), true);
+  assertEquals(r.lagergebuehr_vollstaendig, true);
 });

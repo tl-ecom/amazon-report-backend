@@ -351,7 +351,11 @@ const TOOLS: ToolDef[] = [
       "Per-Produkt-Übersicht je ASIN über einen FREI WÄHLBAREN Zeitraum (bis ~24 Monate): " +
       "Umsatz, Einheiten, Retouren und — falls Einkaufspreise (EK) hinterlegt sind — " +
       "Rohertrag/Rohmarge. Ideal zum Suchen/Filtern nach Produktname oder ASIN über die " +
-      "Historie. Zeitraum via von/bis ('YYYY-MM-DD'), Default letzte 90 Tage.",
+      "Historie. Zeitraum via von/bis ('YYYY-MM-DD'), Default letzte 90 Tage. " +
+      "WICHTIG: Das Feld `warnungen` (Liste von Sätzen) IMMER mit ausgeben, wenn es " +
+      "gefüllt ist — es nennt fehlende Datenstände, etwa Monate ohne Lagergebühren. " +
+      "Fehlende Lagergebühren erscheinen als 0,00 €, sind aber UNBEKANNT; Marge und " +
+      "Gewinn fallen dann zu günstig aus.",
     inputSchema: ZEITRAUM_SCHEMA,
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("produkte", args) : pulseNichtVerfuegbar()),
   },

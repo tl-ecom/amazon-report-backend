@@ -67,7 +67,7 @@ export async function produktUebersicht(
     von = new Date(Date.now() - fenster * 86400000).toISOString().slice(0, 10);
     bis = new Date().toISOString().slice(0, 10);
   }
-  const [{ data, error }, ustFaktor, einstellung, jeAsin, adsRes] = await Promise.all([
+  const [{ data, error }, ustFaktor, einstellung, jeAsin, adsRes, lagerRes] = await Promise.all([
     supabase.rpc("produkt_uebersicht", { p_tenant: tenant_id, p_von: von, p_bis: bis }),
     ladeUstFaktor(supabase, tenant_id),
     supabase.from("tenant_einstellungen").select("umsatzsteuer_prozent")
@@ -77,6 +77,8 @@ export async function produktUebersicht(
     // Werbekosten je ASIN aus der Tagesreihe — derselbe Zeitraum, damit die
     // Kette in einer Zeile aufgeht.
     supabase.rpc("ads_summen", { p_tenant: tenant_id, p_von: von, p_bis: bis }),
+    // Welche Monate des Fensters haben ueberhaupt Lagergebuehren-Daten?
+    supabase.rpc("lager_abdeckung", { p_tenant: tenant_id, p_von: von, p_bis: bis }),
   ]);
   if (error) throw new Error(`produkt_uebersicht: ${error.message}`);
 
@@ -232,6 +234,49 @@ export async function produktUebersicht(
     };
   });
 
+  // Lagergebuehren: Amazon gibt den Bericht mit Verzug heraus. Fehlt ein Monat,
+  // ist die Lagergebuehr fuer ihn UNBEKANNT, nicht null. Das gehoert in die
+  // Ausgabe, sonst rechnet der Leser mit einer Null weiter, die es nicht gibt.
+  const lagerFehlend: string[] = ((lagerRes?.data ?? []) as any[])
+    .filter((z) => !z.hat_daten).map((z) => String(z.monat));
+
+  // Der laufende Monat KANN noch keine Lagergebuehr haben — Amazon rechnet sie
+  // erst nach Monatsende ab. Das ist etwas anderes als ein abgeschlossener
+  // Monat, der fehlt. Beides verfaelscht die Marge, aber nur das zweite ist ein
+  // Datenproblem, und wer beides gleich benennt, wird nach dem dritten Mal
+  // keine Warnung mehr lesen.
+  const laufend = new Date().toISOString().slice(0, 7);
+  const fehlendAbgeschlossen = lagerFehlend.filter((m) => m < laufend);
+  const laufendFehlt = lagerFehlend.includes(laufend);
+
+  const warnungen: string[] = [];
+  if (fehlendAbgeschlossen.length > 0) {
+    warnungen.push(
+      `Für ${fehlendAbgeschlossen.length === 1 ? "den Monat" : "die Monate"} `
+      + `${fehlendAbgeschlossen.join(", ")} liegen noch keine Lagergebühren vor — `
+      + "Amazon gibt den Lagergebührenbericht erst mit einigen Wochen Verzug "
+      + "heraus. Die ausgewiesene Lagergebühr ist für diese Monate NICHT null, "
+      + "sondern unbekannt; Marge und Gewinn fallen dadurch zu günstig aus.",
+    );
+  }
+  if (laufendFehlt) {
+    warnungen.push(
+      `Der laufende Monat (${laufend}) enthält noch keine Lagergebühr — Amazon `
+      + "rechnet sie erst nach Monatsende ab. Auch hier steht 0,00 € für "
+      + "unbekannt, nicht für null.",
+    );
+  }
+  const unvollstaendig = produkte.filter((p: any) =>
+    p.gebuehren_abdeckung != null && p.gebuehren_abdeckung < 0.95);
+  if (unvollstaendig.length > 0) {
+    warnungen.push(
+      `${unvollstaendig.length} Produkt(e) haben noch nicht abgerechnete `
+      + "Bestellungen im Zeitraum. Amazon rechnet mit Verzug ab; die Gebühren "
+      + "sind dort unvollständig, nicht niedrig. Siehe `gebuehren_abdeckung` "
+      + "je Produkt.",
+    );
+  }
+
   const mitGebuehren = produkte.filter((p) => p.gebuehren != null);
   return {
     von, bis,
@@ -248,6 +293,12 @@ export async function produktUebersicht(
       verkaufsgebuehr: p.verkaufsgebuehr, fba_gebuehr: p.fba_gebuehr,
       gebuehren: p.gebuehren, gebuehren_abdeckung: p.gebuehren_abdeckung,
     }))),
+    lagergebuehr_monate_fehlend: lagerFehlend,
+    lagergebuehr_vollstaendig: lagerFehlend.length === 0,
+    // Warnungen fuer den LESER — Mensch wie KI. Ueber MCP oder ChatGPT sieht
+    // niemand die Datenlage, nur die Zahl. Eine fehlende Lagergebuehr steht dort
+    // sonst als 0,00 EUR und liest sich wie "keine Lagerkosten".
+    warnungen,
     hat_gebuehren: mitGebuehren.length > 0,
     summe_gebuehren: mitGebuehren.length ? runde(mitGebuehren.reduce((s, p) => s + (p.gebuehren ?? 0), 0)) : null,
     gebuehren_anteilig: produkte.some((p) => p.gebuehren_anteilig),

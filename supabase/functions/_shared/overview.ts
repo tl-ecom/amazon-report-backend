@@ -313,7 +313,15 @@ export async function pulseOverview(supabase: any, tenant_id: string): Promise<u
     diagnosen_offen: diagRes?.count ?? null,
     pruefungen: hinweise.slice(0, 3),
     top_changes: (changesRes.data ?? []).map(mitTitel),
-    warnungen: sales?.konsistenz && !sales.konsistenz.ok ? ["Sales-Daten: byDate und byAsin weichen ab — Zahlen prüfen."] : [],
+    warnungen: [
+      ...(sales?.konsistenz && !sales.konsistenz.ok
+        ? ["Sales-Daten: byDate und byAsin weichen ab — Zahlen prüfen."]
+        : []),
+      // Aus der Produktsicht durchgereicht: fehlende Lagergebuehren-Monate,
+      // unvollstaendig abgerechnete Bestellungen. Beides macht den Gewinn zu
+      // schoen, und beides sieht man der Zahl selbst nicht an.
+      ...((aktuell?.warnungen ?? []) as string[]),
+    ],
     datenqualitaet: {
       sales_vorhanden: Boolean(sales),
       listings_vorhanden: Boolean(listings),
