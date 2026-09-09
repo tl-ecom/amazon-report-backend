@@ -37,6 +37,7 @@ Ablauf:
         python tools/ads_gebote.py budget-setzen  --firma Vaneja --kampagne 12345 --budget 12 --grund "..."
         python tools/ads_gebote.py zustand-setzen --firma Vaneja --kampagne 12345 --state PAUSED --grund "..."
         python tools/ads_gebote.py sb-budget-setzen --firma Vaneja --kampagne 12345 --budget 17.5 --grund "..."
+        python tools/ads_gebote.py negative-anlegen --firma Vaneja --kampagne 12345 --text "a" --text "b" --grund "..."
      Beide zeigen erst den Ist-Stand, fragen nach (ausser --ja) und schreiben dann.
 
 Wo ausfuehren: auf dem PC (nicht VPS). Braucht nur Python 3 + requests.
@@ -494,12 +495,22 @@ def cmd_keyword_anlegen(args):
 def cmd_negative_anlegen(args):
     tenant, name = firma_id(args.firma)
     cid, kname = _eine_kampagne(tenant, args.kampagne)
+    texte = [t.strip() for t in args.text if t and t.strip()]
     print(f"Firma: {name}   Kampagne: {kname} ({cid})")
-    print(f"Neues Negative (Anzeigengruppe): '{args.text}'  {args.match}")
-    _ja(args, "Negative bei Amazon anlegen?")
-    r = ruf({"action": "negative_anlegen", "company_id": tenant, "campaignId": cid, "adGroupId": args.adgroup,
-             "keywordText": args.text, "matchType": args.match, "bestaetigung": True, "grund": args.grund})
-    print(f"Ergebnis: {r['ergebnis']}   keywordId: {r.get('keywordId')}   " + (f"Detail: {json.dumps(r.get('detail') or r.get('keyword'), ensure_ascii=False)[:600]}" if r['ergebnis'] != 'ok' else ""))
+    print(f"Neue Negatives (Anzeigengruppe, {args.match}): {len(texte)}")
+    for t in texte:
+        print(f"  - {t}")
+    _ja(args, "Negatives bei Amazon anlegen?")
+    # Die Function legt je Aufruf EIN Negative an (mit Duplikat-Schutz); hier nacheinander.
+    zeilen = []
+    for t in texte:
+        r = ruf({"action": "negative_anlegen", "company_id": tenant, "campaignId": cid, "adGroupId": args.adgroup,
+                 "keywordText": t, "matchType": args.match, "bestaetigung": True, "grund": args.grund})
+        detail = "" if r["ergebnis"] == "ok" else json.dumps(r.get("detail") or r.get("keyword"), ensure_ascii=False)[:160]
+        zeilen.append({"text": t, "ergebnis": r["ergebnis"], "keywordId": r.get("keywordId") or "", "detail": detail})
+    ok = sum(z["ergebnis"] == "ok" for z in zeilen)
+    print(f"\nAngelegt: {ok}   uebersprungen: {sum(z['ergebnis'] == 'uebersprungen' for z in zeilen)}   Fehler: {sum(z['ergebnis'] == 'fehler' for z in zeilen)}")
+    tabelle(zeilen, ["text", "ergebnis", "keywordId", "detail"])
 
 
 def cmd_sb_kampagnen(args):
@@ -684,11 +695,11 @@ def main():
     s.add_argument("--gebot", type=float, required=True)
     s.set_defaults(fn=cmd_keyword_anlegen)
 
-    s = sub.add_parser("negative-anlegen", help="SP-Negative (Anzeigengruppe) anlegen")
+    s = sub.add_parser("negative-anlegen", help="SP-Negatives (Anzeigengruppe) anlegen, --text mehrfach moeglich")
     schreib(s)
     s.add_argument("--kampagne", required=True)
     s.add_argument("--adgroup", default=None)
-    s.add_argument("--text", required=True)
+    s.add_argument("--text", action="append", required=True, help="Keyword-Text, mehrfach moeglich")
     s.add_argument("--match", default="NEGATIVE_EXACT", choices=["NEGATIVE_EXACT", "NEGATIVE_PHRASE"])
     s.set_defaults(fn=cmd_negative_anlegen)
 
