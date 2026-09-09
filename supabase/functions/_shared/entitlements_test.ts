@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { RESOURCE_FEATURE, zugriffErlaubt } from "./entitlements.ts";
+import { coachZugriff, RESOURCE_FEATURE, zugriffErlaubt } from "./entitlements.ts";
 
 Deno.test("Admin darf immer (auch ohne Features)", () => {
   assertEquals(zugriffErlaubt("tasks", null, true), true);
@@ -60,4 +60,22 @@ Deno.test("Jede Web-Ressource des Cash-Bereichs ist gegated", () => {
   for (const r of ["cashflow", "stammdaten", "stammdaten_setzen"]) {
     assertEquals(typeof RESOURCE_FEATURE[r], "string", `${r} ist ungegated`);
   }
+});
+
+Deno.test("Kundensicht schraenkt ein und erweitert nie", () => {
+  // Der Coach versetzt sich ausdruecklich in die Teilnehmersicht.
+  assertEquals(coachZugriff(true, undefined), true);
+  assertEquals(coachZugriff(true, false), true);
+  assertEquals(coachZugriff(true, true), false);
+
+  // Der entscheidende Fall: Das Flag kommt aus dem Request-Body. Ein
+  // Teilnehmer, der es setzt (oder weglaesst), gewinnt dadurch NICHTS —
+  // sonst waere es eine Rechteausweitung per Parameter.
+  assertEquals(coachZugriff(false, true), false);
+  assertEquals(coachZugriff(false, false), false);
+  assertEquals(coachZugriff(false, undefined), false);
+
+  // Nur der Wahrheitswert true schaltet um, kein "true", keine 1.
+  assertEquals(coachZugriff(true, "true"), true);
+  assertEquals(coachZugriff(true, 1), true);
 });

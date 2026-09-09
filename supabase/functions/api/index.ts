@@ -26,7 +26,7 @@ import { pulseOverview } from "../_shared/overview.ts";
 import { diagnosenLauf, listeDiagnosen, setzeDiagnoseStatus } from "../_shared/diagnostics.ts";
 import { erstelleTask, listeTasks, setzeTaskStatus, taskAusDiagnose } from "../_shared/tasks.ts";
 import { generiereBrief, listeBriefs, setzeCoachNotiz } from "../_shared/brief.ts";
-import { ladeFeatures, zugriffErlaubt } from "../_shared/entitlements.ts";
+import { coachZugriff, ladeFeatures, zugriffErlaubt } from "../_shared/entitlements.ts";
 import { erstelleNote, listeNotes, loescheNote, setzeNoteSichtbarkeit } from "../_shared/notes.ts";
 import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
 import { adsVerlauf } from "../_shared/ads_verlauf.ts";
@@ -257,11 +257,17 @@ Deno.serve(async (req) => {
   // Feature-Gating: Kunden nur auf die in ihrem Tarif aktiven Ressourcen/Aktionen.
   // Admins/Coaches (is_admin) umgehen das. Serverseitig, damit nicht per Direktaufruf
   // umgehbar — nicht nur im Frontend versteckt.
-  const features = firma.is_admin ? null : await ladeFeatures(service, tenantId);
+  // Kundensicht: Der Coach kann sich ausdruecklich in die Sicht eines
+  // Teilnehmers versetzen — um zu pruefen, was der Tarif wirklich hergibt, und
+  // um Demos nicht mit Funktionen zu zeigen, die der Interessent nicht kauft.
+  // Bewusst NACH der Firmenaufloesung: sonst koennte der Coach die fremde Firma
+  // nicht mehr waehlen und der Modus waere nutzlos. Das Flag schraenkt nur ein.
+  const alsCoach = coachZugriff(firma.is_admin, body?.kundensicht);
+  const features = alsCoach ? null : await ladeFeatures(service, tenantId);
   // Sicht fuer die Ads-Leser: Coach unbegrenzt, Teilnehmer 30 Tage — ausser der
   // Tarif hat ads_historie. Kommt aus Session und Tarif, nie aus den Argumenten.
-  const sicht = { coach: firma.is_admin, historie: features?.ads_historie === true };
-  if (!firma.is_admin) {
+  const sicht = { coach: alsCoach, historie: features?.ads_historie === true };
+  if (!alsCoach) {
     const gateKey = (body?.resource ?? body?.action) as string | undefined;
     if (!zugriffErlaubt(gateKey, features, false)) {
       return json({ error: "In deinem Tarif nicht enthalten.", gesperrt: true }, 403);
@@ -325,7 +331,7 @@ Deno.serve(async (req) => {
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
       if (action === "mcp_token_widerrufen") {
-        const r = await widerrufeMcpToken(service, tenantId, userData.user.id, firma.is_admin, args as any);
+        const r = await widerrufeMcpToken(service, tenantId, userData.user.id, alsCoach, args as any);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
       if (action === "sqp_laden") {
@@ -421,7 +427,7 @@ Deno.serve(async (req) => {
       }
       // Coaching-Notizen schreiben: NUR Coach/Admin (der Coachee liest nur freigegebene).
       if (action === "note_erstellen" || action === "note_sichtbarkeit" || action === "note_loeschen") {
-        if (!firma.is_admin) return json({ error: "Nur der Coach darf Notizen bearbeiten.", gesperrt: true }, 403);
+        if (!alsCoach) return json({ error: "Nur der Coach darf Notizen bearbeiten.", gesperrt: true }, 403);
         if (action === "note_erstellen") {
           const r = await erstelleNote(service, tenantId, userData.user.id, args as any);
           return json({ ok: true, action, tenant_id: tenantId, data: r });
@@ -499,7 +505,7 @@ Deno.serve(async (req) => {
       return json({ ok: true, resource, tenant_id: tenantId, data: await loopDaten(service, tenantId, String((args as any)?.asin ?? "")) });
     }
     if (resource === "mcp_tokens") {
-      return json({ ok: true, resource, tenant_id: tenantId, data: await listeMcpTokens(service, tenantId, userData.user.id, firma.is_admin) });
+      return json({ ok: true, resource, tenant_id: tenantId, data: await listeMcpTokens(service, tenantId, userData.user.id, alsCoach) });
     }
     if (resource === "returns_uebersicht") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await returnsVerlaufUebersicht(service, tenantId, args as any) });
@@ -540,7 +546,7 @@ Deno.serve(async (req) => {
       return json({ ok: true, resource, tenant_id: tenantId, data: await listeBriefs(service, tenantId) });
     }
     if (resource === "coaching_notes") {
-      return json({ ok: true, resource, tenant_id: tenantId, data: await listeNotes(service, tenantId, firma.is_admin) });
+      return json({ ok: true, resource, tenant_id: tenantId, data: await listeNotes(service, tenantId, alsCoach) });
     }
     if (resource === "kpi_verlauf") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await kpiVerlauf(service, tenantId) });

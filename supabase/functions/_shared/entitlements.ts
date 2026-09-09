@@ -147,6 +147,19 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   get_strategy_overview: "strategie",
 };
 
+/**
+ * Gilt fuer diesen Aufruf Coach-Vollzugriff?
+ *
+ * Der Coach kann sich ausdruecklich in die Kundensicht versetzen, um zu sehen,
+ * was ein Teilnehmer des Tarifs sieht. Das Flag kommt aus dem Body und darf
+ * deshalb NUR einschraenken: ein Teilnehmer, der es setzt, gewinnt nichts —
+ * er war ohnehin kein Coach. Andersherum waere es eine Rechteausweitung per
+ * Request-Parameter.
+ */
+export function coachZugriff(isAdmin: boolean, kundensicht: unknown): boolean {
+  return isAdmin && kundensicht !== true;
+}
+
 /** Reine Zugriffsentscheidung. Admins immer erlaubt; ungelistete Keys immer erlaubt;
  * sonst muss das Feature im Tarif aktiv sein. */
 export function zugriffErlaubt(
