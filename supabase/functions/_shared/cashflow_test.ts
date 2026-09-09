@@ -288,3 +288,41 @@ Deno.test("median: gerade und ungerade Anzahl, leer ergibt null", () => {
   assertEquals(median([4, 1, 2, 3]), 2.5);
   assertEquals(median([]), null);
 });
+
+Deno.test("Stammdaten: gelesene Feldnamen sind identisch mit den geschriebenen", async () => {
+  // Zwei Felder hiessen beim Lesen anders als beim Schreiben
+  // (`dauerfristverlaengerung` statt `ust_dauerfristverlaengerung`, `oss` statt
+  // `oss_teilnahme`). Folge: das Einstellungsformular fand seinen eigenen
+  // gespeicherten Wert nicht wieder und zeigte OSS nach jedem Neuladen als
+  // "nicht angegeben". Ein Test auf die NAMEN, weil der Fehler genau dort sass
+  // und keine Rechnung betraf.
+  const { cashflowUebersicht } = await import("./cashflow.ts");
+  const client = {
+    from: () => {
+      const b: any = {
+        select: () => b, eq: () => b, maybeSingle: () => b,
+        then: (res: any) => Promise.resolve({
+          data: {
+            umsatzsteuerpflichtig: true, vorsteuerabzug: true,
+            ust_voranmeldung: "monatlich", ust_dauerfristverlaengerung: false,
+            ermaessigter_satz: null, oss_teilnahme: true, pan_eu: false,
+            lager_ausland: null, lager_laender: null,
+            stammdaten_bestaetigt_am: "2026-09-10T00:00:00Z", firmensitz_land: "DE",
+          },
+          error: null,
+        }).then(res),
+      };
+      return b;
+    },
+    rpc: () => Promise.resolve({ data: [], error: null }),
+  } as any;
+
+  const r = await cashflowUebersicht(client, "t") as any;
+  const s = r.stammdaten;
+  assertEquals(s.ust_dauerfristverlaengerung, false);
+  assertEquals(s.oss_teilnahme, true);
+  assertEquals(s.ust_voranmeldung, "monatlich");
+  // Die alten, abweichenden Namen darf es nicht mehr geben.
+  assertEquals("dauerfristverlaengerung" in s, false);
+  assertEquals("oss" in s, false);
+});

@@ -659,10 +659,15 @@ export async function cashflowUebersicht(
     stammdaten: {
       umsatzsteuerpflichtig: stamm.umsatzsteuerpflichtig ?? null,
       vorsteuerabzug: abzug,
+      // Die Namen sind bewusst IDENTISCH mit denen, die setzeStammdaten
+      // erwartet. Vorher hiessen zwei Felder beim Lesen anders als beim
+      // Schreiben (`dauerfristverlaengerung` / `oss`), und das Formular fand
+      // seinen eigenen gespeicherten Wert nicht wieder: OSS stand nach dem
+      // Speichern und Neuladen erneut auf "nicht angegeben".
       ust_voranmeldung: stamm.ust_voranmeldung ?? null,
-      dauerfristverlaengerung: stamm.ust_dauerfristverlaengerung ?? null,
+      ust_dauerfristverlaengerung: stamm.ust_dauerfristverlaengerung ?? null,
       ermaessigter_satz: stamm.ermaessigter_satz ?? null,
-      oss: stamm.oss_teilnahme ?? null,
+      oss_teilnahme: stamm.oss_teilnahme ?? null,
       pan_eu: stamm.pan_eu ?? null,
       lager_ausland: stamm.lager_ausland ?? null,
       lager_laender: stamm.lager_laender ?? null,
