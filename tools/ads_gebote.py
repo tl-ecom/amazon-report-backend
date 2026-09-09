@@ -38,6 +38,8 @@ Ablauf:
         python tools/ads_gebote.py zustand-setzen --firma Vaneja --kampagne 12345 --state PAUSED --grund "..."
         python tools/ads_gebote.py sb-budget-setzen --firma Vaneja --kampagne 12345 --budget 17.5 --grund "..."
         python tools/ads_gebote.py negative-anlegen --firma Vaneja --kampagne 12345 --text "a" --text "b" --grund "..."
+        python tools/ads_gebote.py negative-asins --firma Vaneja --kampagne 12345
+        python tools/ads_gebote.py negative-asin-anlegen --firma Vaneja --kampagne 12345 --asin B0XXXXXXXX --asin B0YYYYYYYY --grund "..."
      Beide zeigen erst den Ist-Stand, fragen nach (ausser --ja) und schreiben dann.
 
 Wo ausfuehren: auf dem PC (nicht VPS). Braucht nur Python 3 + requests.
@@ -513,6 +515,32 @@ def cmd_negative_anlegen(args):
     tabelle(zeilen, ["text", "ergebnis", "keywordId", "detail"])
 
 
+def cmd_negative_asins(args):
+    tenant, name = firma_id(args.firma)
+    ids, namen, kname = kampagnen_ids(tenant, args.kampagne, ["ENABLED", "PAUSED"])
+    d = ruf({"action": "negative_targets", "company_id": tenant, "kampagnen": ids})
+    for n in d["negative_targets"]:
+        n["kampagne"] = kname.get(n["campaignId"], n["campaignId"])
+    print(f"Firma: {name}   Kampagnen: {', '.join(namen)}   Negativ-Targets: {len(d['negative_targets'])}")
+    tabelle(sorted(d["negative_targets"], key=lambda n: (n["kampagne"], n["text"])), ["kampagne", "adGroupId", "text", "state", "targetId"])
+
+
+def cmd_negative_asin_anlegen(args):
+    tenant, name = firma_id(args.firma)
+    cid, kname = _eine_kampagne(tenant, args.kampagne)
+    asins = sorted({a.strip().upper() for a in args.asin if a and a.strip()})
+    print(f"Firma: {name}   Kampagne: {kname} ({cid})")
+    print(f"Neue Negativ-ASINs (Anzeigengruppe): {len(asins)}  {', '.join(asins)}")
+    _ja(args, "Negativ-ASINs bei Amazon anlegen?")
+    r = ruf({"action": "negative_target_anlegen", "company_id": tenant, "campaignId": cid, "adGroupId": args.adgroup,
+             "asins": asins, "bestaetigung": True, "grund": args.grund})
+    print(f"Angelegt: {r['angelegt']}   uebersprungen: {r['uebersprungen']}   Fehler: {r['fehler']}   (Anzeigengruppe {r.get('adGroupId')})")
+    for e in r["ergebnisse"]:
+        if e.get("detail") and not isinstance(e["detail"], str):
+            e["detail"] = json.dumps(e["detail"], ensure_ascii=False)[:160]
+    tabelle(r["ergebnisse"], ["asin", "ergebnis", "targetId", "detail"])
+
+
 def cmd_sb_kampagnen(args):
     tenant, name = firma_id(args.firma)
     d = ruf({"action": "sb_kampagnen", "company_id": tenant, "kampagnen": args.kampagne or [], "status": args.status.split(",")})
@@ -702,6 +730,18 @@ def main():
     s.add_argument("--text", action="append", required=True, help="Keyword-Text, mehrfach moeglich")
     s.add_argument("--match", default="NEGATIVE_EXACT", choices=["NEGATIVE_EXACT", "NEGATIVE_PHRASE"])
     s.set_defaults(fn=cmd_negative_anlegen)
+
+    s = sub.add_parser("negative-asins", help="SP-Negativ-Produkt-Targets (ASIN) ansehen")
+    s.add_argument("--firma", required=True)
+    s.add_argument("--kampagne", action="append", required=True)
+    s.set_defaults(fn=cmd_negative_asins)
+
+    s = sub.add_parser("negative-asin-anlegen", help="SP-Negativ-ASINs (Anzeigengruppe) anlegen, --asin mehrfach")
+    schreib(s)
+    s.add_argument("--kampagne", required=True, help="campaignId oder eindeutiger Namensteil")
+    s.add_argument("--adgroup", default=None, help="adGroupId, noetig wenn die Kampagne mehrere hat")
+    s.add_argument("--asin", action="append", required=True, help="ASIN, mehrfach moeglich")
+    s.set_defaults(fn=cmd_negative_asin_anlegen)
 
     s = sub.add_parser("sb-kampagnen", help="Sponsored-Brands-Kampagnen ansehen")
     s.add_argument("--firma", required=True)

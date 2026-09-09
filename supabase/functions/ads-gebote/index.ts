@@ -24,6 +24,10 @@
 //                     Nur mit bestaetigung=true. Spur in ads_aenderungen_log.
 //   sb_budget_setzen  Tagesbudget einer SB-Kampagne setzen {campaignId, budget}.
 //                     Nur mit bestaetigung=true. Spur in ads_aenderungen_log.
+//   negative_targets         Negativ-Produkt-Targets (ASIN) der Kampagnen lesen {kampagnen[]}
+//   negative_target_anlegen  Negativ-ASINs auf Anzeigengruppenebene anlegen
+//                            {campaignId, adGroupId?, asins[]}. Nur mit bestaetigung=true.
+//                            Duplikat-Schutz, Spur in ads_aenderungen_log.
 //
 // Spec (Advertising API v3, Sponsored Products, verifiziert 2026-09):
 //   POST /sp/campaigns/list   Content-Type/Accept application/vnd.spCampaign.v3+json
@@ -34,6 +38,8 @@
 //   PUT  /sp/targets          { targetingClauses: [{ targetId, bid }] }
 //   PUT  /sp/campaigns        { campaigns: [{ campaignId, budget: { budget, budgetType } | state }] }
 //   PUT  /sb/v4/campaigns     { campaigns: [{ campaignId, budget, budgetType | state }] }  (SB: budget flach)
+//   POST /sp/negativeTargets/list  application/vnd.spNegativeTargetingClause.v3+json
+//   POST /sp/negativeTargets       { negativeTargetingClauses: [{ campaignId, adGroupId, state, expression: [{ type: "ASIN_SAME_AS", value }] }] }
 //   Listen paginieren über nextToken, max 1000 je Seite. Updates max 1000 je Aufruf.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -53,6 +59,7 @@ const CT = {
   target: "application/vnd.spTargetingClause.v3+json",
   negKeyword: "application/vnd.spNegativeKeyword.v3+json",
   campNegKeyword: "application/vnd.spCampaignNegativeKeyword.v3+json",
+  negTarget: "application/vnd.spNegativeTargetingClause.v3+json",
   sbCampaign: "application/vnd.sbcampaignresource.v4+json",
   sbAdGroup: "application/vnd.sbadgroupresource.v4+json",
   sbNegKeyword: "application/vnd.sbnegativekeyword.v3+json",     // GET /sb/negativeKeywords (Accept)
@@ -354,6 +361,51 @@ Deno.serve(async (req) => {
       return json({ ergebnis: e.ok ? "ok" : "fehler", keywordId: e.id ?? null, adGroupId: agId.id, detail: e.ok ? null : e.detail, ...(logErr ? { log_fehler: logErr } : {}) });
     }
 
+    // SP-Negativ-Produkt-Targets (Anzeigengruppenebene) lesen
+    if (action === "negative_targets") {
+      const ids = liste(body.kampagnen, []);
+      if (!ids.length) return json({ error: "kampagnen fehlt." }, 400);
+      const r = await ads.alle("/sp/negativeTargets/list", CT.negTarget, { campaignIdFilter: { include: ids } }, "negativeTargetingClauses");
+      if (!r.ok) return json({ error: "Negativ-Targets laden fehlgeschlagen", detail: r.detail }, 502);
+      return json({ tenant_id: tenantId, negative_targets: r.daten.map((x: any) => ({
+        targetId: String(x.targetId), campaignId: String(x.campaignId), adGroupId: String(x.adGroupId),
+        text: targetText(x.expression), state: x.state,
+      })) });
+    }
+
+    // SP-Negativ-ASINs anlegen: {campaignId, adGroupId?, asins: [..]}
+    if (action === "negative_target_anlegen") {
+      if (!bestaetigt()) return json({ error: "bestaetigung=true fehlt. Es wurde NICHTS geschrieben." }, 400);
+      const cid = str(body.campaignId);
+      const asins = liste(body.asins, []).map((a) => a.toUpperCase()).filter((a, i, arr) => arr.indexOf(a) === i);
+      const ungueltig = asins.filter((a) => !/^[A-Z0-9]{10}$/.test(a));
+      if (!cid || !asins.length) return json({ error: "campaignId und asins nötig." }, 400);
+      if (ungueltig.length) return json({ error: `Ungültige ASIN(s): ${ungueltig.join(", ")}` }, 400);
+      const agId = await ads.anzeigengruppe(cid, str(body.adGroupId));
+      if (!agId.ok) return json({ error: agId.detail }, 400);
+      const vorhanden = await ads.alle("/sp/negativeTargets/list", CT.negTarget, { campaignIdFilter: { include: [cid] } }, "negativeTargetingClauses");
+      if (!vorhanden.ok) return json({ error: "Negativ-Targets prüfen fehlgeschlagen", detail: vorhanden.detail }, 502);
+      const alt = new Set(vorhanden.daten
+        .filter((t: any) => String(t.adGroupId) === agId.id && t.state !== "ARCHIVED")
+        .flatMap((t: any) => (Array.isArray(t.expression) ? t.expression : []).map((e: any) => String(e.value ?? "").toUpperCase())));
+      const neu = asins.filter((a) => !alt.has(a));
+      const dup = asins.filter((a) => alt.has(a));
+      const ergebnisse: any[] = dup.map((a) => ({ asin: a, ergebnis: "uebersprungen", detail: "existiert schon", targetId: null }));
+      if (neu.length) {
+        const r = await ads.post("/sp/negativeTargets", CT.negTarget, "negativeTargetingClauses",
+          neu.map((a) => ({ campaignId: cid, adGroupId: agId.id, state: "ENABLED", expression: [{ type: "ASIN_SAME_AS", value: a }] })));
+        neu.forEach((a, i) => {
+          const e = r[i] ?? { ok: false, detail: "keine Antwort" };
+          ergebnisse.push({ asin: a, ergebnis: e.ok ? "ok" : "fehler", targetId: e.ok ? (e.id ?? null) : null, detail: e.ok ? null : e.detail });
+        });
+      }
+      const logErr = await spur(ergebnisse.map((e) => ({ aktion: "negative_target_anlegen", objekt_art: "negative_target", objekt_id: e.targetId ?? null, campaign_id: cid,
+        nachher: { adGroupId: agId.id, expression: [{ type: "ASIN_SAME_AS", value: e.asin }] }, ergebnis: e.ergebnis,
+        detail: e.detail ? String(typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail)).slice(0, 1000) : null })));
+      return json({ campaignId: cid, adGroupId: agId.id, angelegt: ergebnisse.filter((e) => e.ergebnis === "ok").length, uebersprungen: dup.length,
+        fehler: ergebnisse.filter((e) => e.ergebnis === "fehler").length, ergebnisse, ...(logErr ? { log_fehler: logErr } : {}) });
+    }
+
     // Sponsored Brands: Kampagnen lesen
     if (action === "sb_kampagnen") {
       const ids = liste(body.kampagnen, []);
@@ -484,7 +536,7 @@ Deno.serve(async (req) => {
       return json({ campaignId: cid, name: c.name, vorher: c.state, nachher: state, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : e.detail, ...(logErr ? { log_fehler: logErr } : {}) });
     }
 
-    return json({ error: "Unbekannte action. Erlaubt: firmen, kampagnen, gebote, vorschau, pruefen, setzen, platzierung, platzierung_setzen, budget_setzen, kampagne_zustand, negatives, keyword_anlegen, negative_anlegen, sb_kampagnen, sb_kampagne_zustand, sb_budget_setzen, sb_negatives, sb_negatives_anlegen" }, 400);
+    return json({ error: "Unbekannte action. Erlaubt: firmen, kampagnen, gebote, vorschau, pruefen, setzen, platzierung, platzierung_setzen, budget_setzen, kampagne_zustand, negatives, keyword_anlegen, negative_anlegen, negative_targets, negative_target_anlegen, sb_kampagnen, sb_kampagne_zustand, sb_budget_setzen, sb_negatives, sb_negatives_anlegen" }, 400);
   } catch (e) {
     return json({ error: "Ausnahme", detail: String(e) }, 500);
   }
