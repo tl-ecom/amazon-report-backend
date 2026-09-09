@@ -283,3 +283,61 @@ export function umsatzsteuerZahllast(
     hinweise,
   };
 }
+
+/**
+ * Welcher Zeitraum wird mit der Voranmeldung am `faellig_am` angemeldet?
+ *
+ * Nicht der laufende Monat. Die Anmeldung am 10.09. betrifft den AUGUST — und
+ * genau das ging beim ersten Bau schief: der Kalender nahm den jüngsten Monat
+ * mit Daten, also den angebrochenen September, und wies 0,00 € aus. Eine Null,
+ * wo 5.450 € fällig sind, ist schlimmer als gar keine Zahl.
+ *
+ * Mit Dauerfristverlängerung verschiebt sich der Zeitraum um einen weiteren
+ * Monat: die Anmeldung am 10.10. betrifft dann ebenfalls den August.
+ */
+export function angemeldeteMonate(
+  faellig_am: string, rhythmus: string, dauerfrist: boolean,
+): string[] {
+  const j = Number(faellig_am.slice(0, 4));
+  const m = Number(faellig_am.slice(5, 7)) - 1; // 0-basiert
+  const versatz = dauerfrist ? 2 : 1;
+
+  const alsText = (jahr: number, monat: number) => {
+    const d = new Date(Date.UTC(jahr, monat, 1));
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  };
+
+  if (rhythmus === "monatlich") return [alsText(j, m - versatz)];
+  if (rhythmus === "vierteljaehrlich") {
+    // Der Termin liegt im Monat nach Quartalsende (plus Verlängerung). Von dort
+    // aus rückwärts auf das Quartal, das gemeldet wird.
+    const quartalsEnde = m - versatz;
+    return [quartalsEnde - 2, quartalsEnde - 1, quartalsEnde].map((x) => alsText(j, x));
+  }
+  if (rhythmus === "jaehrlich") {
+    const jahr = j - 1;
+    return Array.from({ length: 12 }, (_, i) => alsText(jahr, i));
+  }
+  return [];
+}
+
+/**
+ * Zahllast für den Zeitraum, der als Nächstes angemeldet wird.
+ *
+ * null, wenn für den Zeitraum keine Daten vorliegen — dann steht im Kalender
+ * ein Termin ohne Betrag statt eines Betrags, den niemand geprüft hat.
+ */
+export function zahllastFuerTermin(
+  monate: UstMonat[], faellig_am: string | null,
+  rhythmus: string | null, dauerfrist: boolean,
+): { betrag: number | null; zeitraum: string[] } {
+  if (!faellig_am || !rhythmus) return { betrag: null, zeitraum: [] };
+  const gesucht = angemeldeteMonate(faellig_am, rhythmus, dauerfrist);
+  const treffer = monate.filter((m) => gesucht.includes(m.monat));
+  const mitZahl = treffer.filter((m) => m.zahllast_aus_amazon !== null);
+  if (mitZahl.length === 0) return { betrag: null, zeitraum: gesucht };
+  return {
+    betrag: r2(mitZahl.reduce((s, m) => s + (m.zahllast_aus_amazon ?? 0), 0)),
+    zeitraum: gesucht,
+  };
+}

@@ -5,7 +5,10 @@
 // Bestellgebühren brutto, 257,69 € separat ausgewiesene Vorsteuer.
 
 import { assertEquals } from "jsr:@std/assert@1";
-import { marktplatzLand, umsatzsteuerZahllast, type UstZeile } from "./cashflow_ust.ts";
+import {
+  angemeldeteMonate, marktplatzLand, umsatzsteuerZahllast, zahllastFuerTermin,
+  type UstZeile,
+} from "./cashflow_ust.ts";
 
 const AUGUST: UstZeile[] = [
   {
@@ -194,4 +197,55 @@ Deno.test("Je Marktplatz: die Summe der Inlandszeilen ergibt die Zahllast", () =
   const inland = m.je_marktplatz.filter((x) => x.inland);
   const summe = inland.reduce((s, x) => s + (x.zahllast_aus_amazon ?? 0), 0);
   assertEquals(Math.round(summe * 100) / 100, m.zahllast_aus_amazon);
+});
+
+// --- Welcher Zeitraum wird angemeldet? --------------------------------------
+//
+// Live aufgefallen: der Kalender wies für den 10.09. eine Umsatzsteuer von
+// 0,00 € aus. Genommen wurde der jüngste Monat mit Daten — der angebrochene
+// September. Angemeldet wird an diesem Termin aber der AUGUST, und dort sind
+// 5.450 € fällig. Eine Null an dieser Stelle ist schlimmer als keine Zahl.
+
+Deno.test("Anmeldezeitraum: monatlich meldet den Vormonat", () => {
+  assertEquals(angemeldeteMonate("2026-09-10", "monatlich", false), ["2026-08"]);
+  // Über den Jahreswechsel.
+  assertEquals(angemeldeteMonate("2027-01-10", "monatlich", false), ["2026-12"]);
+});
+
+Deno.test("Anmeldezeitraum: Dauerfristverlängerung schiebt einen Monat weiter", () => {
+  assertEquals(angemeldeteMonate("2026-10-10", "monatlich", true), ["2026-08"]);
+});
+
+Deno.test("Anmeldezeitraum: vierteljährlich meldet drei Monate", () => {
+  assertEquals(angemeldeteMonate("2026-10-10", "vierteljaehrlich", false),
+    ["2026-07", "2026-08", "2026-09"]);
+});
+
+Deno.test("Zahllast zum Termin: nimmt den angemeldeten Monat, nicht den jüngsten", () => {
+  const monate = umsatzsteuerZahllast([
+    ...AUGUST,
+    // Der laufende September, praktisch leer — genau die Falle.
+    {
+      monat: "2026-09", marktplatz: "Amazon.de", vereinnahmt_cents: 5,
+      einbehalten_cents: 0, vorsteuer_ausgewiesen_cents: 0, gebuehren_brutto_cents: 0,
+    },
+  ], PROFIL).monate;
+
+  const r = zahllastFuerTermin(monate, "2026-09-10", "monatlich", false);
+  assertEquals(r.zeitraum, ["2026-08"]);
+  assertEquals(r.betrag, 5452.53);
+});
+
+Deno.test("Zahllast zum Termin: ohne Daten für den Zeitraum bleibt der Betrag offen", () => {
+  const monate = umsatzsteuerZahllast(AUGUST, PROFIL).monate;
+  // Für den Juli liegen keine Daten vor.
+  const r = zahllastFuerTermin(monate, "2026-08-10", "monatlich", false);
+  assertEquals(r.zeitraum, ["2026-07"]);
+  assertEquals(r.betrag, null);
+});
+
+Deno.test("Zahllast zum Termin: ohne Rhythmus keine Zuordnung", () => {
+  const monate = umsatzsteuerZahllast(AUGUST, PROFIL).monate;
+  assertEquals(zahllastFuerTermin(monate, "2026-09-10", null, false).betrag, null);
+  assertEquals(zahllastFuerTermin(monate, null, "monatlich", false).betrag, null);
 });

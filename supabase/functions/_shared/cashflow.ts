@@ -16,7 +16,8 @@
 // koennen. Die DB-Schicht steht ganz unten.
 
 import { ladeUstFaktor } from "./ust_lauf.ts";
-import { umsatzsteuerZahllast, type UstZeile } from "./cashflow_ust.ts";
+import { umsatzsteuerZahllast, zahllastFuerTermin, type UstZeile }
+  from "./cashflow_ust.ts";
 import { zahlungsplan } from "./cashflow_plan.ts";
 
 // --- Bausteine --------------------------------------------------------------
@@ -596,7 +597,15 @@ export async function cashflowUebersicht(
   // Zahlungskalender: die gemessenen Muster in die naechsten Wochen
   // fortgeschrieben. Der Betrag der Umsatzsteuer kommt aus dem juengsten Monat,
   // fuer den es Daten gibt — das ist der, der als naechstes faellig wird.
-  const ustMonat = ust.monate.find((m) => m.zahllast_aus_amazon !== null) ?? null;
+  // Die Anmeldung am 10.09. betrifft den AUGUST, nicht den laufenden Monat.
+  // Der juengste Monat mit Daten waere hier der angebrochene September gewesen
+  // — der Kalender wies deshalb 0,00 € aus, wo 5.450 € faellig sind.
+  const ustFaellig = zahllastFuerTermin(
+    ust.monate,
+    ust.faellig_am,
+    stamm.ust_voranmeldung ?? null,
+    stamm.ust_dauerfristverlaengerung === true,
+  );
   const plan = zahlungsplan({
     rhythmus,
     typische_auszahlung: typischeAuszahlung,
@@ -604,7 +613,8 @@ export async function cashflowUebersicht(
     werbung,
     umsatzsteuer: {
       faellig_am: ust.faellig_am,
-      betrag: ustMonat?.zahllast_aus_amazon ?? null,
+      betrag: ustFaellig.betrag,
+      zeitraum: ustFaellig.zeitraum,
     },
     tage: 60,
   });

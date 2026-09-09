@@ -89,8 +89,12 @@ export interface PlanEingabe {
   typische_auszahlung: number | null;
   termine: TerminMuster[];
   werbung: WerbungMuster;
-  /** Fälligkeit und Betrag der Umsatzsteuer, falls beides bekannt ist. */
-  umsatzsteuer: { faellig_am: string | null; betrag: number | null };
+  /**
+   * Fälligkeit und Betrag der Umsatzsteuer. `zeitraum` nennt die Monate, die
+   * mit diesem Termin angemeldet werden — ohne die Angabe liest sich der Betrag
+   * wie der des laufenden Monats.
+   */
+  umsatzsteuer: { faellig_am: string | null; betrag: number | null; zeitraum?: string[] };
   tage?: number;
 }
 
@@ -205,9 +209,16 @@ export function zahlungsplan(e: PlanEingabe, heute = new Date()): Zahlungsplan {
         bezeichnung: "Umsatzsteuer-Voranmeldung",
         betrag: e.umsatzsteuer.betrag === null ? null : -Math.abs(e.umsatzsteuer.betrag),
         sicher: false,
-        grundlage: "Abgabetermin aus dem hinterlegten Rhythmus. Betrag aus den "
-          + "Amazon-Daten des letzten abgerechneten Monats — Vorsteuer aus "
-          + "Wareneinkauf und Betriebsausgaben fehlt, die echte Zahllast ist niedriger.",
+        grundlage: "Abgabetermin aus dem hinterlegten Rhythmus. "
+          + (e.umsatzsteuer.zeitraum?.length
+            ? `Angemeldet wird ${e.umsatzsteuer.zeitraum.join(", ")}. `
+            : "")
+          + (e.umsatzsteuer.betrag === null
+            ? "Für diesen Zeitraum liegen noch keine Amazon-Daten vor — der Termin "
+              + "steht, der Betrag ist offen."
+            : "Betrag aus den Amazon-Daten dieses Zeitraums; Vorsteuer aus "
+              + "Wareneinkauf und Betriebsausgaben fehlt, die echte Zahllast ist "
+              + "niedriger."),
       });
     }
   } else {
