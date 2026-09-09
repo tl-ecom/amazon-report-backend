@@ -17,6 +17,7 @@
 
 import { ladeUstFaktor } from "./ust_lauf.ts";
 import { umsatzsteuerZahllast, type UstZeile } from "./cashflow_ust.ts";
+import { zahlungsplan } from "./cashflow_plan.ts";
 
 // --- Bausteine --------------------------------------------------------------
 
@@ -576,6 +577,22 @@ export async function cashflowUebersicht(
     oss: stamm.oss_teilnahme ?? null,
   });
 
+  // Zahlungskalender: die gemessenen Muster in die naechsten Wochen
+  // fortgeschrieben. Der Betrag der Umsatzsteuer kommt aus dem juengsten Monat,
+  // fuer den es Daten gibt — das ist der, der als naechstes faellig wird.
+  const ustMonat = ust.monate.find((m) => m.zahllast_aus_amazon !== null) ?? null;
+  const plan = zahlungsplan({
+    rhythmus,
+    typische_auszahlung: typischeAuszahlung,
+    termine,
+    werbung,
+    umsatzsteuer: {
+      faellig_am: ust.faellig_am,
+      betrag: ustMonat?.zahllast_aus_amazon ?? null,
+    },
+    tage: 60,
+  });
+
   const warnungen: string[] = [];
   if (rhythmus.belege < 3) {
     warnungen.push(
@@ -587,6 +604,7 @@ export async function cashflowUebersicht(
   if (gebunden.hinweis) warnungen.push(gebunden.hinweis);
   warnungen.push(...vst.hinweise);
   warnungen.push(...ust.hinweise);
+  warnungen.push(...plan.hinweise);
   if (stamm.stammdaten_bestaetigt_am == null) {
     warnungen.push(
       "Die steuerlichen Stammdaten wurden noch nicht bestätigt. Was dort fehlt, "
@@ -610,6 +628,10 @@ export async function cashflowUebersicht(
         : null,
       naechste_termine: rhythmus.naechste,
     },
+
+    // Der Kalender steht bewusst ganz oben in der Ausgabe: "wann bewegt sich
+    // Geld" ist die Frage, die man zuerst hat.
+    kalender: plan,
 
     einbehalt: reserve,
     gebundenes_geld: gebunden,

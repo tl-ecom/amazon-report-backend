@@ -35,6 +35,24 @@ export interface UstZeile {
   gebuehren_brutto_cents: number;
 }
 
+/**
+ * Ein Marktplatz eines Monats, vollstaendig durchgerechnet.
+ *
+ * Auslandsumsaetze zu einer Summe zu addieren hilft niemandem: jedes Land hat
+ * seine eigene Meldung (OSS oder lokale Registrierung), und wer in Frankreich
+ * meldet, braucht die franzoesische Zahl, nicht die Summe aus vier Laendern.
+ */
+export interface UstMarktplatz {
+  marktplatz: string;
+  /** ISO-Land, aus der Domain abgeleitet. null = nicht zuordenbar. */
+  land: string | null;
+  inland: boolean;
+  vereinnahmt: number;
+  amazon_abgefuehrt: number;
+  vorsteuer: number | null;
+  zahllast_aus_amazon: number | null;
+}
+
 export interface UstMonat {
   monat: string;
   vereinnahmt: number;
@@ -48,6 +66,15 @@ export interface UstMonat {
   ausland_summe: number;
   /** Von der Auslandssumme hat Amazon diesen Teil selbst abgeführt. */
   ausland_abgefuehrt: number;
+  /**
+   * Vorsteuer aus Gebühren AUSLÄNDISCHER Marktplätze. Gehört nicht in die
+   * deutsche Voranmeldung — steht hier nur, damit der Unterschied zur
+   * Gesamt-Vorsteuer nachvollziehbar ist und niemand zwei Zahlen vergleicht,
+   * die verschiedene Grundmengen haben.
+   */
+  ausland_vorsteuer: number | null;
+  /** Jeder Marktplatz einzeln — Inland und Ausland, ohne Vermischung. */
+  je_marktplatz: UstMarktplatz[];
 }
 
 export interface Umsatzsteuer {
@@ -134,6 +161,43 @@ export function umsatzsteuerZahllast(
         ? 0
         : (eingerechnet === null ? null : r2(ausgewiesen + eingerechnet));
 
+      // Derselbe Rechenweg wie im Inland, nur fuer die uebrigen Marktplaetze.
+      const auslandBrutto = Math.abs(summe(ausland, "gebuehren_brutto_cents"));
+      const auslandAusgewiesen = Math.abs(summe(ausland, "vorsteuer_ausgewiesen_cents")) / 100;
+      const auslandVorsteuer = profil.abzugsberechtigt === false
+        ? 0
+        : (profil.faktor === null
+          ? null
+          : r2(auslandAusgewiesen + (auslandBrutto - auslandBrutto / profil.faktor) / 100));
+
+      // Derselbe Rechenweg je einzelnem Marktplatz. Die RPC liefert genau eine
+      // Zeile je (Monat, Marktplatz), deshalb ist hier keine Gruppierung noetig.
+      const jeMarktplatz: UstMarktplatz[] = liste.map((z) => {
+        const brutto = Math.abs(Number(z.gebuehren_brutto_cents) || 0);
+        const ausgew = Math.abs(Number(z.vorsteuer_ausgewiesen_cents) || 0) / 100;
+        const vst = profil.abzugsberechtigt === false
+          ? 0
+          : (profil.faktor === null
+            ? null
+            : r2(ausgew + (brutto - brutto / profil.faktor) / 100));
+        const ein = (Number(z.vereinnahmt_cents) || 0) / 100;
+        const abg = Math.abs(Number(z.einbehalten_cents) || 0) / 100;
+        const l = marktplatzLand(z.marktplatz);
+        return {
+          marktplatz: z.marktplatz,
+          land: l,
+          inland: l === null || l === profil.land,
+          vereinnahmt: r2(ein),
+          amazon_abgefuehrt: r2(abg),
+          vorsteuer: vst,
+          zahllast_aus_amazon: vst === null ? null : r2(ein - abg - vst),
+        };
+      }).sort((a, b) =>
+        // Inland zuerst, danach nach Umsatzsteuer absteigend: die Reihenfolge,
+        // in der man sie braucht.
+        (a.inland === b.inland ? 0 : a.inland ? -1 : 1) || (b.vereinnahmt - a.vereinnahmt)
+      );
+
       const auslandListe = ausland
         .map((z) => ({
           marktplatz: z.marktplatz,
@@ -156,6 +220,8 @@ export function umsatzsteuerZahllast(
         ausland: auslandListe,
         ausland_summe: r2(auslandListe.reduce((s, a) => s + a.vereinnahmt, 0)),
         ausland_abgefuehrt: r2(auslandListe.reduce((s, a) => s + a.amazon_abgefuehrt, 0)),
+        ausland_vorsteuer: auslandVorsteuer,
+        je_marktplatz: jeMarktplatz,
       };
     });
 

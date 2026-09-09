@@ -365,7 +365,12 @@ const TOOLS: ToolDef[] = [
       "bucht Amazon Lagergebühr und Kontogebühr ab, nach welchem Muster werden " +
       "Werbekosten abgezogen (Termin oder Rechnungsschwelle), wie viel " +
       "Vorsteuer steckt in den Gebühren, und wie hoch ist die " +
-      "Umsatzsteuer-Zahllast je Monat samt Fälligkeit. " +
+      "Umsatzsteuer-Zahllast je Monat samt Fälligkeit — je Marktplatz getrennt, " +
+      "weil jedes Land seine eigene Meldung hat. Dazu ein KALENDER der " +
+      "nächsten 60 Tage im Feld `kalender`: welche Zahlung wann erwartet wird, " +
+      "mit Wochensummen. Jede Position trägt `sicher` und `grundlage` — die " +
+      "TERMINE sind gemessen, die BETRÄGE fortgeschrieben und nie zugesagt. " +
+      "Das gehört in jede Antwort, die eine dieser Zahlen nennt. " +
       "Zur Zahllast IMMER dazusagen, dass sie nur Amazon-Daten enthält: " +
       "Vorsteuer aus Wareneinkauf und Betriebsausgaben fehlt, die echte " +
       "Zahllast liegt niedriger. Sie ist keine Grundlage für die Voranmeldung. " +

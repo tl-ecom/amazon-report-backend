@@ -146,3 +146,52 @@ Deno.test("marktplatzLand: die längere Endung gewinnt", () => {
   assertEquals(marktplatzLand("Non-Amazon DE"), null);
   assertEquals(marktplatzLand("unbekannt"), null);
 });
+
+Deno.test("Inlands- und Auslands-Vorsteuer ergeben zusammen die Gesamtsumme", () => {
+  // Aufgefallen beim Lesen der Oberfläche: die Zahllast-Tabelle wies 3.632,09 €
+  // Vorsteuer aus, die Vorsteuer-Tabelle darunter 3.775,56 €. Beide Zahlen
+  // waren richtig — die eine rechnet inländisch, die andere über alle
+  // Marktplätze. Aber beide hießen "Vorsteuer", und die Differenz von 143,47 €
+  // musste man selbst herleiten. Jetzt kommt der Auslandsanteil mit heraus,
+  // damit die Brücke sichtbar ist.
+  const u = umsatzsteuerZahllast(AUGUST, PROFIL);
+  const m = u.monate[0];
+
+  assertEquals(m.vorsteuer, 3630.06);
+  // 858,27 brutto -> 137,03 Steueranteil, plus 2,99 separat ausgewiesen.
+  assertEquals(m.ausland_vorsteuer, 140.02);
+  // Die Summe muss der Gesamtsicht entsprechen, sonst stehen wieder zwei
+  // Zahlen nebeneinander, die sich nicht verbinden lassen.
+  assertEquals(Math.round(((m.vorsteuer ?? 0) + (m.ausland_vorsteuer ?? 0)) * 100) / 100, 3770.08);
+});
+
+Deno.test("Ohne Steuerfaktor bleibt auch der Auslandsanteil offen", () => {
+  const u = umsatzsteuerZahllast(AUGUST, { ...PROFIL, faktor: null });
+  assertEquals(u.monate[0].ausland_vorsteuer, null);
+});
+
+Deno.test("Je Marktplatz: getrennt gerechnet, Inland zuerst", () => {
+  // Auslandsumsätze zu addieren hilft niemandem — wer in Frankreich meldet,
+  // braucht die französische Zahl, nicht die Summe aus vier Ländern.
+  const u = umsatzsteuerZahllast(AUGUST, PROFIL);
+  const mp = u.monate[0].je_marktplatz;
+
+  assertEquals(mp.map((x) => x.marktplatz), ["Amazon.de", "unbekannt", "Amazon.fr"]);
+  // Inland zuerst, danach nach Umsatz absteigend.
+  assertEquals(mp.map((x) => x.inland), [true, true, false]);
+  assertEquals(mp[0].land, "DE");
+  assertEquals(mp[2].land, "FR");
+
+  // Frankreich vollständig durchgerechnet: 254,86 vereinnahmt, 140,02 Vorsteuer.
+  assertEquals(mp[2].vereinnahmt, 254.86);
+  assertEquals(mp[2].vorsteuer, 140.02);
+  assertEquals(mp[2].zahllast_aus_amazon, 114.84);
+});
+
+Deno.test("Je Marktplatz: die Summe der Inlandszeilen ergibt die Zahllast", () => {
+  // Sonst stünden im selben Bereich zwei Zahlen, die sich widersprechen.
+  const m = umsatzsteuerZahllast(AUGUST, PROFIL).monate[0];
+  const inland = m.je_marktplatz.filter((x) => x.inland);
+  const summe = inland.reduce((s, x) => s + (x.zahllast_aus_amazon ?? 0), 0);
+  assertEquals(Math.round(summe * 100) / 100, m.zahllast_aus_amazon);
+});
