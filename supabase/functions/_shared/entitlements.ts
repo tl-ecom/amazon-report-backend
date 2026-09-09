@@ -85,6 +85,15 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   betriebskosten: "betriebskosten",
   masse_uebersicht: "masse",
   abrechnungen: "auszahlungen",
+  // Cash-Management. Eigener Schluessel und NICHT an "auszahlungen" gehaengt:
+  // der Abrechnungs-Tab zeigt die Belege, dieser Bereich rechnet daraus
+  // Rhythmus, Einbehalt und Steuerlast — das ist ein anderer Gegenwert und
+  // gehoert in der Matrix getrennt schaltbar.
+  cashflow: "cashflow",
+  // Die steuerlichen Stammdaten sind die Eingabe fuer genau diese Rechnung
+  // und haengen deshalb am selben Schluessel.
+  stammdaten: "cashflow",
+  stammdaten_setzen: "cashflow",
   // MCP-Zugang (KI-Anbindung) — schaltbar, damit das Häkchen in der Tarif-Matrix
   // auch wirklich greift und nicht nur den Tab versteckt.
   mcp_tokens: "mcp",
