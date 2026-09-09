@@ -221,3 +221,18 @@ Deno.test("Reichweite knapp bleibt eine FBA-Warnung — externes Lager aendert d
   }));
   assertEquals(b.status, "reichweite_knapp");
 });
+
+Deno.test("Langsamdreher: Amazon gemessen leer, Ware im Prep Center -> trotzdem sichtbar (Vaneja B0FKNN9CCJ)", () => {
+  const b = bewerteAsin(inp({
+    velo_tag: 0.207, tage_ohne_verkauf: 8, avg_preis_cents: 3000,
+    bestand: 0, nachschub_unterwegs: 0, bestand_bekannt: true, reichweite_tage: 0, extern_physisch: 416,
+  }));
+  assertEquals(b.status, "leer_extern_lager");
+  assertEquals(b.schwere, 2);
+  assertEquals(b.verlust_art, "laufend");
+});
+
+Deno.test("Langsamdreher ohne externe Ware bleibt wie bisher ok", () => {
+  const b = bewerteAsin(inp({ velo_tag: 0.2, tage_ohne_verkauf: 8, bestand: 0, nachschub_unterwegs: 0, bestand_bekannt: true }));
+  assertEquals(b.status, "ok");
+});

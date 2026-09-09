@@ -123,7 +123,20 @@ function nz(x: unknown): number {
  */
 export function bewerteAsin(i: AsinInput): Bewertung {
   const velo = nz(i.velo_tag);
-  if (velo < MIN_VELO) return { status: "ok", schwere: 0, verlust_cents: 0, verlust_art: null, verlust_basis: null };
+  // Langsamdreher bleiben normalerweise aussen vor (Nulltage sind dort normal).
+  // Ausnahme: Amazon ist GEMESSEN leer, nichts unterwegs, aber Ware liegt im
+  // eigenen Lager/Prep Center. Das ist keine Vermutung aus der Verkaufsluecke,
+  // sondern ein Anlieferproblem mit bekannter Loesung — Vanejas Etagere
+  // dunkelgruen: 0 bei Amazon, 416 im Prep Center, 0,2 Stk/Tag. Geringe Schwere,
+  // weil wenig Umsatz dranhaengt; aber sichtbar.
+  if (velo < MIN_VELO) {
+    if (i.bestand_bekannt && nz(i.bestand) === 0 && nz(i.nachschub_unterwegs) === 0 && nz(i.extern_physisch) > 0) {
+      const tage = Math.max(1, Math.min(nz(i.tage_ohne_verkauf), LEER_MAX_TAGE));
+      const wert = stueckwert(i);
+      return { status: "leer_extern_lager", schwere: 2, verlust_cents: Math.round(velo * tage * wert.cents), verlust_art: "laufend", verlust_basis: wert.basis };
+    }
+    return { status: "ok", schwere: 0, verlust_cents: 0, verlust_art: null, verlust_basis: null };
+  }
 
   const tageOhne = nz(i.tage_ohne_verkauf);
   const preis = nz(i.avg_preis_cents);
