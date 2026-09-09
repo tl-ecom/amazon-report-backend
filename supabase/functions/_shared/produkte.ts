@@ -30,6 +30,7 @@
 // fehlt der Steuersatz dort, gilt der Mandanten-Wert.
 
 import { nettoGebuehr } from "./ust_faktor.ts";
+import { pruefeGebuehren } from "./gebuehren_pruefung.ts";
 import { ladeUstFaktor } from "./ust_lauf.ts";
 
 function runde(n: number, stellen = 2): number {
@@ -42,6 +43,9 @@ interface Row {
   wareneinsatz_cents: number; einheiten_mit_ek: number; retouren: number;
   gebuehren_cents: number; gebuehren_bekannt: boolean; gebuehren_anteilig: boolean;
   fba_cents: number; verkaufsgebuehr_cents: number; sonstige_gebuehren_cents: number;
+  lager_cents?: number; gutschriften_cents?: number;
+  gebuehren_direkt_cents?: number; gebuehren_umgelegt_cents?: number;
+  gebuehren_abdeckung?: number | null; gebuehren_vollstaendig?: boolean;
 }
 
 function istDatum(s: unknown): s is string {
@@ -124,13 +128,24 @@ export async function produktUebersicht(
     // Amazon-Gebühren je Produkt (signiert, negativ = Kosten).
     // Ohne bestätigten Faktor lässt nettoGebuehr den Betrag unverändert.
     const hatGeb = Boolean(r.gebuehren_bekannt);
-    const gebuehren = hatGeb ? nettoGebuehr(Number(r.gebuehren_cents) || 0, ustFaktor) / 100 : null;
     // Die zwei grossen Bloecke einzeln — sie haben verschiedene Hebel: die
     // Verkaufsgebuehr haengt am Preis, die FBA-Gebuehr an Groesse und Gewicht.
     const je = (cents: unknown) => hatGeb ? nettoGebuehr(Number(cents) || 0, ustFaktor) / 100 : null;
     const fba = je(r.fba_cents);
     const verkaufsgebuehr = je(r.verkaufsgebuehr_cents);
     const sonstige = je(r.sonstige_gebuehren_cents);
+    const lager = je(r.lager_cents ?? 0);
+    // Gutschriften NICHT durch den USt.-Faktor teilen.
+    //
+    // Erstattungen (fehlende Ware beim Wareneingang, Neubewertung) sind keine
+    // Gebuehr mit Vorsteuer darauf, sondern ein Ersatz fuer den Warenwert. Wer
+    // sie mitteilt, kuerzt eine Gutschrift um eine Steuer, die nie darauf lag —
+    // und der Fehler faellt nicht auf, weil das Ergebnis plausibel aussieht.
+    const gutschriften = hatGeb ? (Number(r.gutschriften_cents) || 0) / 100 : null;
+    // Gesamt: USt.-behaftete Gebuehren netto PLUS Gutschriften zum Nennwert.
+    const gebuehren = hatGeb
+      ? runde(nettoGebuehr(Number(r.gebuehren_cents) || 0, ustFaktor) / 100 + (gutschriften ?? 0))
+      : null;
 
     // Deckungsbeitrag VOR Werbung. Der Name sagt ausdrücklich „vor", damit
     // niemand ihn für das Endergebnis hält.
@@ -171,6 +186,15 @@ export async function produktUebersicht(
       fba_gebuehr: fba == null ? null : runde(fba),
       verkaufsgebuehr: verkaufsgebuehr == null ? null : runde(verkaufsgebuehr),
       sonstige_gebuehren: sonstige == null ? null : runde(sonstige),
+      lagergebuehr: lager == null ? null : runde(lager),
+      gutschriften: gutschriften == null ? null : runde(gutschriften),
+      gebuehren_direkt: hatGeb ? runde(nettoGebuehr(Number(r.gebuehren_direkt_cents) || 0, ustFaktor) / 100) : null,
+      gebuehren_umgelegt_betrag: hatGeb ? runde((Number(r.gebuehren_umgelegt_cents) || 0) / 100) : null,
+      // Wie viele Bestellzeilen des Zeitraums schon abgerechnet sind. Amazon
+      // rechnet mit Verzug ab; im laufenden Monat ist die Quote klein, und dann
+      // sind niedrige Gebuehren je Stueck kein guter Wert, sondern ein halber.
+      gebuehren_abdeckung: r.gebuehren_abdeckung == null ? null : Number(r.gebuehren_abdeckung),
+      gebuehren_vollstaendig: r.gebuehren_vollstaendig ?? null,
       gebuehrenquote: hatGeb && umsatz > 0 ? runde((-gebuehren! / umsatz) * 100, 1) : null,
       gebuehren_anteilig: Boolean(r.gebuehren_anteilig),
       umsatz_nach_gebuehren: umsatzNachGebuehren,
@@ -215,6 +239,15 @@ export async function produktUebersicht(
     produkte,
     summe_retouren: produkte.reduce((s, p) => s + p.retouren, 0),
     // Gebühren-Überblick: was ist bekannt, wie verlässlich ist die Zuordnung?
+    // Auffaellige Gebuehren. Sie aendern nichts an den Zahlen, sie sagen nur, wo
+    // eine nicht zu ihrer Umgebung passt — genau das hat beim Fall vom 09.09.
+    // gefehlt: 25,6 % Verkaufsgebuehr sahen fuer sich genommen unauffaellig aus.
+    gebuehren_befunde: pruefeGebuehren(produkte.map((p: any) => ({
+      asin: p.asin, produktname: p.produktname, einheiten: p.einheiten,
+      umsatz_brutto: p.umsatz_brutto ?? p.umsatz, umsatz: p.umsatz,
+      verkaufsgebuehr: p.verkaufsgebuehr, fba_gebuehr: p.fba_gebuehr,
+      gebuehren: p.gebuehren, gebuehren_abdeckung: p.gebuehren_abdeckung,
+    }))),
     hat_gebuehren: mitGebuehren.length > 0,
     summe_gebuehren: mitGebuehren.length ? runde(mitGebuehren.reduce((s, p) => s + (p.gebuehren ?? 0), 0)) : null,
     gebuehren_anteilig: produkte.some((p) => p.gebuehren_anteilig),
