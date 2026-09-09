@@ -353,8 +353,14 @@ const TOOLS: ToolDef[] = [
       "dem Settlement-Bericht gemessen), wie hoch ist der Einbehalt, wie viel Geld " +
       "steckt in noch nicht abgerechneten Bestellungen, an welchem Tag im Monat " +
       "bucht Amazon Lagergebühr und Kontogebühr ab, nach welchem Muster werden " +
-      "Werbekosten abgezogen (Termin oder Rechnungsschwelle), und wie viel " +
-      "Vorsteuer steckt in den Gebühren. " +
+      "Werbekosten abgezogen (Termin oder Rechnungsschwelle), wie viel " +
+      "Vorsteuer steckt in den Gebühren, und wie hoch ist die " +
+      "Umsatzsteuer-Zahllast je Monat samt Fälligkeit. " +
+      "Zur Zahllast IMMER dazusagen, dass sie nur Amazon-Daten enthält: " +
+      "Vorsteuer aus Wareneinkauf und Betriebsausgaben fehlt, die echte " +
+      "Zahllast liegt niedriger. Sie ist keine Grundlage für die Voranmeldung. " +
+      "Auslandsumsätze stehen getrennt (OSS), die Trennung folgt dem Marktplatz " +
+      "und nicht dem Bestimmungsland. " +
       "Alle Rhythmen sind AM KONTO GEMESSEN, nicht aus Amazons Faustregeln " +
       "übernommen — sie unterscheiden sich je Konto. " +
       "WICHTIG: `warnungen` immer mit ausgeben. Felder mit null sind UNBEKANNT, " +

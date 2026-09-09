@@ -16,6 +16,7 @@
 // koennen. Die DB-Schicht steht ganz unten.
 
 import { ladeUstFaktor } from "./ust_lauf.ts";
+import { umsatzsteuerZahllast, type UstZeile } from "./cashflow_ust.ts";
 
 // --- Bausteine --------------------------------------------------------------
 
@@ -507,14 +508,15 @@ export async function cashflowUebersicht(
 ): Promise<unknown> {
   const tage = Math.min(365, Math.max(30, Number(args.tage) || 120));
 
-  const [basisRes, zeitRes, faktor, stammRes] = await Promise.all([
+  const [basisRes, zeitRes, ustRes, faktor, stammRes] = await Promise.all([
     supabase.rpc("cashflow_basis", { p_tenant: tenant_id, p_tage: tage }),
     supabase.rpc("cashflow_zeitpunkte", { p_tenant: tenant_id, p_tage: tage }),
+    supabase.rpc("cashflow_umsatzsteuer", { p_tenant: tenant_id, p_tage: tage }),
     ladeUstFaktor(supabase, tenant_id),
     supabase.from("tenant_einstellungen")
       .select("umsatzsteuerpflichtig, vorsteuerabzug, ust_voranmeldung, "
         + "ust_dauerfristverlaengerung, ermaessigter_satz, oss_teilnahme, pan_eu, "
-        + "lager_ausland, lager_laender, stammdaten_bestaetigt_am")
+        + "lager_ausland, lager_laender, stammdaten_bestaetigt_am, firmensitz_land")
       .eq("tenant_id", tenant_id).maybeSingle(),
   ]);
   if (basisRes.error) throw new Error(`cashflow_basis: ${basisRes.error.message}`);
@@ -563,6 +565,17 @@ export async function cashflowUebersicht(
     dauerfrist: stamm.ust_dauerfristverlaengerung ?? null,
   });
 
+  // Umsatzsteuer aus den Verkaeufen. Amazon zahlt brutto aus; dieser Teil
+  // gehoert dem Finanzamt und darf in keiner Liquiditaetsrechnung fehlen.
+  const ust = umsatzsteuerZahllast((ustRes?.data ?? []) as UstZeile[], {
+    faktor,
+    abzugsberechtigt: abzug,
+    land: stamm.firmensitz_land ?? "DE",
+    rhythmus: stamm.ust_voranmeldung ?? null,
+    dauerfrist: stamm.ust_dauerfristverlaengerung ?? null,
+    oss: stamm.oss_teilnahme ?? null,
+  });
+
   const warnungen: string[] = [];
   if (rhythmus.belege < 3) {
     warnungen.push(
@@ -573,6 +586,7 @@ export async function cashflowUebersicht(
   }
   if (gebunden.hinweis) warnungen.push(gebunden.hinweis);
   warnungen.push(...vst.hinweise);
+  warnungen.push(...ust.hinweise);
   if (stamm.stammdaten_bestaetigt_am == null) {
     warnungen.push(
       "Die steuerlichen Stammdaten wurden noch nicht bestätigt. Was dort fehlt, "
@@ -602,6 +616,7 @@ export async function cashflowUebersicht(
     termin_gebuehren: termine,
     werbung,
     vorsteuer: vst,
+    umsatzsteuer: ust,
 
     stammdaten: {
       umsatzsteuerpflichtig: stamm.umsatzsteuerpflichtig ?? null,
