@@ -82,6 +82,8 @@ interface ReportKonfig {
    * werden die vorhandenen aufgelistet und der jüngste abgeholt.
    */
   vorhanden?: boolean;
+  /** Fenster auf dem Letzten des vorletzten Monats enden lassen (Monatsberichte). */
+  monatsende?: boolean;
 }
 
 const REPORT_KONFIG: Record<string, ReportKonfig> = {
@@ -209,9 +211,16 @@ const REPORT_KONFIG: Record<string, ReportKonfig> = {
   },
   GET_FBA_STORAGE_FEE_CHARGES_DATA: {
     format: "tsv",
-    // MONATLICHER Report. Ein Fenster im laufenden Monat liefert nichts und
-    // Amazon storniert ihn (beobachtet 2026-07-31: CANCELLED). Abgefragt werden
-    // muss ein ABGESCHLOSSENER Monat, also mit end_date auf den Monatsersten.
+    // MONATLICHER Report. Amazon storniert JEDES Fenster, das in den laufenden
+    // Monat reicht — am 09.09.2026 dreimal nachgemessen (02.08.–01.09.,
+    // 10.08.–09.09., 01.08.–31.08.: alle CANCELLED). Dasselbe Fenster, das am
+    // 31.07. funktioniert hatte (01.07.–31.07.), lief sofort durch.
+    //
+    // Das Fenster endet deshalb immer auf dem Letzten des VORLETZTEN Monats.
+    // Zurueck kommt der juengste verfuegbare Monat, nicht der angefragte: am
+    // 31.07. war das Juni, am 09.09. Juli. Amazon bucht die Lagergebuehr eines
+    // Monats am 7. des Folgemonats; der Bericht braucht danach noch Vorlauf.
+    monatsende: true,
     stableLagDays: 0,
     maxDays: 30,
   },
@@ -388,6 +397,11 @@ Deno.serve(async (req) => {
           if (Number.isNaN(end.getTime())) {
             return json({ error: "end_date ist kein gültiges Datum", detail: endDate }, 400);
           }
+        } else if (konfig.monatsende) {
+          // Letzter Tag des VORLETZTEN Monats. Heute im September heisst das der
+          // 31. Juli — der 31. August wird noch storniert, gemessen am 09.09.
+          const jetzt = new Date();
+          end = new Date(Date.UTC(jetzt.getUTCFullYear(), jetzt.getUTCMonth() - 1, 0, 23, 59, 59));
         } else {
           const lag = includeVolatile ? 0 : konfig.stableLagDays;
           end = new Date();
