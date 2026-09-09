@@ -107,6 +107,9 @@ export function klassifiziereSpalte(kopf: string): SpaltenRolle {
 
   // --- Kennungen ---------------------------------------------------------
   if (ist(n, "sku", "sellersku", "merchantsku", "msku", "artikelnummer", "skuhandler")) return { rolle: "sku" };
+  // „Supplier SKU", „Parent SKU": Kennungen, keine Mengen. Muss VOR „supplier"
+  // (= bestellt) stehen — an Vanejas Feed als bestellte Ware eingeordnet.
+  if (hat(n, "sku")) return { rolle: "ignorieren", grund: "Stammdatum" };
   if (ist(n, "asin", "asin1", "childasin")) return { rolle: "asin" };
   if (ist(n, "marketplace", "marktplatz", "market", "country", "land", "region", "shop", "store", "account", "konto")) {
     return { rolle: "marktplatz" };
@@ -134,6 +137,12 @@ export function klassifiziereSpalte(kopf: string): SpaltenRolle {
   }
 
   // --- Keine Mengen: Geld, Zeit, Empfehlungen, Stammdaten --------------------
+  // Schalter und Flags aus Sellerboards Restock-Einstellungen: „Use a Prep
+  // Center" (ja/nein), „Running out of stock" (Warnflag). Beide enthalten
+  // „prep" bzw. „stock" und landeten als Lagerort — mit leeren Mengen.
+  if (n.startsWith("use") || hat(n, "runningout", "outofstock", "isrunning", "flag", "enabled", "aktiv")) {
+    return { rolle: "ignorieren", grund: "Schalter/Flag" };
+  }
   if (hat(n, "price", "preis", "cost", "kosten", "cogs", "value", "wert", "revenue", "umsatz", "profit", "gewinn", "margin", "marge", "fee", "gebuehr", "eur", "usd", "currency", "waehrung")) {
     return { rolle: "ignorieren", grund: "Geldbetrag" };
   }
@@ -181,6 +190,11 @@ export function klassifiziereSpalte(kopf: string): SpaltenRolle {
     return { rolle: "bestand", lagerart: "extern_lager" };
   }
   if (hat(n, "fba", "fulfillable", "amazon", "afn")) return { rolle: "bestand", lagerart: "fba_verfuegbar" };
+  // „On-hand stock" ist bei Sellerboard der Bestand in Amazons Lagern (an
+  // Vanejas Feed geprueft: deckt sich je ASIN mit FBA/FBM Stock bzw. FBA +
+  // Reserviert), NICHT das eigene Lager. Amazon-Klasse; erkenneSpalten laesst
+  // davon nur eine FBA-Spalte zu, damit ohne SP-API nichts doppelt zaehlt.
+  if (hat(n, "onhand")) return { rolle: "bestand", lagerart: "fba_verfuegbar" };
   if (ist(n, "stock", "bestand", "available", "verfuegbar", "lagerbestand", "lager", "inventory", "onhand", "instock")) {
     // Nackte Bestandsspalte: in Sellerboard der FBA-Bestand. Ist Amazon-Klasse
     // und wird deshalb nie doppelt gezaehlt, wenn die SP-API liefert.
@@ -361,6 +375,20 @@ export function erkenneSpalten(kopf: string[]): SpaltenErkennung {
     }
   }
 
+  // Mehrere FBA-Spalten („FBA/FBM Stock" UND „On-hand stock") sind Sichten auf
+  // denselben Bestand. Ohne SP-API-Daten wuerden sie addiert — also nur eine
+  // behalten: bevorzugt die, die FBA/verfuegbar im Namen traegt, sonst die erste.
+  const fba = e.bestand.filter((b) => b.lagerart === "fba_verfuegbar");
+  if (fba.length > 1) {
+    const rang = (s: string) => (hat(norm(s), "fba", "available", "verfuegbar", "fulfillable") ? 0 : 1);
+    const behalten = [...fba].sort((a, b) => rang(a.spalte) - rang(b.spalte))[0];
+    for (const b of fba) {
+      if (b === behalten) continue;
+      e.bestand = e.bestand.filter((x) => x !== b);
+      e.ignoriert.push({ spalte: b.spalte, grund: `weitere FBA-Spalte (in „${behalten.spalte}" enthalten)` });
+    }
+  }
+
   // Langformat: Ort + Menge und keine Lagerart-Spalten. Eine einzelne
   // Mengenspalte OHNE Ort ist dagegen der nackte FBA-Bestand.
   if (e.ort && e.menge && e.bestand.length === 0) e.format = "lang";
@@ -459,4 +487,15 @@ export function parseBestandCsv(text: string): BestandParseErgebnis {
   if (zeilen.length === 0) warnungen.push("Keine verwertbare Zeile gefunden (SKU/ASIN fehlt ueberall?).");
 
   return { zeilen, erkannt, spalten: kopf, uebersprungen, warnungen };
+}
+
+/**
+ * Sellerboard erzeugt den Export erst beim Abruf und antwortet solange mit
+ * einer Textzeile statt CSV („Report not ready, try again in several minutes").
+ * Das ist kein Fehler des Links — nur noch nicht fertig. Am 10.09. bei Vanejas
+ * Link so gesehen: HTTP 200, 49 Bytes, genau dieser Satz.
+ */
+export function istFeedNochNichtBereit(text: string): boolean {
+  const t = String(text ?? "").replace(/^﻿/, "").trim();
+  return t.length < 200 && /report\s+not\s+ready|noch nicht bereit|try again/i.test(t);
 }

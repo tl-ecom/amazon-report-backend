@@ -15,7 +15,7 @@
 // nicht zuordenbare SKUs). Fehler landen in `letzter_fehler`, damit die
 // Sync-Wache sie sieht — ein stiller Ausfall ist der teuerste.
 
-import { KLASSE, LAGERART_LABEL, type Lagerart, parseBestandCsv, type SpaltenErkennung } from "./sellerboard_bestand.ts";
+import { istFeedNochNichtBereit, KLASSE, LAGERART_LABEL, type Lagerart, parseBestandCsv, type SpaltenErkennung } from "./sellerboard_bestand.ts";
 import { ladeEkJeAsin } from "./bestand_gesamt.ts";
 
 export const QUELLE = "sellerboard";
@@ -173,7 +173,28 @@ async function ladeFeed(supabase: any, tenant_id: string): Promise<string> {
   if (/^\s*<(!doctype|html)/i.test(text)) {
     throw new Error("Der Link lieferte eine Webseite statt einer CSV — bitte den Export-Link in Sellerboard neu kopieren.");
   }
+  // Sellerboard baut den Export erst beim Abruf. Bis er fertig ist, kommt eine
+  // Textzeile statt CSV. Das ist kein Verbindungsfehler — nur noch nicht fertig.
+  if (istFeedNochNichtBereit(text)) throw new FeedNochNichtBereit();
   return text;
+}
+
+export class FeedNochNichtBereit extends Error {
+  constructor() {
+    super("Sellerboard erstellt den Export gerade („Report not ready“). In einigen Minuten erneut versuchen — der Auto-Sync wiederholt es von selbst.");
+    this.name = "FeedNochNichtBereit";
+  }
+}
+
+/**
+ * „Noch nicht bereit" wird vermerkt, zaehlt aber weder als Versuch noch als
+ * Fehler: `zuletzt_versuch` bleibt stehen, damit der stuendliche Cron beim
+ * naechsten Lauf erneut anklopft statt erst nach dem vollen Intervall.
+ */
+async function merkeNochNichtBereit(supabase: any, tenant_id: string, err: unknown): Promise<boolean> {
+  if (!(err instanceof FeedNochNichtBereit)) return false;
+  await schreibeVerbindung(supabase, tenant_id, { letzter_fehler: err.message.slice(0, MAX_FEHLER_LAENGE) }).catch(() => {});
+  return true;
 }
 
 // --- Zuordnung ------------------------------------------------------------------
@@ -230,10 +251,13 @@ export async function verarbeiteBestandCsv(
 
   for (const z of p.zeilen) {
     // Bevorzugt ueber SKU (eindeutig je Konto), sonst ueber ASIN, sofern eindeutig.
+    // Sellerboard fuehrt je ASIN ALLE SKUs kommagetrennt in einer Zelle
+    // („8I-4QHO-FU55, RH-PLUM-4ER4, V5-W2LS-X48K") — jede einzeln probieren.
     let asin = "";
     let sku = z.sku ?? "";
     let zuordnung: DbZeile["zuordnung"] = "keine";
-    if (sku && skuZuAsin.has(sku)) { asin = skuZuAsin.get(sku)!; zuordnung = "sku"; }
+    const skuTreffer = sku.split(/\s*,\s*/).map((s) => s.trim()).find((s) => s && skuZuAsin.has(s));
+    if (skuTreffer) { asin = skuZuAsin.get(skuTreffer)!; zuordnung = "sku"; }
     else if (z.asin) {
       asin = z.asin; zuordnung = "asin";
       const skus = asinZuSkus.get(asin);
@@ -329,6 +353,7 @@ export async function pruefeBestandVerbindung(supabase: any, tenant_id: string):
     });
     return erg;
   } catch (err) {
+    if (await merkeNochNichtBereit(supabase, tenant_id, err)) throw err;
     const m = String((err as Error)?.message ?? err);
     await schreibeVerbindung(supabase, tenant_id, { zuletzt_versuch: jetzt, status: "fehler", letzter_fehler: m.slice(0, MAX_FEHLER_LAENGE) }).catch(() => {});
     throw err;
@@ -358,6 +383,7 @@ export async function syncSellerboardBestand(supabase: any, tenant_id: string): 
     });
     return erg;
   } catch (err) {
+    if (await merkeNochNichtBereit(supabase, tenant_id, err)) throw err;
     const m = String((err as Error)?.message ?? err);
     await schreibeVerbindung(supabase, tenant_id, { zuletzt_versuch: jetzt, status: "fehler", letzter_fehler: m.slice(0, MAX_FEHLER_LAENGE) }).catch(() => {});
     throw err;

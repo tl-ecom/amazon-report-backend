@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
-  erkenneSpalten, klassifiziereOrt, klassifiziereSpalte, marktplatzId, mengeGanz, parseBestandCsv,
+  erkenneSpalten, istFeedNochNichtBereit, klassifiziereOrt, klassifiziereSpalte, marktplatzId, mengeGanz, parseBestandCsv,
 } from "./sellerboard_bestand.ts";
 
 Deno.test("mengeGanz: deutsche und englische Tausender, Dezimal, leer", () => {
@@ -147,4 +147,49 @@ Deno.test("erkenneSpalten: einzelne Mengenspalte ohne Ort = FBA-Bestand", () => 
   const e = erkenneSpalten(["SKU", "Quantity"]);
   assertEquals(e.format, "breit");
   assertEquals(e.bestand, [{ spalte: "Quantity", lagerart: "fba_verfuegbar", klasse: "amazon" }]);
+});
+
+Deno.test("istFeedNochNichtBereit: Sellerboards Wartesatz statt CSV", () => {
+  assertEquals(istFeedNochNichtBereit("﻿Report not ready, try again in several minutes"), true);
+  assertEquals(istFeedNochNichtBereit("SKU;ASIN;Stock\nA;B;1"), false);
+  assertEquals(istFeedNochNichtBereit(""), false);
+});
+
+// Vanejas echter Sellerboard-Export vom 10.09.2026 (Kopfzeile 1:1, Werte erfunden).
+// Was hier steht, ist am Live-Sync gepruefte Realitaet, nicht die Doku.
+Deno.test("erkenneSpalten: Vanejas echter Restock-Export", () => {
+  const kopf = [
+    "ASIN", "SKU", "Title", "Marketplace", "FBA/FBM Stock", "Running  out of stock", "Reserved", "Sent  to FBA",
+    "Ordered", "Stock value", "Estimated Sales Velocity", "Days  of stock  left", "Recommended quantity for  reordering",
+    "Time to  reorder", "Margin", "ROI, %", "Profit forecast (30 days)", "Comment", "Use a Prep Center",
+    "Target stock range after new order days", "FBA buffer days", "Manuf. time days", "Shipping to Prep Center days",
+    "Shipping to FBA days", "Supplier SKU", "Size", "Multipack size", "Box param length", "FNSKU",
+    "FBA prep. stock Prep center 1 stock", "FBA prep. stock Prep center 2 stock", "On-hand stock",
+    "Recommended ship-in quantity (by Amazon)", "Historical days of supply", "Missed profit (est)", "Color", "Item number",
+  ];
+  const e = erkenneSpalten(kopf);
+  assertEquals(e.format, "breit");
+  assertEquals(e.sku, "SKU");
+  assertEquals(e.asin, "ASIN");
+  assertEquals(e.marktplatz, "Marketplace");
+  assertEquals(e.bestand.map((b) => [b.spalte, b.lagerart]), [
+    ["FBA/FBM Stock", "fba_verfuegbar"],
+    ["Reserved", "fba_reserviert"],
+    ["Sent  to FBA", "inbound_fba"],
+    ["Ordered", "ordered"],
+    ["FBA prep. stock Prep center 1 stock", "prep_center"],
+    ["FBA prep. stock Prep center 2 stock", "prep_center"],
+  ]);
+  const ignoriert = Object.fromEntries(e.ignoriert.map((i) => [i.spalte, i.grund]));
+  assertEquals(ignoriert["Running  out of stock"], "Schalter/Flag");
+  assertEquals(ignoriert["Use a Prep Center"], "Schalter/Flag");
+  assertEquals(ignoriert["Supplier SKU"], "Stammdatum");
+  assert(String(ignoriert["On-hand stock"]).startsWith("weitere FBA-Spalte"));
+  // Kein physisch-externer Ort ausser den Prep Centern: nichts wird erfunden.
+  assertEquals(e.bestand.filter((b) => b.klasse === "physisch_extern").length, 2);
+});
+
+Deno.test("erkenneSpalten: nur On-hand ohne FBA-Spalte bleibt als FBA erhalten", () => {
+  const e = erkenneSpalten(["SKU", "On-hand stock", "Warehouse"]);
+  assertEquals(e.bestand.map((b) => b.lagerart), ["fba_verfuegbar", "extern_lager"]);
 });

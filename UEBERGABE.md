@@ -896,3 +896,29 @@ hatte die EK-Zweige vom 22.08. verloren — sie sind wieder drin.
 Tabelle füllt sich ab jetzt täglich). Sellerboard-Spaltennamen sind je Konto
 verschieden — die Zuordnung steht in der Verbindung unter „Bestandsspalten" und
 ist bei einem neuen Konto einmal gegenzuprüfen.
+
+### Nachtrag 10.09. — Vanejas echter Sellerboard-Feed (Restock-Export)
+
+Der in Vaneja hinterlegte Bestands-Link ist der Sellerboard-**Restock**-Export
+(nicht der Einkaufspreise-Export, der einen anderen Report-id hat). Kopfzeile
+und Zuordnung stehen als Test in `sellerboard_bestand_test.ts`. Drei Lehren
+aus dem ersten Live-Sync:
+
+* **„On-hand stock" ist Amazon-Bestand**, nicht das eigene Lager — je ASIN
+  deckungsgleich mit FBA/FBM Stock (teils + Reserviert). Zwei FBA-Spalten
+  werden deshalb auf eine reduziert, sonst zaehlte ein Konto ohne SP-API doppelt.
+* **„Running out of stock", „Use a Prep Center", „Supplier SKU"** sind Flags
+  bzw. Kennungen, keine Mengen — sie landeten als Lagerorte mit leeren Mengen.
+* **Mehrere SKUs je ASIN stehen kommagetrennt in einer Zelle.** Die Zuordnung
+  probiert jede einzeln.
+
+Was der Feed fuer Vaneja wirklich ergaenzt: **2.951 Stueck im Prep Center**
+(vier ASINs), die Amazon nicht sieht. „Sent to FBA" stimmt mit Amazons Inbound
+auf die Einheit (1.420 = 1.420); FBA/FBM Stock liegt 8 % unter Amazons Stand
+von 04:30 (Verkaeufe des Tages). Sellerboards „Reserved" (1.499) ist etwas
+anderes als Amazons `reserviert` (373) — egal, Amazon ist primaer.
+
+Sellerboard baut den Export **beim ersten Abruf** („Report not ready, try again
+in several minutes", HTTP 200, 49 Bytes). Der Import behandelt das als
+„noch nicht bereit": kein Fehlerstatus, `zuletzt_versuch` bleibt stehen, der
+stuendliche Cron versucht es erneut.
