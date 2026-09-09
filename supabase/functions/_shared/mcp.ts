@@ -36,7 +36,17 @@ export interface ReportRow {
   is_provisional: boolean;
 }
 
+import { zugriffErlaubt } from "./entitlements.ts";
+
 export interface McpContext {
+  /**
+   * Tarif-Flags des Mandanten. null = nicht geprueft (Coach-Zugang oder Unit-
+   * Test) -> alle Werkzeuge erlaubt. Ein LEERES Objekt sperrt dagegen alles,
+   * genau wie im Web: fehlt der Eintrag, ist das Feature nicht im Tarif.
+   */
+  features?: Record<string, boolean> | null;
+  /** Coach-/Admin-Zugang umgeht das Gating vollstaendig. */
+  coach?: boolean;
   /**
    * Liest die is_latest-Zeile eines Report-Typs für DIESEN Tenant. null = keine
    * Daten. source default 'sp'; 'ads' für die Advertising-Reports.
@@ -530,6 +540,21 @@ function waehleProtokoll(angefragt: unknown): string {
  * Verarbeitet EINE JSON-RPC-Nachricht.
  * Rückgabe null = Notification (keine Antwort schicken, z.B. notifications/*).
  */
+/**
+ * Darf dieses Werkzeug in diesem Kontext benutzt werden?
+ *
+ * Bewusst dieselbe Entscheidung wie im Web (zugriffErlaubt), damit MCP und
+ * Oberflaeche nicht auseinanderlaufen koennen. Vorher waren die Tools ueber MCP
+ * gar nicht gegated: wer Zugang zur KI-Anbindung hatte, bekam alle Werkzeuge,
+ * unabhaengig vom Tarif.
+ */
+function werkzeugErlaubt(name: string, ctx: McpContext): boolean {
+  // features === undefined heisst "nicht geprueft" (Unit-Test, alter Aufrufer)
+  // und bleibt offen. Nur ein ausdruecklich uebergebenes Objekt sperrt.
+  if (ctx.features === undefined || ctx.features === null) return true;
+  return zugriffErlaubt(name, ctx.features, ctx.coach === true);
+}
+
 export async function dispatch(
   req: JsonRpcRequest,
   ctx: McpContext
@@ -552,7 +577,11 @@ export async function dispatch(
       return ergebnis(id, {});
 
     case "tools/list":
-      return ergebnis(id, { tools: toolListe() });
+      // Werkzeuge, die der Tarif nicht traegt, werden gar nicht erst genannt.
+      // Sie trotzdem zu listen hiesse, das Modell in einen Fehlversuch laufen
+      // zu lassen — und es wuerde die Antwort mit einer Absage fuellen, statt
+      // mit dem, was der Kunde tatsaechlich hat.
+      return ergebnis(id, { tools: toolListe().filter((t) => werkzeugErlaubt(t.name, ctx)) });
 
     case "tools/call": {
       const name = req.params?.name as string | undefined;
@@ -560,6 +589,20 @@ export async function dispatch(
       const tool = TOOLS.find((t) => t.name === name);
       if (!tool) {
         return fehler(id, -32602, `Unbekanntes Tool: ${name}`);
+      }
+      // Zweite Schranke, obwohl tools/list schon filtert: ein Client kann einen
+      // Namen aus einer aelteren Sitzung behalten oder raten. Die Liste ist
+      // Bequemlichkeit, diese Pruefung ist die Sperre.
+      if (!werkzeugErlaubt(tool.name, ctx)) {
+        return ergebnis(id, {
+          content: [{
+            type: "text",
+            text: `Das Werkzeug ${tool.name} ist im Tarif dieses Kontos nicht `
+              + "enthalten. Die Daten existieren, der Zugang dazu ist nicht "
+              + "freigeschaltet — bitte beim Coach nachfragen.",
+          }],
+          isError: true,
+        });
       }
       try {
         const daten = await tool.handle(args, ctx);

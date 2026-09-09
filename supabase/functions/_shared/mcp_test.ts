@@ -1,6 +1,7 @@
 // Tests für mcp.ts — ausführen mit:  npx deno@2 test supabase/functions/_shared/
 
 import { assertEquals } from "jsr:@std/assert@1";
+import { RESOURCE_FEATURE } from "./entitlements.ts";
 import { dispatch, McpContext, toolListe } from "./mcp.ts";
 
 // Fake-Loader: liefert vorgegebene Payloads, ohne DB. Genau dafür ist ctx da.
@@ -294,4 +295,72 @@ Deno.test("ein Rechenfehler im Tool bringt den Dispatch nicht zum Absturz", asyn
   const res = r!.result as any;
   assertEquals(res.isError, true);
   assertEquals(res.content[0].text.includes("Währung"), true);
+});
+
+// --- Tarif-Gating der Werkzeuge ---------------------------------------------
+//
+// Vorher waren die MCP-Tools gar nicht gegated: wer Zugang zur KI-Anbindung
+// hatte, bekam alle 23 Werkzeuge, unabhaengig vom Tarif. Ein Kunde ohne den
+// Cash-Flow-Bereich sah ihn im Web nicht, ueber ChatGPT aber schon.
+
+const TARIF_CTX = (features: Record<string, boolean> | null, coach = false) => ({
+  ladeReport: async () => null,
+  ladePulse: async (art: string) => ({ ok: art }),
+  features,
+  coach,
+}) as any;
+
+Deno.test("tools/list nennt nur, was der Tarif traegt", async () => {
+  const r = await dispatch(
+    { jsonrpc: "2.0", id: 1, method: "tools/list" },
+    TARIF_CTX({ products: true, sales: true }),
+  );
+  const namen = (r!.result as any).tools.map((t: any) => t.name);
+  assertEquals(namen.includes("get_products"), true);
+  assertEquals(namen.includes("get_sales_overview"), true);
+  // Nicht im Tarif -> taucht gar nicht erst auf, statt das Modell in einen
+  // Fehlversuch laufen zu lassen.
+  assertEquals(namen.includes("get_cashflow"), false);
+  assertEquals(namen.includes("get_diagnoses"), false);
+});
+
+Deno.test("tools/call sperrt, auch wenn der Name geraten wird", async () => {
+  // Zweite Schranke: ein Client kann einen Namen aus einer aelteren Sitzung
+  // behalten. Die Liste ist Bequemlichkeit, DAS hier ist die Sperre.
+  const r = await dispatch(
+    { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "get_cashflow", arguments: {} } },
+    TARIF_CTX({ products: true }),
+  );
+  assertEquals((r!.result as any).isError, true);
+  assertEquals((r!.result as any).content[0].text.includes("nicht"), true);
+});
+
+Deno.test("Coach-Zugang umgeht das Gating vollstaendig", async () => {
+  const r = await dispatch(
+    { jsonrpc: "2.0", id: 3, method: "tools/list" },
+    TARIF_CTX({}, true),
+  );
+  assertEquals((r!.result as any).tools.length, toolListe().length);
+});
+
+Deno.test("Ohne Flags bleibt alles offen (Unit-Test, alter Aufrufer)", async () => {
+  // features === undefined heisst "nicht geprueft". Waere das eine Sperre,
+  // haetten alle bestehenden Aufrufer stillschweigend nichts mehr bekommen.
+  const r = await dispatch({ jsonrpc: "2.0", id: 4, method: "tools/list" }, leererCtx);
+  assertEquals((r!.result as any).tools.length, toolListe().length);
+});
+
+Deno.test("Leere Flags sperren alles — wie im Web", async () => {
+  // Ein Tarif ohne Eintrag hat kein Feature. Das ist dieselbe Semantik wie in
+  // zugriffErlaubt und darf hier nicht anders sein.
+  const r = await dispatch({ jsonrpc: "2.0", id: 5, method: "tools/list" }, TARIF_CTX({}));
+  assertEquals((r!.result as any).tools.length, 0);
+});
+
+Deno.test("Jedes Werkzeug haengt an einem Feature-Schluessel", () => {
+  // Wache gegen den Fehlertyp: ein neues Tool ohne Eintrag waere ungegated,
+  // weil ungelistete Schluessel absichtlich offen sind. Vergessen heisst hier
+  // also freigeschaltet, nicht gesperrt.
+  const ohne = toolListe().map((t) => t.name).filter((n) => !RESOURCE_FEATURE[n]);
+  assertEquals(ohne, []);
 });

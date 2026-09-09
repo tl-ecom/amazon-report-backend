@@ -126,9 +126,12 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Tarif-Schalter ads_historie: volle Ads-Historie auch fuer Teilnehmer-Token.
+  // Tarif-Schalter. Fuer Teilnehmer-Token gilt die Matrix: sie steuert die
+  // Ads-Historie UND welche Werkzeuge ueberhaupt erscheinen. Coach-Token
+  // umgehen beides.
+  let features: Record<string, boolean> | null = null;
   if (!sicht.coach) {
-    const features = await ladeFeatures(supabase, tenant_id);
+    features = await ladeFeatures(supabase, tenant_id);
     sicht = { coach: false, historie: features?.ads_historie === true };
   }
 
@@ -142,6 +145,10 @@ Deno.serve(async (req) => {
 
   // Loader ist an DIESEN Tenant gebunden. tenant_id kommt aus dem Token, nie aus dem Body.
   const ctx: McpContext = {
+    // null = Coach: kein Gating. Sonst die Flags des Tarifs; ein leeres Objekt
+    // sperrt alles, genau wie im Web.
+    features,
+    coach: sicht.coach,
     ladeReport: async (reportType: string, source = "sp") => {
       const { data, error } = await supabase
         .from("report_data")

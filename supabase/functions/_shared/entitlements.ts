@@ -132,6 +132,19 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   brief_notiz: "brief",
   fr_set_context: "aenderungen",
   fr_manuelle_aenderung: "aenderungen",
+  // --- MCP-Toolnamen ---------------------------------------------------
+  // Dieselbe Tabelle traegt Web-Ressourcen UND MCP-Tools. Fuenfzehn Toolnamen
+  // stehen schon oben (get_sales_overview, get_ads_* usw.), weil sie mit den
+  // Web-Namen uebereinstimmen. Die folgenden acht heissen ueber MCP anders als
+  // im Web und fehlten deshalb — ueber MCP waren sie ungegated.
+  get_products: "products",
+  get_cashflow: "cashflow",
+  get_kpi_history: "verlauf",
+  get_profit_history: "verlauf",
+  get_search_query_performance: "sqp",
+  get_diagnoses: "diagnosen",
+  get_change_log: "aenderungen",
+  get_strategy_overview: "strategie",
 };
 
 /** Reine Zugriffsentscheidung. Admins immer erlaubt; ungelistete Keys immer erlaubt;
