@@ -42,9 +42,50 @@ Deno.test("Zahllast: vereinnahmt minus Vorsteuer, Inland getrennt vom Ausland", 
   assertEquals(m.zahllast_aus_amazon, 5452.53);
 
   // Frankreich gehört NICHT in die deutsche Voranmeldung.
-  assertEquals(m.ausland, [{ marktplatz: "Amazon.fr", vereinnahmt: 254.86 }]);
+  assertEquals(m.ausland, [{ marktplatz: "Amazon.fr", vereinnahmt: 254.86, amazon_abgefuehrt: 0 }]);
   assertEquals(m.ausland_summe, 254.86);
   assertEquals(u.faellig_am, "2026-09-10");
+});
+
+Deno.test("Deutscher Regelfall: Amazon führt nichts ab, alles ist eigene Schuld", () => {
+  // Anders als in den USA behält Amazon in Deutschland nichts ein — der
+  // Verkäufer zahlt selbst. An echten Daten bestätigt: in der gesamten
+  // Vaneja-Historie steht auf Amazon.de keine einzige einbehaltene Zeile.
+  // Genau deshalb ist die volle vereinnahmte Steuer ein echter Cash-Abfluss
+  // und gehört in die Planung.
+  const u = umsatzsteuerZahllast(AUGUST, PROFIL);
+  assertEquals(u.monate[0].amazon_abgefuehrt, 0);
+  assertEquals(u.monate[0].zahllast_aus_amazon, 5452.53);
+  // Und es wird auch nichts dazu behauptet, was nicht passiert ist.
+  assertEquals(u.hinweise.some((h) => h.includes("selbst einbehalten")), false);
+});
+
+Deno.test("Ausland: was Amazon dort abführt, wird getrennt ausgewiesen", () => {
+  // Der einzige Einbehalt in den Vaneja-Daten stammt von Amazon.fr — 4,05 €.
+  // Er darf die deutsche Zahllast nicht berühren, muss aber bei der
+  // OSS-Summe sichtbar sein: dort schuldet der Verkäufer ihn nicht mehr.
+  const u = umsatzsteuerZahllast([
+    AUGUST[0],
+    { ...AUGUST[1], einbehalten_cents: -405 },
+  ], PROFIL);
+
+  assertEquals(u.monate[0].amazon_abgefuehrt, 0);
+  // Nur Amazon.de im Inland (ohne die nicht zuordenbare Zeile): 9.082,54
+  // minus 3.627,81 Vorsteuer.
+  assertEquals(u.monate[0].zahllast_aus_amazon, 5454.73);
+  assertEquals(u.monate[0].ausland_summe, 254.86);
+  assertEquals(u.monate[0].ausland_abgefuehrt, 4.05);
+});
+
+Deno.test("Einbehalt im Inland ist in Deutschland erklärungsbedürftig", () => {
+  const u = umsatzsteuerZahllast([{
+    monat: "2026-08", marktplatz: "Amazon.de",
+    vereinnahmt_cents: 100000, einbehalten_cents: -40000,
+    vorsteuer_ausgewiesen_cents: 0, gebuehren_brutto_cents: 0,
+  }], PROFIL);
+  // Der Betrag wird abgezogen, aber nicht wortlos: in DE ist das die Ausnahme.
+  assertEquals(u.monate[0].zahllast_aus_amazon, 600);
+  assertEquals(u.hinweise.some((h) => h.includes("Ausnahme")), true);
 });
 
 Deno.test("Zahllast: was Amazon selbst abführt, mindert die eigene Schuld", () => {

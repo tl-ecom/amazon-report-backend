@@ -12,6 +12,15 @@
 // Sortiment mit 7 % und 19 % nebeneinander, ohne dass jemand pflegen muss,
 // welcher Artikel in welchen Satz fällt — und ohne dass ein Pflegefehler still
 // in die Zahllast durchschlägt.
+//
+// Wichtig für den deutschen Regelfall: Hier führt der VERKÄUFER die Steuer
+// selbst ab, anders als in den USA, wo Amazon als Marketplace Facilitator
+// einbehält. Der volle vereinnahmte Betrag ist deshalb eigene Schuld und ein
+// echter Abfluss. An den Daten bestätigt: über die gesamte Vaneja-Historie
+// steht auf Amazon.de keine einzige einbehaltene Zeile; die einzigen beiden
+// stammen von Amazon.fr. Der Abzug bleibt trotzdem im Code — für Auslands-
+// umsätze kommt er vor, und ihn zu ignorieren hiesse, dort eine Schuld
+// auszuweisen, die schon beglichen ist.
 
 import { naechsteAnmeldung } from "./cashflow.ts";
 
@@ -35,8 +44,10 @@ export interface UstMonat {
   vorsteuer: number | null;
   /** Was aus den Amazon-Daten ALLEIN übrig bleibt. Nicht die Zahllast. */
   zahllast_aus_amazon: number | null;
-  ausland: Array<{ marktplatz: string; vereinnahmt: number }>;
+  ausland: Array<{ marktplatz: string; vereinnahmt: number; amazon_abgefuehrt: number }>;
   ausland_summe: number;
+  /** Von der Auslandssumme hat Amazon diesen Teil selbst abgeführt. */
+  ausland_abgefuehrt: number;
 }
 
 export interface Umsatzsteuer {
@@ -87,6 +98,7 @@ export function umsatzsteuerZahllast(
   }
 
   let auslandGesehen = false;
+  let inlandEinbehalten = 0;
 
   const monate: UstMonat[] = [...nachMonat.entries()]
     .sort((a, b) => b[0].localeCompare(a[0]))
@@ -108,6 +120,7 @@ export function umsatzsteuerZahllast(
 
       const vereinnahmt = summe(heimisch, "vereinnahmt_cents") / 100;
       const abgefuehrt = Math.abs(summe(heimisch, "einbehalten_cents")) / 100;
+      inlandEinbehalten += abgefuehrt;
 
       // Vorsteuer: der ausgewiesene Teil ("Tax on fee") plus der in den
       // Bestellgebühren eingerechnete. Ohne Abzugsberechtigung fällt beides
@@ -122,8 +135,14 @@ export function umsatzsteuerZahllast(
         : (eingerechnet === null ? null : r2(ausgewiesen + eingerechnet));
 
       const auslandListe = ausland
-        .map((z) => ({ marktplatz: z.marktplatz, vereinnahmt: r2(z.vereinnahmt_cents / 100) }))
-        .filter((x) => x.vereinnahmt !== 0);
+        .map((z) => ({
+          marktplatz: z.marktplatz,
+          vereinnahmt: r2(z.vereinnahmt_cents / 100),
+          // Was Amazon im Ausland schon abgeführt hat, schuldet der Verkäufer
+          // dort nicht mehr. Genau hier kommt der Fall tatsächlich vor.
+          amazon_abgefuehrt: r2(Math.abs(z.einbehalten_cents) / 100),
+        }))
+        .filter((x) => x.vereinnahmt !== 0 || x.amazon_abgefuehrt !== 0);
       if (auslandListe.length > 0) auslandGesehen = true;
 
       return {
@@ -136,6 +155,7 @@ export function umsatzsteuerZahllast(
           : r2(vereinnahmt - abgefuehrt - vorsteuer),
         ausland: auslandListe,
         ausland_summe: r2(auslandListe.reduce((s, a) => s + a.vereinnahmt, 0)),
+        ausland_abgefuehrt: r2(auslandListe.reduce((s, a) => s + a.amazon_abgefuehrt, 0)),
       };
     });
 
@@ -160,6 +180,17 @@ export function umsatzsteuerZahllast(
     hinweise.push(
       "Ohne hinterlegten Voranmeldungs-Rhythmus lässt sich nicht sagen, WANN die "
       + "Zahllast fällig wird. Der Betrag steht, der Termin fehlt.",
+    );
+  }
+  // In Deutschland zahlt der Verkäufer selbst. Behält Amazon hier trotzdem
+  // etwas ein, ist das die Ausnahme (etwa Ware aus dem Drittland) und gehört
+  // erklärt, statt stillschweigend von der Schuld abgezogen zu werden.
+  if (inlandEinbehalten > 0) {
+    hinweise.push(
+      `Amazon hat im Inland ${inlandEinbehalten.toFixed(2)} € Umsatzsteuer selbst `
+      + "einbehalten und abgeführt. In Deutschland ist das die Ausnahme — normal "
+      + "führt der Verkäufer selbst ab. Der Betrag ist von der Zahllast abgezogen; "
+      + "bitte prüfen, ob er in die Voranmeldung gehört.",
     );
   }
   if (auslandGesehen && profil.oss !== true) {
