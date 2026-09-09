@@ -116,3 +116,18 @@ nie im Frontend zwischenspeichern/loggen.
   Antworten und zeige sie an (z.B. „Ads-Zahlen vorläufig", „Umsatz unvollständig").
 - `get_product_performance` führt mehrere Quellen mit VERSCHIEDENEN Zeiträumen/
   Kanälen zusammen — die `warnung` im Ergebnis nicht verstecken.
+
+## Externe Bestände (Sellerboard) — Stand 10.09.2026
+
+| resource / action | Inhalt |
+|---|---|
+| `bestand_gesamt` | Gesamtbestand je ASIN über alle Quellen: FBA verfügbar/reserviert, Amazon Inbound (SP-API) + eigenes Lager, Prep Center, 3PL, bestellt, AWD (Sellerboard). `physisch_gesamt`, `pipeline_gesamt`, `versorgung_gesamt`, `kapital` (Kapitalbindung zum EK, Reichweiten). Feature-Key `bestand`. |
+| `verbindungen` | enthält zusätzlich `sellerboard` (Status der Bestandsquelle — nie die URL). |
+| action `sellerboard_bestand_speichern` `{ url }` | Feed-URL serverseitig im Vault ablegen. |
+| action `sellerboard_bestand_testen` | Feed laden und prüfen, nichts schreiben. Liefert erkannte Spalten, Summen je Lagerart, Warnungen. |
+| action `sellerboard_bestand_sync` | Voller Import (dieselbe Funktion wie der Cron). |
+| action `sellerboard_bestand_einstellungen` `{ auto_sync?, intervall_stunden? }` | Auto-Sync und Intervall (1–168 h). |
+| action `sellerboard_bestand_trennen` | Verbindung und aktuelle externe Bestände entfernen. |
+
+Regel gegen Doppelzählung: Für FBA/Inbound ist Amazon primär. Sellerboard-Spalten dieser
+Klasse werden nur gezählt, wenn Amazon für die Firma keinen Bestand liefert.

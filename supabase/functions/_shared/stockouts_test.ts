@@ -174,3 +174,50 @@ Deno.test("Statuswarnungen ohne Verlust haben keine Basis", () => {
   assertEquals(b.verlust_cents, 0);
   assertEquals(b.verlust_basis, null);
 });
+
+// --- Mit externen Bestaenden (Sellerboard) ---
+
+Deno.test("Lager leer, nichts unterwegs, aber Ware im externen Lager -> anliefern statt bestellen", () => {
+  const b = bewerteAsin(inp({
+    velo_tag: 2, tage_ohne_verkauf: 3, avg_preis_cents: 4000,
+    bestand: 0, nachschub_unterwegs: 0, bestand_bekannt: true, reichweite_tage: 0,
+    extern_physisch: 1350, ordered: 2000,
+  }));
+  assertEquals(b.status, "leer_extern_lager");
+  assertEquals(b.schwere, 4);
+  assertEquals(b.verlust_cents, Math.round(2 * 3 * 4000)); // der Verlust laeuft trotzdem
+  assertEquals(b.verlust_art, "laufend");
+});
+
+Deno.test("Lager leer, nichts unterwegs, nichts extern, aber bestellt -> leer_bestellt", () => {
+  const b = bewerteAsin(inp({
+    velo_tag: 1, tage_ohne_verkauf: 2, bestand: 0, nachschub_unterwegs: 0, bestand_bekannt: true,
+    extern_physisch: 0, ordered: 500,
+  }));
+  assertEquals(b.status, "leer_bestellt");
+  assertEquals(b.schwere, 4);
+});
+
+Deno.test("Zu Amazon unterwegs schlaegt externes Lager (Verlust ist adressiert)", () => {
+  const b = bewerteAsin(inp({
+    velo_tag: 1, tage_ohne_verkauf: 2, bestand: 0, nachschub_unterwegs: 75, bestand_bekannt: true,
+    extern_physisch: 1350,
+  }));
+  assertEquals(b.status, "leer_mit_nachschub");
+});
+
+Deno.test("Ohne externe Quelle (Felder fehlen) bleibt alles wie bisher", () => {
+  const b = bewerteAsin(inp({
+    velo_tag: 2, tage_ohne_verkauf: 3, bestand: 0, nachschub_unterwegs: 0, bestand_bekannt: true,
+  }));
+  assertEquals(b.status, "leer_ohne_nachschub");
+  assertEquals(b.schwere, 5);
+});
+
+Deno.test("Reichweite knapp bleibt eine FBA-Warnung — externes Lager aendert die Frist zum Anliefern nicht", () => {
+  const b = bewerteAsin(inp({
+    velo_tag: 3, tage_ohne_verkauf: 0, bestand: 30, nachschub_unterwegs: 0, bestand_bekannt: true,
+    reichweite_tage: 10, extern_physisch: 5000,
+  }));
+  assertEquals(b.status, "reichweite_knapp");
+});

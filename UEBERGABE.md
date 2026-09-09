@@ -855,3 +855,44 @@ Roundtrip-Test). Kann bei Bedarf entfernt werden (es gibt noch keine delete-RPC)
 - Erst ein Report/Feature komplett + getestet, dann nächstes. Kein Big-Bang.
 - LLM/KI nur für Framing/Interpretation, NIE für die Zahlen. Rechnen im Code.
 - Datenverarbeiter-Rolle (DSGVO): AVV mit Kunden, sichere Speicherung, Haftung.
+
+## Nachtrag 10.09.2026 — Sellerboard-Bestandsquelle (externe Lager, Pipeline)
+
+**Was:** Operator Pulse kennt jetzt Bestände ausserhalb von Amazon: eigenes
+Lager, Prep Center, 3PL/Logistiker, bestellte Ware, AWD, sonstige Pipeline —
+aus einem Sellerboard-Export-Link („Export: Lagerbestand"). Amazon (SP-API)
+bleibt die primäre Quelle für FBA und Inbound.
+
+**Bausteine:**
+- `_shared/sellerboard_bestand.ts` — Parser, erkennt Spalten dynamisch (Breit-
+  und Langformat), klassifiziert je Lagerart; unbekannte Zahlenspalten werden
+  benannt und NICHT importiert. Getestet.
+- `_shared/sellerboard_bestand_import.ts` — DB-Schicht: URL im Vault
+  (`sellerboard_bestand_<tenant>`), Referenz in `bestand_verbindungen`; testen /
+  sync / Einstellungen / trennen. Sync ersetzt `bestand_extern` vollständig
+  (sync_id) und schreibt den Tagesstand nach `bestand_extern_verlauf` (mit EK
+  und Wert — Grundlage für Working Capital über die Zeit).
+- `_shared/bestand_gesamt.ts` — DIE Bestandslogik je ASIN: `vereinigeBestand`
+  (physisch / Pipeline / Versorgung), `bewerteKapital` (Kapitalbindung zum EK,
+  Reichweiten). Doppelzählung: Sellerboard-Zeilen der Klasse „amazon" zählen
+  nur, wenn Amazon für den Mandanten GAR NICHTS liefert; sonst stehen sie in
+  `doppelt_uebersprungen`. AWD zählt zur Pipeline (nicht verkaufsfähig).
+- Edge Function `sync-sellerboard-bestand` (service_role), Cron
+  `sync-bestand-extern-stuendlich` (20 * * * *) → `internal.cron_bestand_extern_faellige()`
+  stösst nur Mandanten an, deren `intervall_stunden` abgelaufen ist.
+- `api`: Aktionen `sellerboard_bestand_{speichern,testen,sync,einstellungen,trennen}`,
+  Ressource `bestand_gesamt`, `verbindungen.sellerboard`. MCP-Tool
+  `get_inventory_overview`. Feature-Schlüssel `bestand` (Tarif-Matrix, Tab „Bestand").
+- Eingebunden in Nachschub (neue Status `leer_extern_lager`, `leer_bestellt`,
+  `reichweite_physisch_tage`), Ladenhüter (extern/bestellt je Zeile),
+  Bestandshistorie (`extern` je Zeile als Kontext — die Messung bleibt FBA),
+  Cash-Flow (`kapitalbindung`).
+
+**Sync-Wache:** `sync_stoerungen` meldet jetzt `sellerboard-sellerboard-bestand`
+(kein Erfolg / fehlgeschlagen). Dabei aufgefallen: Die Neufassung vom 28.08.
+hatte die EK-Zweige vom 22.08. verloren — sie sind wieder drin.
+
+**Nicht gebaut:** Auswertung von `bestand_extern_verlauf` über die Zeit (die
+Tabelle füllt sich ab jetzt täglich). Sellerboard-Spaltennamen sind je Konto
+verschieden — die Zuordnung steht in der Verbindung unter „Bestandsspalten" und
+ist bei einem neuen Konto einmal gegenzuprüfen.

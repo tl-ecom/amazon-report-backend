@@ -19,6 +19,10 @@ import { ladeUstFaktor } from "./ust_lauf.ts";
 import { umsatzsteuerZahllast, zahllastFuerTermin, type UstZeile }
   from "./cashflow_ust.ts";
 import { zahlungsplan } from "./cashflow_plan.ts";
+// Kapitalbindung im Bestand: FBA, externes Lager, bestellte Ware — zum EK
+// bewertet. Geld, das schon ausgegeben ist (oder bald faellig wird) und erst
+// ueber den Verkauf zurueckkommt. Gehoert in die Cash-Sicht, nicht in den Gewinn.
+import { kapitalbindung } from "./bestand_gesamt.ts";
 
 // --- Bausteine --------------------------------------------------------------
 
@@ -510,7 +514,7 @@ export async function cashflowUebersicht(
 ): Promise<unknown> {
   const tage = Math.min(365, Math.max(30, Number(args.tage) || 120));
 
-  const [basisRes, zeitRes, ustRes, faktor, stammRes] = await Promise.all([
+  const [basisRes, zeitRes, ustRes, faktor, stammRes, kapital] = await Promise.all([
     supabase.rpc("cashflow_basis", { p_tenant: tenant_id, p_tage: tage }),
     supabase.rpc("cashflow_zeitpunkte", { p_tenant: tenant_id, p_tage: tage }),
     supabase.rpc("cashflow_umsatzsteuer", { p_tenant: tenant_id, p_tage: tage }),
@@ -520,6 +524,8 @@ export async function cashflowUebersicht(
         + "ust_dauerfristverlaengerung, ermaessigter_satz, oss_teilnahme, pan_eu, "
         + "lager_ausland, lager_laender, stammdaten_bestaetigt_am, firmensitz_land")
       .eq("tenant_id", tenant_id).maybeSingle(),
+    // null, wenn weder Amazon noch eine externe Quelle Bestand liefert.
+    kapitalbindung(supabase, tenant_id),
   ]);
   if (basisRes.error) throw new Error(`cashflow_basis: ${basisRes.error.message}`);
 
@@ -661,6 +667,10 @@ export async function cashflowUebersicht(
 
     einbehalt: reserve,
     gebundenes_geld: gebunden,
+    // Kapital im Bestand (zum EK): FBA, externes Lager, bestellt, Inbound —
+    // getrennt, damit „Geld bei Amazon" und „Geld im eigenen Lager" nicht in
+    // einer Zahl verschwinden. Werte null = kein EK bekannt, nicht null Euro.
+    kapitalbindung: kapital,
     termin_gebuehren: termine,
     werbung,
     vorsteuer: vst,

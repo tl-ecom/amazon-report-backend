@@ -25,6 +25,10 @@ export const LUECKE_TAGE = 14;    // Null-Strecke, ab der eine VERSORGUNGSlücke
 // tauchen nur noch als Historie auf und werden nachrangig gezeigt.
 export type LhStatus = "tot" | "wiederanlauf" | "abkuehlend" | "ausgelistet" | "ok";
 
+// Externe Bestaende (Sellerboard) je ASIN — fuer die Frage, wo das Kapital
+// eines Ladenhueters wirklich liegt.
+import { externJeAsin } from "./bestand_gesamt.ts";
+
 export interface LhInput {
   lifetime_units: number;
   units_0_30: number;
@@ -87,9 +91,10 @@ export function bewerteLadenhueter(i: LhInput): LhBewertung {
 
 /** DB-Wrapper: RPC-Basis + Produktnamen zusammenführen, einstufen, Auffällige zurück. */
 export async function ladenhueterRadar(supabase: any, tenant_id: string): Promise<unknown> {
-  const [basisRes, asinRes] = await Promise.all([
+  const [basisRes, asinRes, extern] = await Promise.all([
     supabase.rpc("ladenhueter_basis", { p_tenant: tenant_id }),
     supabase.from("asins").select("asin, produktname").eq("tenant_id", tenant_id),
+    externJeAsin(supabase, tenant_id),
   ]);
   const basis = (basisRes.data ?? []) as any[];
   const titel = new Map<string, string>(
@@ -132,6 +137,11 @@ export async function ladenhueterRadar(supabase: any, tenant_id: string): Promis
       nachschub_unterwegs: r.nachschub_unterwegs == null ? null : nz(r.nachschub_unterwegs),
       bestand_bekannt: Boolean(r.bestand_bekannt),
       ist_fba: Boolean(r.ist_fba),
+      // Externe Bestaende (Sellerboard). Ein toter Artikel mit 2.000 Stueck im
+      // eigenen Lager ist ein anderer Fall als einer mit 12 bei Amazon — das
+      // gebundene Kapital liegt dann ausserhalb von Amazons Sicht.
+      extern_physisch: extern.get(String(r.asin))?.extern_physisch ?? null,
+      ordered: extern.get(String(r.asin))?.ordered ?? null,
       status: b.status,
       schwere: b.schwere,
       einbruch_cents: b.einbruch_cents,
@@ -169,5 +179,14 @@ export async function ladenhueterRadar(supabase: any, tenant_id: string): Promis
     // noch Ware, die auch liegen bleibt. Der Planungsreport kennt den Zulauf
     // nicht; dann ist er unbekannt, nicht null.
     zulauf_bekannt: basis.some((r: any) => r.nachschub_unterwegs != null),
+    // Externe Quelle (Sellerboard) und was davon in Ladenhuetern steckt.
+    hat_externe_bestaende: extern.size > 0,
+    extern_stand: [...extern.values()].reduce<string | null>((m, e) => (!m || (e.stand ?? "") > m ? e.stand : m), null),
+    extern_einheiten_tot_abkuehlend: zeilen
+      .filter((z) => z.status === "tot" || z.status === "abkuehlend")
+      .reduce((s, z) => s + (z.extern_physisch ?? 0), 0),
+    extern_bestellt_tot_abkuehlend: zeilen
+      .filter((z) => z.status === "tot" || z.status === "abkuehlend")
+      .reduce((s, z) => s + (z.ordered ?? 0), 0),
   };
 }

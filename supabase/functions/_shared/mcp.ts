@@ -356,6 +356,26 @@ const TOOLS: ToolDef[] = [
   },
   // --- Pulse-Analytics (READ-ONLY; alles, was wir über die 6 Overviews hinaus gebaut haben) ---
   {
+    name: "get_inventory_overview",
+    description:
+      "Gesamtbestand je ASIN über ALLE Quellen: Amazon SP-API (FBA verfügbar, " +
+      "FBA reserviert, Inbound zu Amazon) plus externe Bestände aus Sellerboard " +
+      "(eigenes Lager, Prep Center, 3PL/Logistiker, bestellt beim Lieferanten, " +
+      "AWD, sonstige Pipeline). Zwei Summen, die NICHT vermischt werden dürfen: " +
+      "`physisch_gesamt` = FBA + externes Lager (greifbar, kann angeliefert " +
+      "werden) und `pipeline_gesamt` = Inbound + bestellt + AWD/unterwegs (kommt " +
+      "noch); `versorgung_gesamt` ist beides zusammen. Amazon ist für FBA und " +
+      "Inbound die primäre Quelle — Sellerboard-FBA-Werte werden NICHT gezählt, " +
+      "wenn Amazon liefert (Feld `doppelt_uebersprungen`). Dazu `kapital`: " +
+      "Kapitalbindung zum Einkaufspreis je Klasse (FBA, extern, bestellt, " +
+      "Inbound), Wert ausserhalb Amazons, EK-Abdeckung und Reichweite in Tagen " +
+      "(FBA / physisch / Versorgung) aus der Verkaufsgeschwindigkeit der letzten " +
+      "90 Tage. WICHTIG: null heisst unbekannt, nicht 0 — besonders bei FBA ohne " +
+      "Amazon-Datensatz und bei Werten ohne EK. `hinweise` immer mit ausgeben.",
+    inputSchema: LEERES_SCHEMA,
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("bestand", args) : pulseNichtVerfuegbar()),
+  },
+  {
     name: "get_cashflow",
     description:
       "Geldfluss INNERHALB von Amazon — nicht Gewinn. Beantwortet: wann kommt die " +

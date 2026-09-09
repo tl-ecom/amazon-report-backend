@@ -44,8 +44,6 @@ Deno.test("Cash-Flow haengt an einem eigenen Tarif-Schluessel", () => {
   // absichtlich offen. Ein Kunde ohne das Feature haette die Daten per
   // direktem API-Aufruf bekommen.
   assertEquals(RESOURCE_FEATURE.cashflow, "cashflow");
-  assertEquals(RESOURCE_FEATURE.stammdaten, "cashflow");
-  assertEquals(RESOURCE_FEATURE.stammdaten_setzen, "cashflow");
 
   assertEquals(zugriffErlaubt("cashflow", { cashflow: true }, false), true);
   assertEquals(zugriffErlaubt("cashflow", { cashflow: false }, false), false);
@@ -54,10 +52,20 @@ Deno.test("Cash-Flow haengt an einem eigenen Tarif-Schluessel", () => {
   assertEquals(zugriffErlaubt("cashflow", {}, true), true);
 });
 
-Deno.test("Jede Web-Ressource des Cash-Bereichs ist gegated", () => {
-  // Wache gegen den Fehler, nicht gegen die eine Stelle: wer hier eine neue
-  // Ressource ergaenzt, muss sie auch in RESOURCE_FEATURE eintragen.
-  for (const r of ["cashflow", "stammdaten", "stammdaten_setzen"]) {
+Deno.test("Eigene Angaben sind NICHT gegated", () => {
+  // Stammdaten, Steuerprofil und Ziele sind Angaben, die der Verkaeufer ueber
+  // sich macht. Haengen sie an einem Tarif-Schalter, kommt ein Teilnehmer ohne
+  // Cash-Flow oder EK an seine eigenen Angaben nicht heran — und dann rechnet
+  // Pulse fuer ihn dauerhaft mit Luecken, die er selbst schliessen koennte.
+  for (const r of [
+    "stammdaten", "stammdaten_setzen", "einstellungen", "einstellungen_setzen",
+    "ust_faktor", "ust_faktor_setzen", "steuerprofil_setzen",
+  ]) {
+    assertEquals(RESOURCE_FEATURE[r], undefined, `${r} ist gegated`);
+    assertEquals(zugriffErlaubt(r, {}, false), true, `${r} ist gesperrt`);
+  }
+  // Die AUSWERTUNGEN bleiben gegated — sonst waere das Gating sinnlos.
+  for (const r of ["cashflow", "asin_ek", "gebuehren_vorschau"]) {
     assertEquals(typeof RESOURCE_FEATURE[r], "string", `${r} ist ungegated`);
   }
 });

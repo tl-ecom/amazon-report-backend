@@ -194,7 +194,14 @@ export interface HistorieZeile extends ProduktHistorie {
    * auf heute.
    */
   stand_alt_tage: number;
+  /**
+   * Externe Bestaende (Sellerboard) zum jetzigen Stand — Kontext, keine Messung.
+   * null = keine externe Quelle verbunden (unbekannt, nicht 0).
+   */
+  extern: { physisch: number; ordered: number; pipeline: number; stand: string | null } | null;
 }
+
+import { externJeAsin } from "./bestand_gesamt.ts";
 
 /**
  * Bestandshistorie aller Produkte eines Kontos. Liest die aggregierte Tagesreihe
@@ -232,11 +239,23 @@ export async function bestandshistorie(
     proAsin.set(key, liste);
   }
 
+  // Externe Bestaende (Sellerboard): aendern die Messung NICHT — ein Tag ohne
+  // verkaufsfaehige FBA-Einheit war fuer den Kunden nicht lieferbar, egal was im
+  // eigenen Lager stand. Sie stehen als Kontext daneben: „leer bei Amazon, aber
+  // 1.350 beim Logistiker" ist ein Anlieferproblem, kein Beschaffungsproblem.
+  const extern = await externJeAsin(supabase, tenant_id);
+
   const zeilen: HistorieZeile[] = [];
   for (const [asin, staende] of proAsin) {
     const h = findeLeerphasen(staende, { mindest_tage: mindest });
     if (!h) continue;
-    zeilen.push({ asin, produktname: titel.get(asin) ?? asin, stand_alt_tage: 0, ...h });
+    const ex = extern.get(asin);
+    zeilen.push({
+      asin, produktname: titel.get(asin) ?? asin, stand_alt_tage: 0, ...h,
+      extern: ex
+        ? { physisch: ex.extern_physisch, ordered: ex.ordered, pipeline: ex.pipeline_sonstig, stand: ex.stand }
+        : null,
+    });
   }
 
   // Kontostand = der jüngste Tag, für den überhaupt gemessen wurde. Produkte, die
@@ -274,6 +293,10 @@ export async function bestandshistorie(
      * mehr). Bewusst getrennt: das ist Historie, kein aktueller Handlungsbedarf.
      */
     anzahl_leer_stand_alt: zeilen.filter((z) => z.aktuell_leer && !jetztLeer(z)).length,
+    /** Jetzt leer bei Amazon, aber physisch im eigenen Lager/Prep/3PL vorhanden: anliefern, nicht bestellen. */
+    anzahl_jetzt_leer_mit_extern: zeilen.filter((z) => jetztLeer(z) && (z.extern?.physisch ?? 0) > 0).length,
+    hat_externe_bestaende: extern.size > 0,
+    extern_stand: [...extern.values()].reduce<string | null>((m, e) => (!m || (e.stand ?? "") > m ? e.stand : m), null),
     anzahl_mit_phasen: zeilen.filter((z) => z.phasen.length > 0).length,
     tage_leer_gesamt: zeilen.reduce((s, z) => s + z.tage_leer, 0),
     entgangene_einheiten_gesamt: zeilen.reduce(

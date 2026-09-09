@@ -20,6 +20,7 @@ import { dispatch, McpContext, protokollFehler } from "../_shared/mcp.ts";
 import { ladeVerlaufFactory } from "../_shared/verlauf.ts";
 import { produktUebersicht } from "../_shared/produkte.ts";
 import { cashflowUebersicht } from "../_shared/cashflow.ts";
+import { bestandGesamt } from "../_shared/bestand_gesamt.ts";
 import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
 import { adsVerlauf } from "../_shared/ads_verlauf.ts";
 import { istPlattformAdmin } from "../_shared/admin.ts";
@@ -167,6 +168,7 @@ Deno.serve(async (req) => {
       switch (art) {
         case "produkte": return await produktUebersicht(supabase, tenant_id, pulseArgs);
         case "cashflow": return await cashflowUebersicht(supabase, tenant_id, pulseArgs);
+        case "bestand": return await bestandGesamt(supabase, tenant_id);
         case "kpi": return await kpiVerlauf(supabase, tenant_id);
         case "ads_verlauf": return await adsVerlauf(supabase, tenant_id, pulseArgs, sicht);
         case "ads_struktur": return await adsStruktur(supabase, tenant_id, pulseArgs);

@@ -28,6 +28,11 @@ verify_jwt = true
 [functions.sync-sqp]
 verify_jwt = true
 
+# Externe Bestaende (eigenes Lager, Prep Center, 3PL, bestellt) aus dem
+# Sellerboard-Bestands-Feed. pg_cron/manuell mit service_role -> verify_jwt = true.
+[functions.sync-sellerboard-bestand]
+verify_jwt = true
+
 # Einkaufspreise aus dem Sellerboard-Export-Link. pg_cron/manuell mit service_role
 # -> verify_jwt = true.
 [functions.sync-ek]

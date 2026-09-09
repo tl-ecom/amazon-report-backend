@@ -40,12 +40,19 @@ import { radarDaten } from "../_shared/reimbursements.ts";
 import { stockoutRadar } from "../_shared/stockouts.ts";
 import { ladenhueterRadar } from "../_shared/ladenhueter.ts";
 import { bestandshistorie } from "../_shared/bestandshistorie.ts";
+import { aendereBestellung, bestandsplanung, erstelleBestellung, loescheBestellung, setzeBestellungStatus, setzePlanung, setzePlanungVorgabe }
+  from "../_shared/bestandsplanung.ts";
 import { boardReport } from "../_shared/board.ts";
 import { ertragVerlauf, listeEk, loescheEk, setzeEk } from "../_shared/ertrag.ts";
 import { ladeEinstellungen, ladeStammdaten, setzeAsinEinstellung, setzeEinstellungen, setzeStammdaten }
   from "../_shared/einstellungen.ts";
 import { cashflowUebersicht } from "../_shared/cashflow.ts";
 import { importiereEkCsv, importiereEkVonUrl, speichereEkUrl } from "../_shared/sellerboard_import.ts";
+import {
+  bestandVerbindungStatus, pruefeBestandVerbindung, setzeBestandEinstellungen, speichereBestandUrl,
+  syncSellerboardBestand, trenneBestandVerbindung,
+} from "../_shared/sellerboard_bestand_import.ts";
+import { bestandGesamt } from "../_shared/bestand_gesamt.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, legeFirmaAn, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
 import { importiereFeeSchedule, listeFeeKlassifizierung, listeFeeSchedule, setzeFeeKlassifizierung } from "../_shared/fee_stammdaten.ts";
 import { setzeSteuerprofil, setzeUstFaktor, ustStatus } from "../_shared/ust_lauf.ts";
@@ -366,6 +373,29 @@ Deno.serve(async (req) => {
         const r = await loescheEk(service, tenantId, String((args as any)?.id ?? ""));
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
+      // Sellerboard-Bestandsquelle (eigenes Lager, Prep Center, 3PL, bestellt).
+      // Die Feed-URL geht in den Vault und wird NIE zurueckgegeben. „testen"
+      // schreibt nichts; „sync" ist dieselbe Funktion, die auch der Cron ruft.
+      if (action === "sellerboard_bestand_speichern") {
+        const r = await speichereBestandUrl(service, tenantId, String((args as any)?.url ?? ""));
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "sellerboard_bestand_testen") {
+        const r = await pruefeBestandVerbindung(service, tenantId);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "sellerboard_bestand_sync") {
+        const r = await syncSellerboardBestand(service, tenantId);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "sellerboard_bestand_einstellungen") {
+        const r = await setzeBestandEinstellungen(service, tenantId, args as any);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "sellerboard_bestand_trennen") {
+        const r = await trenneBestandVerbindung(service, tenantId);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
       // Steuerliche Stammdaten: was kein Amazon-Bericht hergibt und die
       // Cash-Sicht trotzdem braucht (Voranmeldung, OSS, Pan-EU, Lagerland).
       if (action === "stammdaten_setzen") {
@@ -384,6 +414,32 @@ Deno.serve(async (req) => {
       }
       // Steuerprofil der Firma: Sitzland + Vorsteuerabzug. Daraus leitet sich
       // ab, ob Gebühren netto gerechnet werden — ohne dass jemand rechnen muss.
+      // Bestandsplanung: Parameter je Produkt bzw. Firmenvorgabe, und die eigenen
+      // Bestellungen, die Amazon nicht kennt (fliessen in die Zeitachse ein).
+      if (action === "planung_setzen") {
+        const r = await setzePlanung(service, tenantId, (args ?? {}) as Record<string, unknown>);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "planung_vorgabe_setzen") {
+        const r = await setzePlanungVorgabe(service, tenantId, (args ?? {}) as Record<string, unknown>);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "bestellung_erstellen") {
+        const r = await erstelleBestellung(service, tenantId, userData.user.id, (args ?? {}) as Record<string, unknown>);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "bestellung_aendern") {
+        const r = await aendereBestellung(service, tenantId, (args ?? {}) as Record<string, unknown>);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "bestellung_status") {
+        const r = await setzeBestellungStatus(service, tenantId, String((args as any)?.id ?? ""), String((args as any)?.status ?? ""));
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
+      if (action === "bestellung_loeschen") {
+        const r = await loescheBestellung(service, tenantId, String((args as any)?.id ?? ""));
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
       if (action === "steuerprofil_setzen") {
         const r = await setzeSteuerprofil(
           service, tenantId, (args as any)?.land, (args as any)?.vorsteuerabzug,
@@ -525,6 +581,10 @@ Deno.serve(async (req) => {
           connected_at: (r as any).connected_at ?? null,
         };
       }
+      // Sellerboard-Bestandsquelle: Status ohne URL (die bleibt im Vault).
+      map.sellerboard = await bestandVerbindungStatus(service, tenantId).catch((e) => ({
+        connected: false, status: "fehler", hat_url: false, letzter_fehler: String((e as Error)?.message ?? e),
+      }));
       return json({ ok: true, resource, tenant_id: tenantId, data: map });
     }
     if (resource === "fr_experiments") {
@@ -603,8 +663,16 @@ Deno.serve(async (req) => {
     if (resource === "stockout_radar") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await stockoutRadar(service, tenantId) });
     }
+    // Gesamtbestand je ASIN ueber alle Quellen (Amazon + Sellerboard) inkl. Kapitalbindung.
+    if (resource === "bestand_gesamt") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await bestandGesamt(service, tenantId) });
+    }
     if (resource === "ladenhueter_radar") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await ladenhueterRadar(service, tenantId) });
+    }
+    // Bestandsplanung: Bestelltermin und -menge je Produkt, Zeitachse, Bestellungen.
+    if (resource === "bestandsplanung") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await bestandsplanung(service, tenantId, args as any) });
     }
     if (resource === "bestandshistorie") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await bestandshistorie(service, tenantId, args as any) });

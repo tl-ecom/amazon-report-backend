@@ -23,17 +23,12 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   ertrag_verlauf: "verlauf",
   // Einkaufspreise sind ein eigener Menuepunkt -> eigener Feature-Key.
   // Steuerfaktor der Gebühren: gehört zur Ertragsrechnung, hängt am EK-Bereich.
-  ust_faktor: "ek",
-  ust_faktor_setzen: "ek",
-  steuerprofil_setzen: "ek",
   asin_ek: "ek",
   ek_setzen: "ek",
   ek_loeschen: "ek",
   ek_import_csv: "ek",
   ek_import_url: "ek",
   ek_url_speichern: "ek",
-  einstellungen: "verlauf",
-  einstellungen_setzen: "verlauf",
   get_sales_overview: "sales",
   // Derselbe Report ueber einen gewaehlten Zeitraum — dasselbe Feature.
   sales_fenster: "sales",
@@ -71,6 +66,15 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   sqp_laden: "sqp",
   reimbursements_radar: "erstattungen",
   stockout_radar: "nachschub",
+  // Bestandsplanung (Termin, Menge, Zeitachse, Bestellungen) ist derselbe
+  // Bereich wie der Nachschub-Radar — ein Schalter in der Matrix.
+  bestandsplanung: "nachschub",
+  planung_setzen: "nachschub",
+  planung_vorgabe_setzen: "nachschub",
+  bestellung_erstellen: "nachschub",
+  bestellung_aendern: "nachschub",
+  bestellung_status: "nachschub",
+  bestellung_loeschen: "nachschub",
   ladenhueter_radar: "ladenhueter",
   bestandshistorie: "bestandshistorie",
   board_report: "board",
@@ -83,6 +87,16 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   // Eigenes Feature, nicht an "lager" gehaengt: sonst haette der Bereich keine
   // eigene Zeile in der Tarif-Matrix und liesse sich nicht getrennt schalten.
   betriebskosten: "betriebskosten",
+  // Vereinheitlichte Bestandssicht (FBA + externes Lager + Pipeline) samt der
+  // Sellerboard-Bestandsquelle. Eigener Schluessel: Nachschub kann im Tarif
+  // sein, ohne dass der Teilnehmer eine externe Quelle anbinden darf.
+  bestand_gesamt: "bestand",
+  get_inventory_overview: "bestand",
+  sellerboard_bestand_speichern: "bestand",
+  sellerboard_bestand_testen: "bestand",
+  sellerboard_bestand_sync: "bestand",
+  sellerboard_bestand_einstellungen: "bestand",
+  sellerboard_bestand_trennen: "bestand",
   masse_uebersicht: "masse",
   abrechnungen: "auszahlungen",
   // Cash-Management. Eigener Schluessel und NICHT an "auszahlungen" gehaengt:
@@ -90,10 +104,6 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   // Rhythmus, Einbehalt und Steuerlast — das ist ein anderer Gegenwert und
   // gehoert in der Matrix getrennt schaltbar.
   cashflow: "cashflow",
-  // Die steuerlichen Stammdaten sind die Eingabe fuer genau diese Rechnung
-  // und haengen deshalb am selben Schluessel.
-  stammdaten: "cashflow",
-  stammdaten_setzen: "cashflow",
   // MCP-Zugang (KI-Anbindung) — schaltbar, damit das Häkchen in der Tarif-Matrix
   // auch wirklich greift und nicht nur den Tab versteckt.
   mcp_tokens: "mcp",
@@ -146,6 +156,19 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   get_change_log: "aenderungen",
   get_strategy_overview: "strategie",
 };
+
+// BEWUSST NICHT gelistet, also immer erlaubt: stammdaten, stammdaten_setzen,
+// einstellungen, einstellungen_setzen, ust_faktor, ust_faktor_setzen,
+// steuerprofil_setzen.
+//
+// Das sind Angaben, die der Verkaeufer ueber SICH macht — Voranmeldungs-
+// Rhythmus, Sitzland, Vorsteuerabzug, Ziel-ACOS. Sie hingen frueher an
+// "cashflow" bzw. "ek" und waren damit an Bereiche gekoppelt, die im Tarif
+// fehlen koennen. Ein Teilnehmer ohne Cash-Flow kam so an seine eigenen
+// Stammdaten nicht heran, obwohl genau sie die Rechnung erst richtig machen.
+//
+// Die AUSWERTUNGEN daraus bleiben gegated: cashflow, ek, gebuehren. Die
+// Eingabe ist Voraussetzung, keine Leistung.
 
 /**
  * Gilt fuer diesen Aufruf Coach-Vollzugriff?

@@ -39,10 +39,16 @@ export const REICHWEITE_KNAPP_TAGE = 28;
 // Fuer den Deckungsbeitrag: dieselbe Rechnung wie in der Produktuebersicht,
 // damit nicht zwei Ansichten verschiedene Gewinne behaupten.
 import { produktUebersicht } from "./produkte.ts";
+// Externe Bestaende (Sellerboard): eigenes Lager, Prep Center, 3PL, bestellt.
+// Sie aendern die Einstufung: „FBA leer, aber 1.350 beim Logistiker" ist kein
+// „nichts bestellt", sondern „sofort anliefern".
+import { externJeAsin } from "./bestand_gesamt.ts";
 
 export type Status =
   | "leer_ohne_nachschub"
   | "leer"              // aus der Verkaufslücke geschlossen, Bestand unbekannt
+  | "leer_extern_lager" // FBA leer, Ware liegt aber im eigenen Lager/Prep/3PL
+  | "leer_bestellt"     // FBA leer, nichts zu Amazon unterwegs, aber beim Lieferanten bestellt
   | "leer_mit_nachschub"
   | "reichweite_knapp"
   | "buybox"
@@ -62,6 +68,12 @@ export interface AsinInput {
   bestand_bekannt?: boolean;
   /** Tage bis leer (bestand / Velocity). null = unbekannt. */
   reichweite_tage?: number | null;
+  /** Physisch ausserhalb Amazons (eigenes Lager + Prep Center + 3PL). null/fehlend = keine externe Quelle. */
+  extern_physisch?: number | null;
+  /** Beim Lieferanten bestellt, noch nicht eingetroffen. */
+  ordered?: number | null;
+  /** AWD + sonstige Pipeline (z. B. in transit zum Lager). */
+  pipeline_sonstig?: number | null;
   /**
    * Deckungsbeitrag je Stück in Cent: Nettopreis − EK − Amazon-Gebühren.
    * null/fehlend = nicht berechenbar (kein EK oder keine Gebühren hinterlegt).
@@ -128,9 +140,14 @@ export function bewerteAsin(i: AsinInput): Bewertung {
       const tage = Math.max(1, Math.min(tageOhne, LEER_MAX_TAGE));
       const wert = stueckwert(i);
       const verlust = Math.round(velo * tage * wert.cents);
-      return unterwegs > 0
-        ? { status: "leer_mit_nachschub", schwere: 3, verlust_cents: verlust, verlust_art: "laufend", verlust_basis: wert.basis }
-        : { status: "leer_ohne_nachschub", schwere: 5, verlust_cents: verlust, verlust_art: "laufend", verlust_basis: wert.basis };
+      const laufend = { verlust_cents: verlust, verlust_art: "laufend" as const, verlust_basis: wert.basis };
+      // Reihenfolge = Naehe der Ware: zu Amazon unterwegs (Verlust adressiert) >
+      // im eigenen Lager (heute anliefern) > beim Lieferanten bestellt (dauert
+      // Wochen) > nichts davon (niemand hat gehandelt).
+      if (unterwegs > 0) return { status: "leer_mit_nachschub", schwere: 3, ...laufend };
+      if (nz(i.extern_physisch) > 0) return { status: "leer_extern_lager", schwere: 4, ...laufend };
+      if (nz(i.ordered) + nz(i.pipeline_sonstig) > 0) return { status: "leer_bestellt", schwere: 4, ...laufend };
+      return { status: "leer_ohne_nachschub", schwere: 5, ...laufend };
     }
 
     const reichweite = i.reichweite_tage == null ? null : nz(i.reichweite_tage);
@@ -172,7 +189,7 @@ export function bewerteAsin(i: AsinInput): Bewertung {
  * zurückgeben. Reichert Produktnamen an und liefert das S&T-Fenster mit.
  */
 export async function stockoutRadar(supabase: any, tenant_id: string): Promise<unknown> {
-  const [basisRes, stRes, asinRes, ertragRes] = await Promise.all([
+  const [basisRes, stRes, asinRes, ertragRes, extern] = await Promise.all([
     supabase.rpc("stockout_basis", { p_tenant: tenant_id, p_tage: FENSTER_TAGE }),
     supabase.from("report_data").select("payload")
       .eq("tenant_id", tenant_id).eq("report_type", "GET_SALES_AND_TRAFFIC_REPORT").eq("is_latest", true).maybeSingle(),
@@ -180,7 +197,11 @@ export async function stockoutRadar(supabase: any, tenant_id: string): Promise<u
     // Deckungsbeitrag je Stueck: dieselbe Rechnung wie in der Produktuebersicht,
     // damit beide Ansichten nicht verschiedene Gewinne behaupten.
     produktUebersicht(supabase, tenant_id, { tage: FENSTER_TAGE }).catch(() => null),
+    // Externe Bestaende je ASIN (leer, wenn keine Quelle verbunden ist).
+    externJeAsin(supabase, tenant_id),
   ]);
+  const hatExtern = extern.size > 0;
+  const externStand = [...extern.values()].reduce<string | null>((m, e) => (!m || (e.stand ?? "") > m ? e.stand : m), null);
 
   const basis = (basisRes.data ?? []) as any[];
   const titel = new Map<string, string>(
@@ -222,6 +243,7 @@ export async function stockoutRadar(supabase: any, tenant_id: string): Promise<u
 
   const zeilen = basis.map((r) => {
     const bb = bbMap.get(String(r.asin));
+    const ex = extern.get(String(r.asin));
     const eingabe: AsinInput = {
       velo_tag: nz(r.velo_tag),
       tage_ohne_verkauf: nz(r.tage_ohne_verkauf),
@@ -229,6 +251,9 @@ export async function stockoutRadar(supabase: any, tenant_id: string): Promise<u
       buybox_pct: bb?.buybox ?? null,
       deckungsbeitrag_cents: dbJeAsin.get(String(r.asin)) ?? null,
       sessions: bb?.sessions ?? null,
+      extern_physisch: ex ? ex.extern_physisch : null,
+      ordered: ex ? ex.ordered : null,
+      pipeline_sonstig: ex ? ex.pipeline_sonstig : null,
       bestand: r.bestand == null ? null : nz(r.bestand),
       nachschub_unterwegs: r.nachschub_unterwegs == null ? null : nz(r.nachschub_unterwegs),
       bestand_bekannt: Boolean(r.bestand_bekannt),
@@ -249,6 +274,15 @@ export async function stockoutRadar(supabase: any, tenant_id: string): Promise<u
       nachschub_unterwegs: eingabe.nachschub_unterwegs,
       bestand_bekannt: eingabe.bestand_bekannt,
       reichweite_tage: eingabe.reichweite_tage,
+      // Externe Bestaende (Sellerboard). null = keine externe Quelle, nicht 0.
+      extern_physisch: ex ? ex.extern_physisch : null,
+      ordered: ex ? ex.ordered : null,
+      pipeline_sonstig: ex ? ex.pipeline_sonstig : null,
+      // Reichweite auf FBA + externes Lager: so lange reicht die Ware, die man
+      // heute anliefern koennte. null ohne Bestand oder ohne Velocity.
+      reichweite_physisch_tage: eingabe.bestand_bekannt && nz(r.velo_tag) > 0
+        ? Math.round(((nz(eingabe.bestand) + (ex?.extern_physisch ?? 0)) / nz(r.velo_tag)) * 10) / 10
+        : null,
       ...b,
     };
   }).filter((z) => z.status !== "ok");
@@ -263,7 +297,8 @@ export async function stockoutRadar(supabase: any, tenant_id: string): Promise<u
     zeilen,
     // Headline: konkret schon entgangener Umsatz ALLER leeren Produkte (wächst täglich).
     summe_laufend_cents: zeilen
-      .filter((z) => z.status === "leer" || z.status === "leer_ohne_nachschub" || z.status === "leer_mit_nachschub")
+      .filter((z) => z.status === "leer" || z.status === "leer_ohne_nachschub" || z.status === "leer_mit_nachschub"
+        || z.status === "leer_extern_lager" || z.status === "leer_bestellt")
       .reduce((s, z) => s + z.verlust_cents, 0),
     // Der dringende Teil davon: leer UND nichts bestellt.
     summe_ohne_nachschub_cents: zeilen
@@ -271,6 +306,8 @@ export async function stockoutRadar(supabase: any, tenant_id: string): Promise<u
       .reduce((s, z) => s + z.verlust_cents, 0),
     anzahl_leer_ohne_nachschub: zaehle("leer_ohne_nachschub"),
     anzahl_leer_mit_nachschub: zaehle("leer_mit_nachschub"),
+    anzahl_leer_extern_lager: zaehle("leer_extern_lager"),
+    anzahl_leer_bestellt: zaehle("leer_bestellt"),
     anzahl_reichweite_knapp: zaehle("reichweite_knapp"),
     anzahl_leer: zaehle("leer"), // nur wo der Bestand unbekannt ist
     anzahl_kritisch: zaehle("kritisch"),
@@ -292,5 +329,10 @@ export async function stockoutRadar(supabase: any, tenant_id: string): Promise<u
     // unbekannt, nicht null — und die Bewertung darf daraus nicht schliessen,
     // es sei nichts bestellt.
     zulauf_bekannt: basis.some((r: any) => r.nachschub_unterwegs != null),
+    // Externe Quelle (Sellerboard): ob sie verbunden ist und wie alt ihr Stand ist.
+    // Ohne sie bleiben extern_physisch/ordered je Zeile null — unbekannt, nicht 0.
+    hat_externe_bestaende: hatExtern,
+    extern_stand: externStand,
+    extern_quelle: hatExtern ? ([...extern.values()][0]?.quelle ?? null) : null,
   };
 }
