@@ -556,7 +556,14 @@ export async function bestandsplanung(supabase: any, tenant_id: string, args: Pl
   const von90 = tagPlus(heute, -90);
   let vorjahrRueckfall = 0;
 
-  const zeilen = ((basisRes.data ?? []) as any[]).map((r) => {
+  // Ohne Lagerdatensatz UND ohne Verkauf in 90 Tagen gibt es nichts zu planen:
+  // weder Bestand noch Geschwindigkeit. Solche Zeilen (bei grossen Katalogen
+  // hunderte, einmal verkaufte ASINs) wuerden die Tabelle nur zuschuetten.
+  const basisZeilen = ((basisRes.data ?? []) as any[]);
+  const relevant = basisZeilen.filter((r) => Boolean(r.bestand_bekannt) || nz(r.units_90) > 0);
+  const ausgeblendet = basisZeilen.length - relevant.length;
+
+  const zeilen = relevant.map((r) => {
     const asin = String(r.asin);
     const planung = planungJeAsin.get(asin) ?? null;
     const parameter = fuehreParameterZusammen(planung, firmaParam);
@@ -663,6 +670,8 @@ export async function bestandsplanung(supabase: any, tenant_id: string, args: Pl
       .reduce((s, z) => s + z.bestellmenge, 0),
     vorjahr_rueckfall_anzahl: vorjahrRueckfall,
     anzahl_produkte: zeilen.length,
+    /** ASINs ohne Lagerdatensatz und ohne Verkauf in 90 Tagen — nicht planbar, nicht gelistet. */
+    anzahl_ausgeblendet: ausgeblendet,
     zeilen,
     bestellungen,
     anzahl_offene_bestellungen: bestellungen.filter((b) => b.offen).length,
