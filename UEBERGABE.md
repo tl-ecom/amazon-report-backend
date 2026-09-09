@@ -879,7 +879,7 @@ bleibt die primäre Quelle für FBA und Inbound.
   `doppelt_uebersprungen`. AWD zählt zur Pipeline (nicht verkaufsfähig).
 - Edge Function `sync-sellerboard-bestand` (service_role), Cron
   `sync-bestand-extern-stuendlich` (20 * * * *) → `internal.cron_bestand_extern_faellige()`
-  stösst nur Mandanten an, deren `intervall_stunden` abgelaufen ist.
+  stösst nur Mandanten an, deren `intervall_stunden` abgelaufen ist (Voreinstellung 24 h — Sellerboard erneuert den Export höchstens täglich; wählbar täglich, wöchentlich, monatlich).
 - `api`: Aktionen `sellerboard_bestand_{speichern,testen,sync,einstellungen,trennen}`,
   Ressource `bestand_gesamt`, `verbindungen.sellerboard`. MCP-Tool
   `get_inventory_overview`. Feature-Schlüssel `bestand` (Tarif-Matrix, Tab „Bestand").

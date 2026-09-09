@@ -79,7 +79,7 @@ export async function bestandVerbindungStatus(supabase: any, tenant_id: string):
   const v = await ladeVerbindung(supabase, tenant_id);
   if (!v) {
     return {
-      connected: false, status: "nicht_verbunden", hat_url: false, auto_sync: true, intervall_stunden: 6,
+      connected: false, status: "nicht_verbunden", hat_url: false, auto_sync: true, intervall_stunden: 24,
       zuletzt_versuch: null, zuletzt_erfolg: null, letzter_fehler: null, zeilen_zuletzt: null,
       erkannte_spalten: null, je_lagerart: null,
     };
@@ -89,7 +89,7 @@ export async function bestandVerbindungStatus(supabase: any, tenant_id: string):
     status: String(v.status ?? "ungeprueft"),
     hat_url: Boolean(v.url_secret),
     auto_sync: v.auto_sync !== false,
-    intervall_stunden: Number(v.intervall_stunden) || 6,
+    intervall_stunden: Number(v.intervall_stunden) || 24,
     zuletzt_versuch: v.zuletzt_versuch ?? null,
     zuletzt_erfolg: v.zuletzt_erfolg ?? null,
     letzter_fehler: v.letzter_fehler ?? null,
@@ -119,7 +119,7 @@ export async function setzeBestandEinstellungen(
   if ("auto_sync" in args) satz.auto_sync = args.auto_sync === true || args.auto_sync === "true";
   if ("intervall_stunden" in args) {
     const n = Math.round(Number(args.intervall_stunden));
-    if (!Number.isFinite(n) || n < 1 || n > 168) throw new Error("Intervall: bitte 1 bis 168 Stunden angeben.");
+    if (!Number.isFinite(n) || n < 1 || n > 744) throw new Error("Intervall: bitte 1 bis 744 Stunden angeben (24 = täglich, 168 = wöchentlich, 720 = monatlich).");
     satz.intervall_stunden = n;
   }
   if (Object.keys(satz).length === 0) throw new Error("Nichts zu ändern.");
