@@ -266,14 +266,23 @@ export async function produktUebersicht(
       + "unbekannt, nicht für null.",
     );
   }
-  const unvollstaendig = produkte.filter((p: any) =>
-    p.gebuehren_abdeckung != null && p.gebuehren_abdeckung < 0.95);
+  // Abdeckung = Anteil der Bestellungen, die Amazon im Zeitraum schon
+  // abgerechnet hat. Ein blosser Zaehler ("26 Produkte betroffen") sagt nichts
+  // darueber, wie schlimm es ist — deshalb kommt die Spanne mit. 60 % Abdeckung
+  // heisst: rund 40 % der Gebuehren fehlen noch, der Gewinn steht zu hoch.
+  const mitAbdeckung = produkte
+    .filter((p: any) => p.gebuehren_abdeckung != null)
+    .map((p: any) => p.gebuehren_abdeckung as number);
+  const unvollstaendig = mitAbdeckung.filter((a) => a < 0.95);
   if (unvollstaendig.length > 0) {
+    const pz = (a: number) => Math.round(a * 100);
     warnungen.push(
-      `${unvollstaendig.length} Produkt(e) haben noch nicht abgerechnete `
-      + "Bestellungen im Zeitraum. Amazon rechnet mit Verzug ab; die Gebühren "
-      + "sind dort unvollständig, nicht niedrig. Siehe `gebuehren_abdeckung` "
-      + "je Produkt.",
+      `Bei ${unvollstaendig.length} von ${mitAbdeckung.length} Produkten hat `
+      + "Amazon die Bestellungen des Zeitraums noch nicht vollständig "
+      + `abgerechnet (Abdeckung ${pz(Math.min(...unvollstaendig))} % bis `
+      + `${pz(Math.max(...unvollstaendig))} %). Die Gebühren sind dort `
+      + "unvollständig, nicht niedrig — der ausgewiesene Gewinn steht zu hoch. "
+      + "Siehe `gebuehren_abdeckung` je Produkt.",
     );
   }
 

@@ -283,6 +283,8 @@ Deno.test("Warnung: unvollstaendig abgerechnete Bestellungen", async () => {
   }), "t", ZEITRAUM) as any;
 
   const w = (r.warnungen as string[]).join(" ");
-  assertEquals(w.includes("nicht abgerechnete"), true);
+  assertEquals(w.includes("1 von 1 Produkten"), true);
+  // Die Spanne muss mit: ein blosser Zaehler sagt nicht, wie schlimm es ist.
+  assertEquals(w.includes("80 % bis 80 %"), true);
   assertEquals(r.lagergebuehr_vollstaendig, true);
 });
