@@ -328,9 +328,10 @@ Deno.serve(async (req) => {
       const agId = await ads.anzeigengruppe(cid, str(body.adGroupId));
       if (!agId.ok) return json({ error: agId.detail }, 400);
       // Duplikat-Schutz: gleiches Keyword + Match in der Kampagne?
-      const vorhanden = await ads.alle("/sp/keywords/list", CT.keyword, { campaignIdFilter: { include: [cid] }, matchTypeFilter: { include: [mt] } }, "keywords");
+      // Kein matchTypeFilter im Request: Amazon lehnt ihn in dieser Form ab (400). Match-Typ lokal filtern.
+      const vorhanden = await ads.alle("/sp/keywords/list", CT.keyword, { campaignIdFilter: { include: [cid] } }, "keywords");
       if (!vorhanden.ok) return json({ error: "Keywords prüfen fehlgeschlagen", detail: vorhanden.detail }, 502);
-      const dup = vorhanden.daten.find((k: any) => String(k.keywordText).toLowerCase() === text.toLowerCase());
+      const dup = vorhanden.daten.find((k: any) => k.matchType === mt && k.state !== "ARCHIVED" && String(k.keywordText).toLowerCase() === text.toLowerCase());
       if (dup) {
         await spur([{ aktion: "keyword_anlegen", objekt_art: "keyword", objekt_id: String(dup.keywordId), campaign_id: cid, nachher: { keywordText: text, matchType: mt, bid }, ergebnis: "uebersprungen", detail: `existiert schon (state ${dup.state}, bid ${dup.bid})` }]);
         return json({ ergebnis: "uebersprungen", detail: "Keyword existiert schon in dieser Kampagne", keyword: { keywordId: String(dup.keywordId), state: dup.state, bid: dup.bid, matchType: dup.matchType } });
