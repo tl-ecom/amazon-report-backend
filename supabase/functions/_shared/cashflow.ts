@@ -547,7 +547,23 @@ export async function cashflowUebersicht(
     .filter((a) => (Number(a.betrag_cents) || 0) > 0 && (a.auszahlung_am ?? "") <= heuteIso);
   const letzteMitGeld = echteZufluesse
     .slice().sort((a, b) => (b.auszahlung_am ?? "").localeCompare(a.auszahlung_am ?? ""))[0] ?? null;
-  const typischeAuszahlung = median(echteZufluesse.map((a) => Number(a.betrag_cents) / 100));
+  // Wie viel kommt je Abrechnungsperiode? Der Median EINZELNER Gutschriften
+  // taugt dafuer nicht: Amazon fuehrt neben der Hauptreihe kleine Nachzuegler,
+  // und der Median mischt beide. Bei Vaneja kamen so 2.450 € heraus, waehrend
+  // tatsaechlich rund 8.000 € je 14 Tage flossen — eine Planung auf dieser Zahl
+  // waere um zwei Drittel zu niedrig gewesen.
+  //
+  // Richtig ist die Summe ALLER Zufluesse geteilt durch die Anzahl der Perioden
+  // im Fenster: im Kalender steht ein Termin je Periode, also gehoert dorthin
+  // auch alles, was in dieser Periode fliesst.
+  const zuflussSumme = echteZufluesse.reduce((s, a) => s + (Number(a.betrag_cents) || 0) / 100, 0);
+  const perioden = rhythmus.periode_tage && rhythmus.periode_tage > 0
+    ? tage / rhythmus.periode_tage
+    : null;
+  const typischeAuszahlung = perioden !== null && perioden >= 1 && echteZufluesse.length > 0
+    ? Math.round((zuflussSumme / perioden) * 100) / 100
+    // Ohne gemessene Periode bleibt nur der Median — grob, aber nicht erfunden.
+    : median(echteZufluesse.map((a) => Number(a.betrag_cents) / 100));
 
   const termine = terminMuster((basis.termin_gebuehren ?? []) as TerminZeile[]);
   const werbung = werbungsMuster((basis.werbung ?? []) as WerbungZeile[]);

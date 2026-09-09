@@ -80,7 +80,12 @@ function monatsTermine(tag: number, ab: Date, bis: Date): string[] {
 
 export interface PlanEingabe {
   rhythmus: Rhythmus;
-  /** Median der bisherigen echten Auszahlungen — die Schätzgrundlage. */
+  /**
+   * Bisheriger Zufluss je Abrechnungsperiode — die Schätzgrundlage.
+   * Bewusst NICHT der Median einzelner Gutschriften: Amazon führt neben der
+   * Hauptreihe kleine Nachzügler, und ein Median mischt beide zu einer Zahl,
+   * die es so nie gab.
+   */
   typische_auszahlung: number | null;
   termine: TerminMuster[];
   werbung: WerbungMuster;
@@ -119,9 +124,9 @@ export function zahlungsplan(e: PlanEingabe, heute = new Date()): Zahlungsplan {
       grundlage: e.typische_auszahlung === null
         ? "Termin aus dem gemessenen Rhythmus; für den Betrag fehlen Vergleichswerte."
         : (t.geschaetzt
-          ? "Termin fortgeschrieben, Betrag = bisherige typische Auszahlung."
-          : "Periode ist bereits geschlossen, der Termin steht fest. "
-            + "Der Betrag ist die bisherige typische Auszahlung, nicht der echte."),
+          ? "Termin fortgeschrieben. Betrag = bisheriger Zufluss je Abrechnungsperiode."
+          : "Periode ist bereits geschlossen, der Termin steht fest. Der Betrag ist "
+            + "der bisherige Zufluss je Abrechnungsperiode, nicht der echte."),
     });
   }
   if (e.rhythmus.naechste.length === 0) {

@@ -50,6 +50,9 @@ Deno.test("Kalender: Auszahlungstermine im Fenster, mit Schätzbetrag", () => {
   // vorher nicht, wie viel kommt. Das darf der Kalender nicht behaupten.
   assertEquals(aus[0].sicher, false);
   assertEquals(aus[0].grundlage.includes("nicht der echte"), true);
+  // Die Schaetzgrundlage muss benannt sein: der Zufluss je Periode, nicht der
+  // Median einzelner Gutschriften. Der Unterschied war bei Vaneja der Faktor 3.
+  assertEquals(aus[0].grundlage.includes("je Abrechnungsperiode"), true);
 });
 
 Deno.test("Kalender: Monatstermine wiederholen sich korrekt", () => {
