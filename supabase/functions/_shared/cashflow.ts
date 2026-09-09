@@ -269,7 +269,7 @@ export interface ReserveStand {
  * wieder frei. Der aktuelle Einbehalt ist also der Betrag der juengsten
  * Current-Zeile, nicht die Summe aller Zeilen.
  */
-export function reserveStand(zeilen: ReserveZeile[], letzteAuszahlung: number | null): ReserveStand {
+export function reserveStand(zeilen: ReserveZeile[], typischeAuszahlung: number | null): ReserveStand {
   const aktuell = zeilen
     .filter((z) => z.art === "Current Reserve Amount")
     .sort((a, b) => b.gebucht_am.localeCompare(a.gebucht_am));
@@ -277,7 +277,12 @@ export function reserveStand(zeilen: ReserveZeile[], letzteAuszahlung: number | 
     return { stand: null, stand_am: null, anteil_prozent: null, belege: 0 };
   }
   const stand = Math.abs(Number(aktuell[0].betrag_cents) || 0) / 100;
-  const basis = letzteAuszahlung === null ? null : Math.abs(letzteAuszahlung);
+
+  // Bezugsgroesse ist die TYPISCHE Auszahlung, nicht die letzte. Amazon fuehrt
+  // neben der Hauptreihe kleine Verrechnungs-Abrechnungen; landet zufaellig
+  // eine davon zuletzt (bei Vaneja eine ueber 0,29 €), kaeme ein Einbehalt von
+  // 34.379 % heraus. Das war kein Rechenfehler, sondern ein Bezugsfehler.
+  const basis = typischeAuszahlung === null ? null : Math.abs(typischeAuszahlung);
   return {
     stand: r2(stand),
     stand_am: aktuell[0].gebucht_am,
@@ -530,16 +535,20 @@ export async function cashflowUebersicht(
   }));
 
   const rhythmus = auszahlungsRhythmus(auszahlungen);
-  const letzteMitGeld = auszahlungen
-    .filter((a) => Math.abs(Number(a.betrag_cents) || 0) > 0)
-    .sort((a, b) => (b.auszahlung_am ?? "").localeCompare(a.auszahlung_am ?? ""))[0] ?? null;
+
+  // "Zuletzt ausgezahlt" heisst: schon geflossen und ein echter Zufluss.
+  // Ein Termin von morgen ist keine vergangene Auszahlung, und eine
+  // Verrechnung ueber -0,29 € ist kein Geldeingang.
+  const heuteIso = new Date().toISOString().slice(0, 10);
+  const echteZufluesse = auszahlungen
+    .filter((a) => (Number(a.betrag_cents) || 0) > 0 && (a.auszahlung_am ?? "") <= heuteIso);
+  const letzteMitGeld = echteZufluesse
+    .slice().sort((a, b) => (b.auszahlung_am ?? "").localeCompare(a.auszahlung_am ?? ""))[0] ?? null;
+  const typischeAuszahlung = median(echteZufluesse.map((a) => Number(a.betrag_cents) / 100));
 
   const termine = terminMuster((basis.termin_gebuehren ?? []) as TerminZeile[]);
   const werbung = werbungsMuster((basis.werbung ?? []) as WerbungZeile[]);
-  const reserve = reserveStand(
-    (basis.reserve ?? []) as ReserveZeile[],
-    letzteMitGeld ? Number(letzteMitGeld.betrag_cents) / 100 : null,
-  );
+  const reserve = reserveStand((basis.reserve ?? []) as ReserveZeile[], typischeAuszahlung);
   const gebunden = gebundenesGeld((basis.abrechnung_je_monat ?? []) as MonatZeile[]);
 
   // Vorsteuerabzug: die ausdrueckliche Angabe schlaegt die alte Vorgabe.

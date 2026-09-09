@@ -176,6 +176,18 @@ Deno.test("Einbehalt: der Stand ist die jüngste Zeile, nicht die Summe", () => 
   assertEquals(r.anteil_prozent, 0.9);
 });
 
+Deno.test("Einbehalt: Bezugsgröße ist die typische, nicht die letzte Auszahlung", () => {
+  // Live aufgefallen: Vaneja hatte als jüngste Abrechnung eine Verrechnung
+  // über 0,29 €. Bezogen darauf ergab der Einbehalt von 99,70 € einen Anteil
+  // von 34.379 %. Die Zahl war richtig gerechnet und trotzdem Unsinn — falsche
+  // Bezugsgröße. Jetzt zählt die typische Auszahlung.
+  const zeilen = [
+    { gebucht_am: "2026-09-01", art: "Current Reserve Amount", betrag_cents: -9970 },
+  ];
+  assertEquals(reserveStand(zeilen, 0.29).anteil_prozent, 34379.3);
+  assertEquals(reserveStand(zeilen, 8000).anteil_prozent, 1.2);
+});
+
 Deno.test("Einbehalt: kein Einbehalt in den Daten -> null, nicht 0", () => {
   const r = reserveStand([], 5000);
   assertEquals(r.stand, null);
