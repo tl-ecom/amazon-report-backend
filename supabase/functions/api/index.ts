@@ -42,7 +42,9 @@ import { ladenhueterRadar } from "../_shared/ladenhueter.ts";
 import { bestandshistorie } from "../_shared/bestandshistorie.ts";
 import { boardReport } from "../_shared/board.ts";
 import { ertragVerlauf, listeEk, loescheEk, setzeEk } from "../_shared/ertrag.ts";
-import { ladeEinstellungen, setzeAsinEinstellung, setzeEinstellungen } from "../_shared/einstellungen.ts";
+import { ladeEinstellungen, ladeStammdaten, setzeAsinEinstellung, setzeEinstellungen, setzeStammdaten }
+  from "../_shared/einstellungen.ts";
+import { cashflowUebersicht } from "../_shared/cashflow.ts";
 import { importiereEkCsv, importiereEkVonUrl, speichereEkUrl } from "../_shared/sellerboard_import.ts";
 import { ablehnenKonto, freigebenKonto, ladeEin, legeFirmaAn, listeKunden, listeTarifFeatures, listeTenants, loeseFirmaAuf, meinKonto, setzeTarif, setzeTarifFeature } from "../_shared/admin.ts";
 import { importiereFeeSchedule, listeFeeKlassifizierung, listeFeeSchedule, setzeFeeKlassifizierung } from "../_shared/fee_stammdaten.ts";
@@ -358,6 +360,12 @@ Deno.serve(async (req) => {
         const r = await loescheEk(service, tenantId, String((args as any)?.id ?? ""));
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
+      // Steuerliche Stammdaten: was kein Amazon-Bericht hergibt und die
+      // Cash-Sicht trotzdem braucht (Voranmeldung, OSS, Pan-EU, Lagerland).
+      if (action === "stammdaten_setzen") {
+        const r = await setzeStammdaten(service, tenantId, args as any);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
       if (action === "einstellungen_setzen") {
         const r = await setzeEinstellungen(service, tenantId, args as any);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
@@ -564,6 +572,14 @@ Deno.serve(async (req) => {
     }
     if (resource === "ads_ziele") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await adsZiele(service, tenantId, args as any, sicht) });
+    }
+    // Geldfluss innerhalb von Amazon: Auszahlungsrhythmus, Einbehalt,
+    // Terminbuchungen, Werbeabbuchung, Vorsteuer. Gemessen, nicht angenommen.
+    if (resource === "cashflow") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await cashflowUebersicht(service, tenantId, args as any) });
+    }
+    if (resource === "stammdaten") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await ladeStammdaten(service, tenantId) });
     }
     if (resource === "produkt_uebersicht") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await produktUebersicht(service, tenantId, args as any) });

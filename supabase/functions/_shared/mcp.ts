@@ -346,6 +346,30 @@ const TOOLS: ToolDef[] = [
   },
   // --- Pulse-Analytics (READ-ONLY; alles, was wir über die 6 Overviews hinaus gebaut haben) ---
   {
+    name: "get_cashflow",
+    description:
+      "Geldfluss INNERHALB von Amazon — nicht Gewinn. Beantwortet: wann kommt die " +
+      "nächste Auszahlung und wo liegt der Abrechnungsschnitt (auf die Minute, aus " +
+      "dem Settlement-Bericht gemessen), wie hoch ist der Einbehalt, wie viel Geld " +
+      "steckt in noch nicht abgerechneten Bestellungen, an welchem Tag im Monat " +
+      "bucht Amazon Lagergebühr und Kontogebühr ab, nach welchem Muster werden " +
+      "Werbekosten abgezogen (Termin oder Rechnungsschwelle), und wie viel " +
+      "Vorsteuer steckt in den Gebühren. " +
+      "Alle Rhythmen sind AM KONTO GEMESSEN, nicht aus Amazons Faustregeln " +
+      "übernommen — sie unterscheiden sich je Konto. " +
+      "WICHTIG: `warnungen` immer mit ausgeben. Felder mit null sind UNBEKANNT, " +
+      "nicht null Euro; das gilt besonders für Einbehalt und gebundenes Geld. " +
+      "Optional `tage` (30–365, Vorgabe 120) für das Messfenster.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tage: { type: "integer", description: "Messfenster in Tagen (30–365, Vorgabe 120)" },
+      },
+      additionalProperties: false,
+    },
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("cashflow", args) : pulseNichtVerfuegbar()),
+  },
+  {
     name: "get_products",
     description:
       "Per-Produkt-Übersicht je ASIN über einen FREI WÄHLBAREN Zeitraum (bis ~24 Monate): " +

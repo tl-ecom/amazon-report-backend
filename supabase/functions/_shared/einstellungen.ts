@@ -91,3 +91,103 @@ export async function setzeAsinEinstellung(
   if (error) throw new Error(`asin_einstellungen upsert: ${error.message}`);
   return { ok: true, asin };
 }
+
+// --- Steuerliche Stammdaten -------------------------------------------------
+//
+// Was Pulse NICHT messen kann und trotzdem braucht: ob die Firma
+// vorsteuerabzugsberechtigt ist, in welchem Rhythmus sie voranmeldet, ob sie
+// OSS nutzt, ob Ware im Ausland liegt. Alles davon veraendert die Cash-Sicht,
+// und nichts davon steht in irgendeinem Amazon-Bericht.
+//
+// Jedes Feld darf null bleiben. Das ist Absicht: "OSS: nein" und "OSS: nicht
+// angegeben" sind verschiedene Aussagen, und die zweite darf nicht als die
+// erste ausgegeben werden.
+
+const VORANMELDUNG = ["monatlich", "vierteljaehrlich", "jaehrlich", "keine"];
+
+/** Tri-State: true / false / null. Ein leeres Feld loescht die Angabe. */
+function jaNeinOffen(v: unknown, feld: string): boolean | null {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v === "boolean") return v;
+  const s = String(v).trim().toLowerCase();
+  if (["true", "ja", "1"].includes(s)) return true;
+  if (["false", "nein", "0"].includes(s)) return false;
+  throw new Error(`${feld}: bitte ja, nein oder leer lassen.`);
+}
+
+export async function ladeStammdaten(supabase: any, tenant_id: string): Promise<unknown> {
+  const { data, error } = await supabase.from("tenant_einstellungen")
+    .select("umsatzsteuerpflichtig, vorsteuerabzug, firmensitz_land, umsatzsteuer_prozent, "
+      + "ust_voranmeldung, ust_dauerfristverlaengerung, ermaessigter_satz, oss_teilnahme, "
+      + "pan_eu, lager_ausland, lager_laender, stammdaten_bestaetigt_am")
+    .eq("tenant_id", tenant_id).maybeSingle();
+  if (error) throw new Error(`stammdaten read: ${error.message}`);
+  return {
+    umsatzsteuerpflichtig: data?.umsatzsteuerpflichtig ?? null,
+    vorsteuerabzug: data?.vorsteuerabzug ?? null,
+    firmensitz_land: data?.firmensitz_land ?? null,
+    umsatzsteuer_prozent: data?.umsatzsteuer_prozent ?? null,
+    ust_voranmeldung: data?.ust_voranmeldung ?? null,
+    ust_dauerfristverlaengerung: data?.ust_dauerfristverlaengerung ?? null,
+    ermaessigter_satz: data?.ermaessigter_satz ?? null,
+    oss_teilnahme: data?.oss_teilnahme ?? null,
+    pan_eu: data?.pan_eu ?? null,
+    lager_ausland: data?.lager_ausland ?? null,
+    lager_laender: data?.lager_laender ?? null,
+    bestaetigt_am: data?.stammdaten_bestaetigt_am ?? null,
+  };
+}
+
+export async function setzeStammdaten(
+  supabase: any, tenant_id: string, args: Record<string, unknown>,
+): Promise<{ ok: true }> {
+  const satz: Record<string, unknown> = { tenant_id, updated_at: new Date().toISOString() };
+
+  // Nur mitgeschickte Felder anfassen — sonst loescht das Speichern eines
+  // Hakens alle anderen Angaben gleich mit.
+  for (const feld of [
+    "umsatzsteuerpflichtig", "ust_dauerfristverlaengerung", "ermaessigter_satz",
+    "oss_teilnahme", "pan_eu", "lager_ausland",
+  ]) {
+    if (feld in args) satz[feld] = jaNeinOffen(args[feld], feld);
+  }
+
+  if ("ust_voranmeldung" in args) {
+    const roh = args.ust_voranmeldung;
+    if (roh === null || roh === undefined || roh === "") {
+      satz.ust_voranmeldung = null;
+    } else {
+      const s = String(roh).trim();
+      if (!VORANMELDUNG.includes(s)) {
+        throw new Error(`Voranmeldung: erlaubt sind ${VORANMELDUNG.join(", ")} (oder leer).`);
+      }
+      satz.ust_voranmeldung = s;
+    }
+  }
+
+  if ("lager_laender" in args) {
+    const roh = args.lager_laender;
+    if (roh === null || roh === undefined || roh === "") {
+      satz.lager_laender = null;
+    } else {
+      const liste = (Array.isArray(roh) ? roh : String(roh).split(","))
+        .map((x) => String(x).trim().toUpperCase()).filter(Boolean);
+      if (liste.some((c) => !/^[A-Z]{2}$/.test(c))) {
+        throw new Error("Lagerländer: bitte zweistellige Ländercodes angeben (z. B. DE, PL, CZ).");
+      }
+      satz.lager_laender = liste;
+    }
+  }
+
+  // Kleinunternehmer hat keinen Vorsteuerabzug. Die beiden Felder duerfen sich
+  // nicht widersprechen, sonst rechnet die Cash-Sicht mit einer Erstattung,
+  // die es nicht gibt.
+  if (satz.umsatzsteuerpflichtig === false) satz.vorsteuerabzug = false;
+
+  if (args.bestaetigen === true) satz.stammdaten_bestaetigt_am = new Date().toISOString();
+
+  const { error } = await supabase.from("tenant_einstellungen")
+    .upsert(satz, { onConflict: "tenant_id" });
+  if (error) throw new Error(`stammdaten upsert: ${error.message}`);
+  return { ok: true };
+}

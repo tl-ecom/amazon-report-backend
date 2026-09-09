@@ -79,6 +79,7 @@ Deno.test("tools/list nennt alle Tools mit Schema", async () => {
     "get_ads_struktur", "get_ads_suchbegriffe", "get_ads_platzierungen", "get_ads_ziele",
     "get_sales_history", "get_orders_history", "get_orders_revenue",
     "get_returns_history",
+    "get_cashflow",
     "get_products", "get_kpi_history", "get_profit_history", "get_search_query_performance",
     "get_diagnoses", "get_change_log", "get_strategy_overview",
   ]);
@@ -87,7 +88,7 @@ Deno.test("tools/list nennt alle Tools mit Schema", async () => {
 });
 
 Deno.test("toolListe ist stabil", () => {
-  assertEquals(toolListe().length, 22);
+  assertEquals(toolListe().length, 23);
 });
 
 Deno.test("Pulse-Tools rufen ladePulse mit der richtigen Datenart", async () => {
@@ -97,7 +98,8 @@ Deno.test("Pulse-Tools rufen ladePulse mit der richtigen Datenart", async () => 
     ladePulse: async (art: string) => { gerufen.push(art); return { ok: art }; },
   } as any;
   const paare: Array<[string, string]> = [
-    ["get_products", "produkte"], ["get_kpi_history", "kpi"], ["get_profit_history", "ertrag"],
+    ["get_products", "produkte"], ["get_cashflow", "cashflow"],
+    ["get_kpi_history", "kpi"], ["get_profit_history", "ertrag"],
     ["get_search_query_performance", "sqp"], ["get_diagnoses", "diagnosen"],
     ["get_change_log", "aenderungen"], ["get_strategy_overview", "strategie"],
     ["get_ads_verlauf", "ads_verlauf"],
