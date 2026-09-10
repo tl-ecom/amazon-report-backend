@@ -400,7 +400,9 @@ Deno.test("Suchbegriff-Zeilen SB: keywordText als Zieltext, ad_product SB", () =
 });
 
 Deno.test("Registry: jeder Typ hat Tabelle, adProduct und Bauplan; istReportTyp", () => {
-  assertEquals(ALLE_REPORT_TYPEN.length, 7);
+  // 7 + die beiden Kostenquellen, die beim Sellerboard-Abgleich als fehlend
+  // aufgefallen sind: Sponsored Display (mit ASIN) und Sponsored Brands (ohne).
+  assertEquals(ALLE_REPORT_TYPEN.length, 9);
   for (const [typ, def] of Object.entries(ADS_REPORTS)) {
     const req = baueReportRequest(typ, "2026-08-01", "2026-08-02")!;
     assertEquals(req.configuration.reportTypeId, def.reportTypeId);
@@ -409,5 +411,71 @@ Deno.test("Registry: jeder Typ hat Tabelle, adProduct und Bauplan; istReportTyp"
   }
   assertEquals(baueReportRequest("sb-targeting", "2026-08-01", "2026-08-02")?.configuration.adProduct, "SPONSORED_BRANDS");
   assertEquals(istReportTyp("sd-targeting"), true);
+  assertEquals(istReportTyp("sd-advertised-product"), true);
+  assertEquals(istReportTyp("sb-campaigns"), true);
+  // Beide schreiben in die Tagesreihe, sonst waeren die Gesamtkosten wieder
+  // auf zwei Wege verteilt.
+  assertEquals(ADS_REPORTS["sd-advertised-product"].tabelle, "ads_daily");
+  assertEquals(ADS_REPORTS["sb-campaigns"].tabelle, "ads_daily");
   assertEquals(istReportTyp("sp-daily"), false);
+});
+
+// --- Sponsored Brands und Display -------------------------------------------
+//
+// Aufgefallen beim Sellerboard-Abgleich: Pulse wies fuer Vanejas August
+// 9.494 € Werbekosten aus, Sellerboard 11.586 €. Die Luecke von 18 % waren
+// Brands und Display — sie wurden nie geholt.
+
+Deno.test("Display liefert eine ASIN, Brands nicht", () => {
+  const sd = baueAdsDailyRows("t", [{
+    date: "2026-08-01", campaignId: "c1", campaignName: "SD Retarget",
+    adGroupId: "g1", promotedAsin: "B001", promotedSku: "SKU-1",
+    impressions: 100, clicks: 5, cost: 12.5, purchases: 1, unitsSold: 1, sales: 40,
+  }], "SD")[0] as any;
+
+  // Display benennt das Feld promotedAsin statt advertisedAsin — ohne diese
+  // Zuordnung waere die ASIN leer und die Kosten keinem Artikel zuzuordnen.
+  assertEquals(sd.ad_product, "SD");
+  assertEquals(sd.asin, "B001");
+  assertEquals(sd.spend_cents, 1250);
+
+  const sb = baueAdsDailyRows("t", [{
+    date: "2026-08-01", campaignId: "c2", campaignName: "SB Marke",
+    impressions: 900, clicks: 20, cost: 45.6, purchases: 2, unitsSold: 3, sales: 120,
+  }], "SB")[0] as any;
+
+  assertEquals(sb.ad_product, "SB");
+  // Brands hat KEINE Produktebene. Eine ASIN zu erfinden (etwa die meistbeworbene)
+  // waere genau an der Stelle geraten, an der die Ertragsrechnung je Produkt
+  // darauf aufsetzt.
+  assertEquals(sb.asin, "");
+  assertEquals(sb.spend_cents, 4560);
+});
+
+Deno.test("Derselbe Tag und dieselbe Kampagne, verschiedene Anzeigentypen", () => {
+  // Ohne ad_product im Schluessel wuerde eine Zeile die andere ueberschreiben,
+  // und die Kosten waeren still zu niedrig statt offensichtlich falsch.
+  const gemeinsam = {
+    date: "2026-08-01", campaignId: "c1", campaignName: "X", adGroupId: "g1",
+    impressions: 10, clicks: 1, cost: 5, purchases: 0, unitsSold: 0, sales: 0,
+  };
+  const sp = baueAdsDailyRows("t", [{ ...gemeinsam, advertisedAsin: "B001", advertisedSku: "S1" }], "SP")[0] as any;
+  const sd = baueAdsDailyRows("t", [{ ...gemeinsam, promotedAsin: "B001", promotedSku: "S1" }], "SD")[0] as any;
+
+  assertEquals(sp.ad_product, "SP");
+  assertEquals(sd.ad_product, "SD");
+  // Alles andere ist gleich — nur der Anzeigentyp trennt sie.
+  assertEquals(sp.campaign_id, sd.campaign_id);
+  assertEquals(sp.asin, sd.asin);
+});
+
+Deno.test("Ohne Angabe bleibt es Sponsored Products", () => {
+  // Rueckwaertskompatibilitaet: alle bestehenden Aufrufer geben keinen Typ mit,
+  // und alle bestehenden Zeilen SIND Sponsored Products.
+  const r = baueAdsDailyRows("t", [{
+    date: "2026-08-01", campaignId: "c1", adGroupId: "g1",
+    advertisedAsin: "B001", advertisedSku: "S1",
+    impressions: 1, clicks: 1, cost: 1, purchases7d: 0, unitsSoldClicks7d: 0, sales7d: 0,
+  }])[0] as any;
+  assertEquals(r.ad_product, "SP");
 });

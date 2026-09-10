@@ -80,6 +80,71 @@ export function baueSpReportRequest(startDate: string, endDate: string): AdsRepo
 }
 
 /**
+ * Sponsored Display, Produktebene.
+ *
+ * Anders als Brands liefert Display eine ASIN — die Kosten lassen sich also
+ * demselben Artikel zuordnen wie bei Sponsored Products. Die Metriken heissen
+ * ohne die 7d-Endung (purchases statt purchases7d), weil das
+ * Attributionsfenster ein anderes ist (14 Tage statt 7).
+ */
+export const SD_ADVERTISED_PRODUCT_COLUMNS = [
+  "date", "campaignId", "campaignName", "adGroupId",
+  "promotedAsin", "promotedSku",
+  "impressions", "clicks", "cost", "purchases", "unitsSold", "sales",
+];
+
+// Genutzt ueber die Registry (ADS_REPORTS) — der Einzelbauer bleibt fuer Tests
+// und aeltere Aufrufer.
+export function baueSdReportRequest(startDate: string, endDate: string): AdsReportRequest {
+  return {
+    name: `sd-advertised-product ${startDate}..${endDate}`,
+    startDate,
+    endDate,
+    configuration: {
+      adProduct: "SPONSORED_DISPLAY",
+      groupBy: ["advertiser"],
+      columns: SD_ADVERTISED_PRODUCT_COLUMNS,
+      reportTypeId: "sdAdvertisedProduct",
+      timeUnit: "DAILY",
+      format: "GZIP_JSON",
+    },
+  };
+}
+
+/**
+ * Sponsored Brands, Kampagnenebene.
+ *
+ * BEWUSST ohne Produktebene: Brands bewirbt die Marke mit mehreren Artikeln in
+ * einer Anzeige, und Amazon liefert dafuer keine belastbare Kostenaufteilung je
+ * ASIN. Sie zu schaetzen (etwa gleichmaessig ueber die beworbenen Artikel)
+ * waere eine erfundene Zahl an genau der Stelle, an der die Ertragsrechnung
+ * je Produkt daraufhin rechnen wuerde.
+ *
+ * Die Kosten sind damit vollstaendig, die Zuordnung je Artikel bleibt offen —
+ * und ads_summen weist sie als "ohne_asin" gesondert aus.
+ */
+export const SB_CAMPAIGN_COLUMNS = [
+  "date", "campaignId", "campaignName",
+  "impressions", "clicks", "cost", "purchases", "unitsSold", "sales",
+];
+
+export function baueSbReportRequest(startDate: string, endDate: string): AdsReportRequest {
+  return {
+    name: `sb-campaigns ${startDate}..${endDate}`,
+    startDate,
+    endDate,
+    configuration: {
+      adProduct: "SPONSORED_BRANDS",
+      groupBy: ["campaign"],
+      columns: SB_CAMPAIGN_COLUMNS,
+      reportTypeId: "sbCampaigns",
+      timeUnit: "DAILY",
+      format: "GZIP_JSON",
+    },
+  };
+}
+
+/**
  * Ist ein Report mit diesem Enddatum vorläufig? Wahr, wenn endDate innerhalb der
  * letzten VOLATIL_TAGE liegt (Zahlen können sich noch ändern).
  */
@@ -300,7 +365,9 @@ export function baueAdsOverview(
     }
     k.akku.add(r);
 
-    const asin = String(r.advertisedAsin ?? "").trim();
+    // Display nennt das Feld promotedAsin. Brands liefert gar keines — solche
+    // Zeilen tauchen in der ASIN-Aufschluesselung schlicht nicht auf.
+    const asin = String(r.advertisedAsin ?? r.promotedAsin ?? "").trim();
     if (asin) {
       const a = asins.get(asin) ?? new AdsAkku();
       a.add(r);
@@ -361,7 +428,8 @@ export interface AdsVerlaufErgebnis {
  */
 export function baueAdsDailyRows(
   tenant_id: string,
-  rows: Record<string, any>[]
+  rows: Record<string, any>[],
+  adProduct: AdProduct = "SP",
 ): Record<string, unknown>[] {
   interface Eintrag {
     datum: string;
@@ -383,8 +451,13 @@ export function baueAdsDailyRows(
 
     // Leerstring statt null — die Spalten sind Teil des Primärschlüssels.
     const ad_group_id = String(r.adGroupId ?? "").trim();
-    const asin = String(r.advertisedAsin ?? "").trim();
-    const sku = String(r.advertisedSku ?? "").trim();
+    // Jeder Anzeigentyp benennt dasselbe Feld anders: Sponsored Products
+    // liefert advertisedAsin, Display promotedAsin. Sponsored Brands liefert
+    // GAR KEINE Produktebene — Amazon teilt die Kosten dort nicht auf Artikel
+    // auf, weil eine Brands-Anzeige mehrere bewirbt. Die Zeile bleibt trotzdem
+    // wertvoll, weil die KOSTEN stimmen; zuzuordnen ist sie nur keinem Artikel.
+    const asin = String(r.advertisedAsin ?? r.promotedAsin ?? "").trim();
+    const sku = String(r.advertisedSku ?? r.promotedSku ?? "").trim();
     const name = String(r.campaignName ?? "").trim();
 
     // Nullbyte als Trenner: SKUs duerfen Leerzeichen und Bindestriche enthalten,
@@ -404,6 +477,7 @@ export function baueAdsDailyRows(
   const jetzt = new Date().toISOString();
   return [...proSchluessel.values()].map((e) => ({
     tenant_id,
+    ad_product: adProduct,
     datum: e.datum,
     campaign_id: e.campaign_id,
     ad_group_id: e.ad_group_id,
@@ -452,7 +526,9 @@ export type AdsReportTyp =
   | "sp-targeting"
   | "sb-search-term"
   | "sb-targeting"
-  | "sd-targeting";
+  | "sd-targeting"
+  | "sd-advertised-product"
+  | "sb-campaigns";
 
 /** Attributionsfenster in Tagen je Anzeigentyp — siehe Kopfkommentar. */
 export const ATTRIBUTION_TAGE: Record<AdProduct, number> = { SP: 7, SB: 14, SD: 14 };
@@ -688,6 +764,13 @@ export function baueZieleRows(tenant_id: string, rows: Record<string, any>[], ad
   }));
 }
 
+// Sponsored Display und Brands landen in derselben Tagesreihe wie Sponsored
+// Products. Der Anzeigentyp steht im Schluessel, damit sich die Zeilen nicht
+// gegenseitig ueberschreiben.
+const TAGESREIHE = {
+  tabelle: "ads_daily",
+  onConflict: "tenant_id,ad_product,datum,campaign_id,ad_group_id,asin,sku",
+};
 const SUCHBEGRIFFE = { tabelle: "ads_suchbegriffe_daily", onConflict: "tenant_id,ad_product,datum,campaign_id,ad_group_id,ziel_id,suchbegriff" };
 const PLACEMENT = { tabelle: "ads_placement_daily", onConflict: "tenant_id,ad_product,datum,campaign_id,platzierung" };
 const ZIELE = { tabelle: "ads_ziele_daily", onConflict: "tenant_id,ad_product,datum,campaign_id,ad_group_id,ziel_id" };
@@ -711,6 +794,20 @@ export const ADS_REPORTS: Record<Exclude<AdsReportTyp, "sp-advertised-product">,
     adProduct: "SP", reportTypeId: "spTargeting", groupBy: ["targeting"],
     columns: ["date", "campaignId", "campaignName", "adGroupId", "adGroupName", "keywordId", "keyword", "matchType", "targeting", "keywordType", "keywordBid", "adKeywordStatus", ...METRIKEN_SP],
     ...ZIELE, rows: (t, r) => baueZieleRows(t, r, "SP"),
+  },
+  // Die beiden Kostenquellen, die bisher fehlten. Sie schreiben in dieselbe
+  // Tabelle wie Sponsored Products (ads_daily), unterschieden nur durch
+  // ad_product — sonst waeren die Gesamtkosten wieder auf zwei Wege verteilt,
+  // und der naechste Abgleich fiele erneut auseinander.
+  "sd-advertised-product": {
+    adProduct: "SD", reportTypeId: "sdAdvertisedProduct", groupBy: ["advertiser"],
+    columns: SD_ADVERTISED_PRODUCT_COLUMNS,
+    ...TAGESREIHE, rows: (t, r) => baueAdsDailyRows(t, r, "SD"),
+  },
+  "sb-campaigns": {
+    adProduct: "SB", reportTypeId: "sbCampaigns", groupBy: ["campaign"],
+    columns: SB_CAMPAIGN_COLUMNS,
+    ...TAGESREIHE, rows: (t, r) => baueAdsDailyRows(t, r, "SB"),
   },
   "sb-search-term": {
     adProduct: "SB", reportTypeId: "sbSearchTerm", groupBy: ["searchTerm"],
