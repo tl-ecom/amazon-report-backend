@@ -133,3 +133,49 @@ Deno.test("Kalender: Wochensummen fassen zusammen, ohne Kontostand zu erfinden",
   // Alles hier ist fortgeschrieben — das muss die Woche mittragen.
   assertEquals(erste.unsicher, true);
 });
+
+Deno.test("Kalender: jeder Anmeldetermin im Fenster steht drin, mit eigenem Betrag", () => {
+  // Zwei Termine, zwei verschiedene Monatsbetraege. Vorher stand nur der erste
+  // im Kalender — der Abfluss war um einen vollen Monatsbetrag zu niedrig.
+  const p = zahlungsplan({
+    ...EINGABE,
+    rhythmus: { ...EINGABE.rhythmus, naechste: [] },
+    werbung: { ...EINGABE.werbung, art: "zu_wenig_daten", je_tag: null },
+    termine: [],
+    umsatzsteuer: {
+      faellig_am: "2026-10-10", betrag: 5450.5,
+      termine: [
+        { faellig_am: "2026-10-10", betrag: 5450.5, zeitraum: ["2026-09"] },
+        { faellig_am: "2026-11-10", betrag: 6102.33, zeitraum: ["2026-10"] },
+      ],
+    },
+    tage: 70,
+  }, HEUTE);
+
+  const ust = p.positionen.filter((x) => x.art === "umsatzsteuer");
+  assertEquals(ust.map((x) => x.am), ["2026-10-10", "2026-11-10"]);
+  assertEquals(ust.map((x) => x.betrag), [-5450.5, -6102.33]);
+  // Jeder Termin nennt den Zeitraum, den er anmeldet — sonst weiss niemand,
+  // welcher Monat da abgeht.
+  assertEquals(ust[1].grundlage.includes("2026-10"), true);
+  assertEquals(p.summe_abfluss, -11552.83);
+});
+
+Deno.test("Kalender: ein Termin ohne Amazon-Daten steht mit offenem Betrag da", () => {
+  const p = zahlungsplan({
+    ...EINGABE,
+    rhythmus: { ...EINGABE.rhythmus, naechste: [] },
+    werbung: { ...EINGABE.werbung, art: "zu_wenig_daten", je_tag: null },
+    termine: [],
+    umsatzsteuer: {
+      faellig_am: "2026-10-10", betrag: null,
+      termine: [{ faellig_am: "2026-10-10", betrag: null, zeitraum: ["2026-09"] }],
+    },
+  }, HEUTE);
+
+  const ust = p.positionen.find((x) => x.art === "umsatzsteuer")!;
+  // Termin steht, Betrag bleibt offen — keine 0, die wie "nichts faellig"
+  // aussieht.
+  assertEquals(ust.betrag, null);
+  assertEquals(ust.grundlage.includes("der Betrag ist offen"), true);
+});

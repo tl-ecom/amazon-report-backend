@@ -484,6 +484,41 @@ export function vorsteuer(
  * auszahlt, haengt vom Amt ab und steht in keinen Daten, die Pulse hat. Eine
  * Zahl dafuer waere geraten.
  */
+/**
+ * ALLE Anmeldetermine in einem Zeitfenster.
+ *
+ * Der Kalender setzte lange nur den naechsten. Bei monatlicher Voranmeldung und
+ * 60 Tagen Vorschau sind aber zwei faellig — und der zweite ist ein voller
+ * Monatsbetrag, bei Vaneja rund 5.000 €. Ihn wegzulassen macht die Vorschau
+ * genau dort zu optimistisch, wo sie gebraucht wird.
+ */
+export function anmeldeTermine(
+  rhythmus: string | null, dauerfrist: boolean, von: Date, bis: Date,
+): string[] {
+  if (!rhythmus || rhythmus === "keine") return [];
+  const vonIso = von.toISOString().slice(0, 10);
+  const bisIso = bis.toISOString().slice(0, 10);
+  const treffer: string[] = [];
+
+  // Einen Tag VOR dem Fenster starten: naechsteAnmeldung liefert nur Termine
+  // echt nach dem Stichtag, sonst faellt ein Termin, der genau heute ist, aus
+  // dem Kalender — und das ist der Tag, an dem das Geld tatsaechlich abgeht.
+  let zeiger = new Date(von.getTime() - 86400000);
+
+  // Hoechstens ein Dutzend Schritte: schuetzt vor einer Endlosschleife, falls
+  // naechsteAnmeldung je einen Termin liefert, der nicht vorwaerts geht.
+  for (let i = 0; i < 12; i++) {
+    const naechst = naechsteAnmeldung(rhythmus, dauerfrist, zeiger);
+    if (!naechst) break;
+    if (naechst > bisIso) break;
+    if (treffer.includes(naechst)) break;
+    if (naechst >= vonIso) treffer.push(naechst);
+    // Einen Tag nach dem gefundenen Termin weitersuchen.
+    zeiger = new Date(Date.parse(`${naechst}T12:00:00Z`) + 86400000);
+  }
+  return treffer;
+}
+
 export function naechsteAnmeldung(
   rhythmus: string | null, dauerfrist: boolean, heute = new Date(),
 ): string | null {
@@ -614,6 +649,24 @@ export async function cashflowUebersicht(
   // Die Anmeldung am 10.09. betrifft den AUGUST, nicht den laufenden Monat.
   // Der juengste Monat mit Daten waere hier der angebrochene September gewesen
   // — der Kalender wies deshalb 0,00 € aus, wo 5.450 € faellig sind.
+  // Alle Termine im Kalenderfenster, nicht nur der naechste. Das Fenster wird
+  // genauso gebildet wie in zahlungsplan(), sonst faellt ein Randtermin durch.
+  const planFenster = 60;
+  const planAb = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  const ustTermine = anmeldeTermine(
+    stamm.ust_voranmeldung ?? null,
+    stamm.ust_dauerfristverlaengerung === true,
+    planAb,
+    new Date(planAb.getTime() + planFenster * 86400000),
+  ).map((am) => {
+    const z = zahllastFuerTermin(
+      ust.monate, am,
+      stamm.ust_voranmeldung ?? null,
+      stamm.ust_dauerfristverlaengerung === true,
+    );
+    return { faellig_am: am, betrag: z.betrag, zeitraum: z.zeitraum };
+  });
+
   const ustFaellig = zahllastFuerTermin(
     ust.monate,
     ust.faellig_am,
@@ -644,6 +697,7 @@ export async function cashflowUebersicht(
       faellig_am: ust.faellig_am,
       betrag: ustFaellig.betrag,
       zeitraum: ustFaellig.zeitraum,
+      termine: ustTermine,
     },
     tage: 60,
   });

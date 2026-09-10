@@ -100,7 +100,17 @@ export interface PlanEingabe {
    * mit diesem Termin angemeldet werden — ohne die Angabe liest sich der Betrag
    * wie der des laufenden Monats.
    */
-  umsatzsteuer: { faellig_am: string | null; betrag: number | null; zeitraum?: string[] };
+  umsatzsteuer: {
+    faellig_am: string | null;
+    betrag: number | null;
+    zeitraum?: string[];
+    /**
+     * ALLE Termine im Fenster. Bei monatlicher Voranmeldung sind das in 60
+     * Tagen zwei — der zweite ist ein voller Monatsbetrag und darf nicht
+     * fehlen. `faellig_am` bleibt fuer aeltere Aufrufer erhalten.
+     */
+    termine?: Array<{ faellig_am: string; betrag: number | null; zeitraum: string[] }>;
+  };
   tage?: number;
 }
 
@@ -216,20 +226,30 @@ export function zahlungsplan(e: PlanEingabe, heute = new Date()): Zahlungsplan {
   }
 
   // --- Umsatzsteuer -------------------------------------------------------
-  if (e.umsatzsteuer.faellig_am) {
-    const am = e.umsatzsteuer.faellig_am;
-    if (am >= iso(ab) && am <= iso(bis)) {
+  // ALLE Termine im Fenster, nicht nur der naechste: bei monatlicher
+  // Voranmeldung sind in 60 Tagen zwei faellig, und der zweite ist ein voller
+  // Monatsbetrag.
+  const ustTermine = e.umsatzsteuer.termine
+    ?? (e.umsatzsteuer.faellig_am
+      ? [{
+        faellig_am: e.umsatzsteuer.faellig_am,
+        betrag: e.umsatzsteuer.betrag,
+        zeitraum: e.umsatzsteuer.zeitraum ?? [],
+      }]
+      : []);
+
+  if (ustTermine.length > 0) {
+    for (const t of ustTermine) {
+      if (t.faellig_am < iso(ab) || t.faellig_am > iso(bis)) continue;
       positionen.push({
-        am,
+        am: t.faellig_am,
         art: "umsatzsteuer",
         bezeichnung: "Umsatzsteuer-Voranmeldung",
-        betrag: e.umsatzsteuer.betrag === null ? null : -Math.abs(e.umsatzsteuer.betrag),
+        betrag: t.betrag === null ? null : -Math.abs(t.betrag),
         sicher: false,
         grundlage: "Abgabetermin aus dem hinterlegten Rhythmus. "
-          + (e.umsatzsteuer.zeitraum?.length
-            ? `Angemeldet wird ${e.umsatzsteuer.zeitraum.join(", ")}. `
-            : "")
-          + (e.umsatzsteuer.betrag === null
+          + (t.zeitraum.length ? `Angemeldet wird ${t.zeitraum.join(", ")}. ` : "")
+          + (t.betrag === null
             ? "Für diesen Zeitraum liegen noch keine Amazon-Daten vor — der Termin "
               + "steht, der Betrag ist offen."
             : "Betrag aus den Amazon-Daten dieses Zeitraums; Vorsteuer aus "

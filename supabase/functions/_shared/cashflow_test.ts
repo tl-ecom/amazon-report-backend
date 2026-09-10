@@ -8,7 +8,7 @@
 
 import { assertEquals } from "jsr:@std/assert@1";
 import {
-  auszahlungsRhythmus, gebundenesGeld, median, naechsteAnmeldung,
+  auszahlungsRhythmus, gebundenesGeld, median, anmeldeTermine, naechsteAnmeldung,
   reserveStand, terminMuster, vorsteuer, werbungsMuster,
 } from "./cashflow.ts";
 
@@ -325,4 +325,63 @@ Deno.test("Stammdaten: gelesene Feldnamen sind identisch mit den geschriebenen",
   // Die alten, abweichenden Namen darf es nicht mehr geben.
   assertEquals("dauerfristverlaengerung" in s, false);
   assertEquals("oss" in s, false);
+});
+
+// --- Anmeldetermine im Fenster ---------------------------------------------
+//
+// Der Kalender setzte lange nur den NAECHSTEN Termin. Bei monatlicher
+// Voranmeldung und 60 Tagen Vorschau sind aber oft zwei faellig, und der zweite
+// ist ein voller Monatsbetrag — bei Vaneja rund 5.000 €. Genau der Posten, der
+// eine Bestellentscheidung kippt, fehlte damit im Abfluss.
+
+Deno.test("Anmeldetermine: monatlich liefert zwei Termine im 60-Tage-Fenster", () => {
+  const termine = anmeldeTermine(
+    "monatlich", false,
+    new Date("2026-09-15T00:00:00Z"),
+    new Date("2026-11-14T00:00:00Z"),
+  );
+  assertEquals(termine, ["2026-10-10", "2026-11-10"]);
+});
+
+Deno.test("Anmeldetermine: ein Termin genau heute faellt nicht heraus", () => {
+  // naechsteAnmeldung liefert nur Termine ECHT nach dem Stichtag. Ohne
+  // Korrektur fehlte der 10., sobald man am 10. hinsieht — an dem Tag, an dem
+  // das Geld tatsaechlich abgeht.
+  const termine = anmeldeTermine(
+    "monatlich", false,
+    new Date("2026-10-10T00:00:00Z"),
+    new Date("2026-10-20T00:00:00Z"),
+  );
+  assertEquals(termine, ["2026-10-10"]);
+});
+
+Deno.test("Anmeldetermine: Dauerfristverlaengerung schiebt um einen Monat", () => {
+  const ohne = anmeldeTermine(
+    "monatlich", false,
+    new Date("2026-09-15T00:00:00Z"), new Date("2026-10-20T00:00:00Z"),
+  );
+  const mit = anmeldeTermine(
+    "monatlich", true,
+    new Date("2026-09-15T00:00:00Z"), new Date("2026-10-20T00:00:00Z"),
+  );
+  assertEquals(ohne, ["2026-10-10"]);
+  // Mit Dauerfrist ist am 10.10. der August faellig, nicht der September —
+  // der Termin bleibt, aber im selben Fenster liegt derselbe eine Tag.
+  assertEquals(mit, ["2026-10-10"]);
+});
+
+Deno.test("Anmeldetermine: vierteljaehrlich nur einmal im Quartal", () => {
+  const termine = anmeldeTermine(
+    "vierteljaehrlich", false,
+    new Date("2026-09-15T00:00:00Z"),
+    new Date("2026-11-14T00:00:00Z"),
+  );
+  assertEquals(termine, ["2026-10-10"]);
+});
+
+Deno.test("Anmeldetermine: ohne Rhythmus wird nichts erfunden", () => {
+  const von = new Date("2026-09-15T00:00:00Z");
+  const bis = new Date("2026-11-14T00:00:00Z");
+  assertEquals(anmeldeTermine(null, false, von, bis), []);
+  assertEquals(anmeldeTermine("keine", false, von, bis), []);
 });
