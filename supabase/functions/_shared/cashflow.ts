@@ -19,6 +19,10 @@ import { ladeUstFaktor } from "./ust_lauf.ts";
 import { umsatzsteuerZahllast, zahllastFuerTermin, type UstZeile }
   from "./cashflow_ust.ts";
 import { zahlungsplan } from "./cashflow_plan.ts";
+import {
+  aufTermine, auszahlungsquote, erwarteteZufluesse, geldlaufMuster, vorfinanzierung,
+  type OffenZeile, type QuoteZeile, type VerteilungZeile,
+} from "./cashflow_geldlauf.ts";
 // Kapitalbindung im Bestand: FBA, externes Lager, bestellte Ware — zum EK
 // bewertet. Geld, das schon ausgegeben ist (oder bald faellig wird) und erst
 // ueber den Verkauf zurueckkommt. Gehoert in die Cash-Sicht, nicht in den Gewinn.
@@ -514,10 +518,14 @@ export async function cashflowUebersicht(
 ): Promise<unknown> {
   const tage = Math.min(365, Math.max(30, Number(args.tage) || 120));
 
-  const [basisRes, zeitRes, ustRes, faktor, stammRes, kapital] = await Promise.all([
+  const [basisRes, zeitRes, ustRes, laufRes, quoteRes, faktor, stammRes, kapital] = await Promise.all([
     supabase.rpc("cashflow_basis", { p_tenant: tenant_id, p_tage: tage }),
     supabase.rpc("cashflow_zeitpunkte", { p_tenant: tenant_id, p_tage: tage }),
     supabase.rpc("cashflow_umsatzsteuer", { p_tenant: tenant_id, p_tage: tage }),
+    // Geldlauf: wie lange haelt Amazon das Geld? Daraus wird der erwartete
+    // Zufluss gerechnet statt aus dem Periodendurchschnitt geschaetzt.
+    supabase.rpc("cashflow_geldlauf", { p_tenant: tenant_id, p_tage: tage }),
+    supabase.rpc("cashflow_quote_je_monat", { p_tenant: tenant_id, p_monate: 4 }),
     ladeUstFaktor(supabase, tenant_id),
     supabase.from("tenant_einstellungen")
       .select("umsatzsteuerpflichtig, vorsteuerabzug, ust_voranmeldung, "
@@ -612,9 +620,24 @@ export async function cashflowUebersicht(
     stamm.ust_voranmeldung ?? null,
     stamm.ust_dauerfristverlaengerung === true,
   );
+  // --- Geldlauf (DD+7) ----------------------------------------------------
+  const lauf = (laufRes?.data ?? {}) as any;
+  const muster = geldlaufMuster((lauf.verteilung ?? []) as VerteilungZeile[]);
+  const quote = auszahlungsquote((quoteRes?.data ?? []) as QuoteZeile[]);
+  const zufluesse = erwarteteZufluesse(
+    (lauf.offen ?? []) as OffenZeile[], muster, quote.quote,
+  );
+  const jeTermin = aufTermine(
+    zufluesse, rhythmus.naechste.map((t) => t.auszahlung_am.slice(0, 10)),
+  );
+  const vorfinanz = vorfinanzierung(muster.median_tage, werbung.je_tag);
+
   const plan = zahlungsplan({
     rhythmus,
     typische_auszahlung: typischeAuszahlung,
+    // Je Termin aus den offenen Bestellungen gerechnet — schlaegt den
+    // Periodendurchschnitt, wo er vorhanden ist.
+    zufluss_je_termin: jeTermin,
     termine,
     werbung,
     umsatzsteuer: {
@@ -631,6 +654,25 @@ export async function cashflowUebersicht(
       `Der Auszahlungsrhythmus beruht auf nur ${rhythmus.belege} Abrechnung(en). `
       + "Für eine belastbare Aussage sind das zu wenige; die Termine unten sind "
       + "fortgeschrieben, nicht bestätigt.",
+    );
+  }
+  if (muster.sperre_erkennbar && muster.frueheste_tage !== null) {
+    warnungen.push(
+      "Amazon hält das Geld zurück: Vom Verkauf bis zur Auszahlung vergehen "
+      + `mindestens ${muster.frueheste_tage} Tage, im Mittel `
+      + `${muster.median_tage} (gemessen an ${muster.belege} Bestellungen). `
+      + "Ohne Freigabesperre wäre eine Bestellung kurz vor Periodenende in zwei "
+      + "bis drei Tagen ausgezahlt — solche Fälle gibt es hier nicht. Das ist "
+      + "die Erklärung dafür, dass Gewinn und Kontostand auseinanderlaufen.",
+    );
+  }
+  if (vorfinanz.sockel !== null) {
+    warnungen.push(
+      "Dauerhaft vorfinanziert allein für Werbung: rund "
+      + `${vorfinanz.sockel.toFixed(0)} € (${vorfinanz.je_tag?.toFixed(0)} € je Tag `
+      + `über ${vorfinanz.tage} Tage). Jede Erhöhung um 100 € je Tag bindet `
+      + `zusätzlich etwa ${vorfinanz.je_100_euro_mehr?.toFixed(0)} € — sofort, `
+      + "während der Rückfluss erst nach dem Geldlauf einsetzt.",
     );
   }
   if (gebunden.hinweis) warnungen.push(gebunden.hinweis);
@@ -664,6 +706,20 @@ export async function cashflowUebersicht(
     // Der Kalender steht bewusst ganz oben in der Ausgabe: "wann bewegt sich
     // Geld" ist die Frage, die man zuerst hat.
     kalender: plan,
+
+    // Der Geldlauf erklaert, warum Gewinn und Kontostand auseinanderlaufen:
+    // er misst, wie lange Amazon das Geld haelt.
+    geldlauf: {
+      median_tage: muster.median_tage,
+      frueheste_tage: muster.frueheste_tage,
+      p90_tage: muster.p90_tage,
+      belege: muster.belege,
+      sperre_erkennbar: muster.sperre_erkennbar,
+      auszahlungsquote: quote.quote,
+      quote_monat: quote.monat,
+      quote_grund: quote.grund,
+      vorfinanzierung: vorfinanz,
+    },
 
     einbehalt: reserve,
     gebundenes_geld: gebunden,

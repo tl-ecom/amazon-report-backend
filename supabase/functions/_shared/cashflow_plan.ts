@@ -87,6 +87,12 @@ export interface PlanEingabe {
    * die es so nie gab.
    */
   typische_auszahlung: number | null;
+  /**
+   * Je Auszahlungstermin aus den noch offenen Bestellungen gerechnet (ueber den
+   * gemessenen Geldlauf). Wo vorhanden, schlaegt das den Periodendurchschnitt:
+   * es ist eine Rechnung und keine Fortschreibung.
+   */
+  zufluss_je_termin?: Map<string, number>;
   termine: TerminMuster[];
   werbung: WerbungMuster;
   /**
@@ -118,19 +124,29 @@ export function zahlungsplan(e: PlanEingabe, heute = new Date()): Zahlungsplan {
   for (const t of e.rhythmus.naechste) {
     const am = t.auszahlung_am.slice(0, 10);
     if (am < iso(ab) || am > iso(bis)) continue;
+    // Gerechnet schlaegt fortgeschrieben: der Betrag aus den offenen
+    // Bestellungen weiss, WAS verkauft wurde — der Durchschnitt nicht.
+    const gerechnet = e.zufluss_je_termin?.get(am);
     positionen.push({
       am,
       art: "auszahlung",
       bezeichnung: t.geschaetzt ? "Auszahlung (fortgeschrieben)" : "Auszahlung",
-      betrag: e.typische_auszahlung === null ? null : r2(e.typische_auszahlung),
+      betrag: gerechnet !== undefined
+        ? r2(gerechnet)
+        : (e.typische_auszahlung === null ? null : r2(e.typische_auszahlung)),
       // Der TERMIN der bereits geschlossenen Periode ist sicher, der Betrag nie.
       sicher: false,
-      grundlage: e.typische_auszahlung === null
-        ? "Termin aus dem gemessenen Rhythmus; für den Betrag fehlen Vergleichswerte."
-        : (t.geschaetzt
-          ? "Termin fortgeschrieben. Betrag = bisheriger Zufluss je Abrechnungsperiode."
-          : "Periode ist bereits geschlossen, der Termin steht fest. Der Betrag ist "
-            + "der bisherige Zufluss je Abrechnungsperiode, nicht der echte."),
+      grundlage: gerechnet !== undefined
+        ? "Aus den noch nicht abgerechneten Bestellungen gerechnet: ihr Umsatz mal "
+          + "der gemessenen Auszahlungsquote, verteilt über den gemessenen Geldlauf. "
+          + "Genauer als ein Periodendurchschnitt, aber weiterhin eine Erwartung — "
+          + "Amazon sagt keinen Betrag zu."
+        : (e.typische_auszahlung === null
+          ? "Termin aus dem gemessenen Rhythmus; für den Betrag fehlen Vergleichswerte."
+          : (t.geschaetzt
+            ? "Termin fortgeschrieben. Betrag = bisheriger Zufluss je Abrechnungsperiode."
+            : "Periode ist bereits geschlossen, der Termin steht fest. Der Betrag ist "
+              + "der bisherige Zufluss je Abrechnungsperiode, nicht der echte.")),
     });
   }
   if (e.rhythmus.naechste.length === 0) {
