@@ -336,6 +336,9 @@ export async function pulseOverview(supabase: any, tenant_id: string): Promise<u
       umsatz_brutto: r2(Number(eaRoh.umsatz_brutto_cents) / 100),
       umsatzsteuer: r2(Number(eaRoh.umsatzsteuer_cents) / 100),
       wareneinsatz: r2(Number(eaRoh.wareneinsatz_cents) / 100),
+      // NETTO. Amazon rechnet brutto ab, aber die Vorsteuer kommt ueber die
+      // Voranmeldung zurueck — sie zweimal zu belasten (als Gebuehr und als
+      // fehlende Erstattung) waere falsch.
       gebuehren: r2(Number(eaRoh.gebuehren_cents) / 100),
       werbung: r2(Number(eaRoh.werbung_cents) / 100),
       // Getrennt ausgewiesen und nicht mit dem Umsatz verrechnet: eine

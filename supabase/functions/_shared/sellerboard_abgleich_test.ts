@@ -7,7 +7,8 @@
 
 import { assertEquals } from "jsr:@std/assert@1";
 import {
-  csvZeile, leseSellerboard, vergleiche, zuCents, zusammenfassung,
+  csvZeile, guvSpalteZuMonat, leseSellerboard, leseSellerboardDatei,
+  leseSellerboardGuv, vergleiche, zuCents, zusammenfassung,
 } from "./sellerboard_abgleich.ts";
 
 const CSV = [
@@ -103,4 +104,66 @@ Deno.test("Zusammenfassung: nur starke Abweichungen wecken jemanden", () => {
   ]);
   assertEquals(stark?.includes("gebuehren -50 %"), true);
   assertEquals(stark?.includes("welche stimmt"), true);
+});
+
+// --- GuV-Export (transponiertes Format) -------------------------------------
+//
+// Ausschnitt aus Vanejas echtem 12-Monats-Download. Kennzahlen als Zeilen,
+// Monate als Spalten — genau umgekehrt zum Automation-Link.
+
+const GUV = [
+  "Parameter/Datum,1.-10. September 2026,August 2026,Juli 2026,Gesamt",
+  'Umsatz,"16233,46","64091,83","56874,46",534756',
+  '    Organisch,"10833,46","39163,33","34490,94","329627,28"',
+  "Einheiten,621,2518,2289,19628",
+  '    Organisch,356,1239,1070,9620',
+  'Werbekosten,"-3092,68","-11584,7","-10713,29","-99591,36"',
+  '    Sponsored Products,"-2775,6","-9865,46","-8966,06","-85192,78"',
+  'Amazon-Gebühren,"-6405,81","-21074,62","-19251,12","-178580,49"',
+  '    FBA-Gebühr,"-2708,24",-10226,"-9276,01","-83648,18"',
+  'Einkaufspreis,"-3534,76","-14454,43","-13673,84","-114200,35"',
+  'Umsatzsteuer,"-2534,97","-9940,19","-8769,33","-80650,23"',
+  'Erwartete Auszahlung,"6399,99","29457,79","25092,17","227607,67"',
+].join("\r\n");
+
+Deno.test("GuV: Monate aus der Kopfzeile, Teilmonat und Gesamt raus", () => {
+  assertEquals(guvSpalteZuMonat("August 2026"), "2026-08");
+  assertEquals(guvSpalteZuMonat("Juli 2026"), "2026-07");
+  assertEquals(guvSpalteZuMonat("März 2026"), "2026-03");
+  // Der angebrochene Monat waere unfertig, "Gesamt" summiert ein Jahr —
+  // beide wuerden die Pruefung verfaelschen.
+  assertEquals(guvSpalteZuMonat("1.-10. September 2026"), null);
+  assertEquals(guvSpalteZuMonat("Gesamt"), null);
+});
+
+Deno.test("GuV: Vanejas Juli und August korrekt gelesen", () => {
+  const m = leseSellerboardGuv(GUV);
+  // Absteigend sortiert, ohne Teilmonat und ohne Gesamt.
+  assertEquals(m.map((x) => x.monat), ["2026-08", "2026-07"]);
+
+  const juli = m[1];
+  assertEquals(juli.umsatz_cents, 5687446);
+  assertEquals(juli.einheiten, 2289);
+  assertEquals(juli.werbung_cents, -1071329);
+  assertEquals(juli.gebuehren_cents, -1925112);
+  assertEquals(juli.ust_cents, -876933);
+  assertEquals(juli.wareneinsatz_cents, -1367384);
+  assertEquals(juli.auszahlung_cents, 2509217);
+});
+
+Deno.test("GuV: eingerückte Unterposten werden übersprungen", () => {
+  // "    Organisch" und "    FBA-Gebuehr" sind in den Hauptposten enthalten.
+  // Sie mitzuzaehlen wuerde jede Summe verdoppeln.
+  const m = leseSellerboardGuv(GUV);
+  assertEquals(m[0].umsatz_cents, 6409183);
+  assertEquals(m[0].gebuehren_cents, -2107462);
+});
+
+Deno.test("Format wird selbst erkannt", () => {
+  // Der GuV-Export beginnt mit "Parameter/Datum", der Automation-Link mit
+  // "DateFrom". Wer die Datei hochlaedt, soll nicht auch noch das Format
+  // angeben muessen.
+  assertEquals(leseSellerboardDatei(GUV).length, 2);
+  assertEquals(leseSellerboardDatei(CSV)[0].monat, "2026-08");
+  assertEquals(leseSellerboardDatei("irgendwas\nohne,struktur"), []);
 });

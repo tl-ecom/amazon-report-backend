@@ -224,3 +224,121 @@ export function zusammenfassung(monat: string, befunde: Befund[]): string | null
     + ". Zwei unabhängige Rechnungen laufen auseinander — welche stimmt, muss "
     + "geprüft werden.";
 }
+
+// --- GuV-Export (manuell heruntergeladen) -----------------------------------
+//
+// Sellerboard kennt zwei Exportformate, und sie sind zueinander transponiert:
+//
+//   Automation-Link:  eine ZEILE je Zeitraum, Kennzahlen als Spalten.
+//                     Liefert nur den letzten Monat — also immer den, der bei
+//                     Amazon noch am wenigsten abgerechnet ist.
+//   GuV-Download:     eine ZEILE je Kennzahl, Monate als Spalten.
+//                     Reicht 12 Monate zurueck und enthaelt damit auch die
+//                     Monate, die man wirklich pruefen kann.
+//
+// Der zweite ist der wertvollere, weil ein abgerechneter Monat eine echte
+// Gegenprobe erlaubt. Er laesst sich nur nicht automatisch abrufen.
+
+/** Deutsche Monatsnamen, wie sie in der Kopfzeile der GuV stehen. */
+const MONATSNAMEN: Record<string, string> = {
+  januar: "01", februar: "02", "märz": "03", maerz: "03", april: "04",
+  mai: "05", juni: "06", juli: "07", august: "08", september: "09",
+  oktober: "10", november: "11", dezember: "12",
+};
+
+/**
+ * Spaltenüberschrift zu YYYY-MM.
+ *
+ * Gibt null zurück für alles, was kein voller Monat ist: "Gesamt" und der
+ * angebrochene laufende Monat ("1.-10. September 2026"). Beide würden die
+ * Prüfung verfälschen — der eine summiert ein Jahr, der andere ist unfertig.
+ */
+export function guvSpalteZuMonat(kopf: string): string | null {
+  const t = kopf.trim();
+  // "1.-10. September 2026" -> Teilmonat, nicht vergleichbar.
+  if (/^\d/.test(t)) return null;
+  const m = t.match(/^([A-Za-zÄÖÜäöü]+)\s+(\d{4})$/);
+  if (!m) return null;
+  const monat = MONATSNAMEN[m[1].toLowerCase()];
+  return monat ? `${m[2]}-${monat}` : null;
+}
+
+/** Hauptposten der GuV -> unsere Kennzahlen. Unterposten sind eingerückt. */
+const GUV_ZEILEN: Record<string, keyof SellerboardMonat> = {
+  "Umsatz": "umsatz_cents",
+  "Einheiten": "einheiten",
+  "Werbekosten": "werbung_cents",
+  "Amazon-Gebühren": "gebuehren_cents",
+  "Umsatzsteuer": "ust_cents",
+  "Einkaufspreis": "wareneinsatz_cents",
+  "Erwartete Auszahlung": "auszahlung_cents",
+};
+
+/**
+ * Liest den GuV-Export (Kennzahlen als Zeilen, Monate als Spalten).
+ *
+ * Unterposten werden übersprungen: Sellerboard rückt sie mit Leerzeichen ein
+ * ("    Organisch", "    FBA-Gebühr"), und ihre Namen ändern sich mit dem
+ * Sortiment. Nur die Hauptposten sind stabil genug für einen Abgleich, der
+ * monatelang unbeaufsichtigt laufen soll.
+ */
+export function leseSellerboardGuv(csv: string): SellerboardMonat[] {
+  const zeilen = csv.replace(/^\uFEFF/, "").split(/\r?\n/).filter((z) => z.trim() !== "");
+  if (zeilen.length < 2) return [];
+
+  const kopf = csvZeile(zeilen[0]);
+  // Spalte 0 ist die Bezeichnung; ab 1 stehen die Zeiträume.
+  const spalten: Array<{ index: number; monat: string }> = [];
+  for (let i = 1; i < kopf.length; i++) {
+    const monat = guvSpalteZuMonat(kopf[i]);
+    if (monat) spalten.push({ index: i, monat });
+  }
+  if (spalten.length === 0) return [];
+
+  const je = new Map<string, SellerboardMonat>();
+  for (const sp of spalten) {
+    je.set(sp.monat, {
+      monat: sp.monat,
+      umsatz_cents: null, einheiten: null, werbung_cents: null,
+      gebuehren_cents: null, ust_cents: null, auszahlung_cents: null,
+      wareneinsatz_cents: null,
+    });
+  }
+
+  for (const zeile of zeilen.slice(1)) {
+    const f = csvZeile(zeile);
+    const roh = f[0] ?? "";
+    // Eingerückt = Unterposten. Der Hauptposten hat sie schon summiert.
+    if (roh !== roh.trimStart()) continue;
+    const feld = GUV_ZEILEN[roh.trim()];
+    if (!feld) continue;
+
+    for (const sp of spalten) {
+      const eintrag = je.get(sp.monat)!;
+      const wert = zuCents(f[sp.index]);
+      if (wert === null) continue;
+      // Einheiten sind Stückzahlen; zuCents hat mit 100 multipliziert.
+      (eintrag[feld] as number | null) = feld === "einheiten"
+        ? Math.round(wert / 100)
+        : wert;
+    }
+  }
+
+  // Monate ohne jede Zahl weglassen: eine leere Spalte ist keine Prüfung.
+  return [...je.values()]
+    .filter((m) => m.umsatz_cents !== null || m.einheiten !== null)
+    .sort((a, b) => b.monat.localeCompare(a.monat));
+}
+
+/**
+ * Erkennt das Format und liest entsprechend.
+ *
+ * Unterscheidungsmerkmal ist die erste Kopfzelle: der GuV-Export nennt sie
+ * "Parameter/Datum", der Automation-Link beginnt mit "DateFrom".
+ */
+export function leseSellerboardDatei(csv: string): SellerboardMonat[] {
+  const erste = csvZeile(csv.replace(/^\uFEFF/, "").split(/\r?\n/)[0] ?? "")[0] ?? "";
+  return erste.trim().toLowerCase().startsWith("parameter")
+    ? leseSellerboardGuv(csv)
+    : leseSellerboard(csv);
+}
