@@ -333,6 +333,10 @@ export async function pulseOverview(supabase: any, tenant_id: string): Promise<u
       wareneinsatz: r2(Number(eaRoh.wareneinsatz_cents) / 100),
       gebuehren: r2(Number(eaRoh.gebuehren_cents) / 100),
       werbung: r2(Number(eaRoh.werbung_cents) / 100),
+      // Getrennt ausgewiesen und nicht mit dem Umsatz verrechnet: eine
+      // Retourenquote ist eine Fuehrungsgroesse. Im Nettoumsatz versteckt
+      // sieht man sie nie wieder.
+      erstattungen: r2(Number(eaRoh.erstattungen_cents) / 100),
       ertrag: r2(Number(eaRoh.ertrag_cents) / 100),
       marge: Number(eaRoh.umsatz_netto_cents) > 0
         ? Math.round((Number(eaRoh.ertrag_cents) / Number(eaRoh.umsatz_netto_cents)) * 1000) / 10
