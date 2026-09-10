@@ -26,6 +26,7 @@
 //    solche ausgewiesen (quelle: "standard").
 
 import { findeLeerphasen, type TagesStand } from "./bestandshistorie.ts";
+import { externJeAsin } from "./bestand_gesamt.ts";
 
 // --- Methodik-Parameter (bewusst benannt) ------------------------------------
 
@@ -463,6 +464,35 @@ export function fuehreParameterZusammen(
   return out;
 }
 
+// --- Eigenes Lager: manuell oder aus Sellerboard ----------------------------
+
+export interface LagerQuelle {
+  menge: number | null;
+  quelle: "manuell" | "sellerboard" | null;
+}
+
+/**
+ * Eigenes Lager (transferierbar). Eine manuelle Angabe je Produkt schlaegt die
+ * automatische Quelle — wer den Wert eintraegt, weiss etwas, das der Feed nicht
+ * weiss. Ohne beides: null, nicht 0.
+ */
+export function effektivesLager(manuell: number | null, extern: number | null): LagerQuelle {
+  if (manuell != null && Number.isFinite(manuell)) return { menge: Math.max(0, manuell), quelle: "manuell" };
+  if (extern != null && Number.isFinite(extern)) return { menge: Math.max(0, extern), quelle: "sellerboard" };
+  return { menge: null, quelle: null };
+}
+
+/**
+ * Beim Lieferanten bestellte Ware laut Feed (ohne Ankunftsdatum). Sie mindert
+ * die Bestellmenge — aber nur, wenn fuer das Produkt KEINE eigenen offenen
+ * Bestellungen erfasst sind: die eigenen Eintraege sind der genauere Datensatz
+ * (mit Termin), und dieselbe Bestellung darf nicht doppelt zaehlen.
+ */
+export function anrechenbarBestellt(externBestellt: number | null, eigeneOffene: number): number {
+  if (eigeneOffene > 0) return 0;
+  return Math.max(0, nz(externBestellt));
+}
+
 // --- DB-Wrapper: Planung ----------------------------------------------------
 
 export interface PlanungArgs {
@@ -480,7 +510,7 @@ export async function bestandsplanung(supabase: any, tenant_id: string, args: Pl
   const horizont = Math.max(30, Math.min(HORIZONT_MAX, Math.round(Number(args.horizont_tage)) || HORIZONT_STANDARD));
   const projektionAsin = args.projektion_asin ? String(args.projektion_asin).toUpperCase() : null;
 
-  const [basisRes, wochenRes, verlaufRes, asinRes, planungRes, firmaRes, bestellRes] = await Promise.all([
+  const [basisRes, wochenRes, verlaufRes, asinRes, planungRes, firmaRes, bestellRes, extern] = await Promise.all([
     supabase.rpc("bestandsplanung_basis", { p_tenant: tenant_id }),
     supabase.rpc("bestandsplanung_wochen", { p_tenant: tenant_id, p_von: von }),
     supabase.rpc("bestandsverlauf_basis", { p_tenant: tenant_id, p_von: von }),
@@ -494,6 +524,9 @@ export async function bestandsplanung(supabase: any, tenant_id: string, args: Pl
     supabase.from("bestellungen")
       .select("id, asin, menge, bestellt_am, erwartet_am, status, ziel, lieferant, referenz, notiz, eingetroffen_am, created_at")
       .eq("tenant_id", tenant_id).order("erwartet_am", { ascending: true }).limit(500),
+    // Externe Bestaende (Sellerboard-Feed): eigenes Lager, Prep Center, 3PL,
+    // bestellte Ware. Leere Map, wenn der Mandant keine Quelle hat.
+    externJeAsin(supabase, tenant_id),
   ]);
   if (basisRes.error) throw new Error(`bestandsplanung_basis: ${basisRes.error.message}`);
   if (wochenRes.error) throw new Error(`bestandsplanung_wochen: ${wochenRes.error.message}`);
@@ -600,10 +633,13 @@ export async function bestandsplanung(supabase: any, tenant_id: string, args: Pl
     for (const b of offene) if (b.ziel === "fba") zulaeufe.push({ datum: b.erwartet_am, menge: b.menge, art: "bestellung" });
     const offeneLagerMenge = offene.filter((b) => b.ziel === "lager").reduce((s, b) => s + b.menge, 0);
 
-    const lagerBestand = planung?.lager_bestand == null ? null : nz(planung.lager_bestand);
+    const ex = extern.get(asin) ?? null;
+    const lager = effektivesLager(planung?.lager_bestand == null ? null : nz(planung.lager_bestand), ex ? ex.extern_physisch : null);
+    const bestelltSb = anrechenbarBestellt(ex ? ex.ordered : null, offene.length);
+    const lagerGesamt = (lager.menge ?? 0) + offeneLagerMenge + bestelltSb;
     const ergebnis = planeAsin({
       heute, bestand: r.bestand == null ? null : nz(r.bestand), bestand_bekannt: Boolean(r.bestand_bekannt),
-      lager_bestand: lagerBestand == null ? (offeneLagerMenge > 0 ? offeneLagerMenge : null) : lagerBestand + offeneLagerMenge,
+      lager_bestand: lager.menge == null && offeneLagerMenge === 0 && bestelltSb === 0 ? null : lagerGesamt,
       zulaeufe, velocity, parameter, horizont_tage: horizont,
     });
 
@@ -614,7 +650,15 @@ export async function bestandsplanung(supabase: any, tenant_id: string, args: Pl
       bestand: r.bestand == null ? null : nz(r.bestand),
       unterwegs,
       bestand_bekannt: Boolean(r.bestand_bekannt),
-      lager_bestand: lagerBestand,
+      lager_bestand: lager.menge,
+      lager_quelle: lager.quelle,
+      lager_manuell: planung?.lager_bestand == null ? null : nz(planung.lager_bestand),
+      // Sellerboard je ASIN. null = keine externe Quelle, nicht 0.
+      extern_physisch: ex ? ex.extern_physisch : null,
+      extern_bestellt: ex ? ex.ordered : null,
+      extern_bestellt_angerechnet: bestelltSb,
+      extern_pipeline: ex ? ex.pipeline_sonstig : null,
+      extern_stand: ex?.stand ?? null,
       offene_lager_menge: offeneLagerMenge,
       offene_fba_menge: offene.filter((b) => b.ziel === "fba").reduce((s, b) => s + b.menge, 0),
       offene_bestellungen: offene.length,
@@ -661,6 +705,11 @@ export async function bestandsplanung(supabase: any, tenant_id: string, args: Pl
     bestand_quelle: erste?.bestand_quelle ?? null,
     bestand_stand: erste?.bestand_stand ?? null,
     zulauf_bekannt: ((basisRes.data ?? []) as any[]).some((r) => r.unterwegs != null),
+    // Externe Quelle (Sellerboard): eigenes Lager wird daraus automatisch
+    // gefuellt, solange je Produkt nichts Manuelles eingetragen ist.
+    hat_externe_bestaende: extern.size > 0,
+    extern_stand: [...extern.values()].reduce<string | null>((m, e) => (!m || (e.stand ?? "") > m ? e.stand : m), null),
+    extern_quelle: extern.size > 0 ? ([...extern.values()][0]?.quelle ?? null) : null,
     anzahl: {
       leer: zaehle("leer"), ueberfaellig: zaehle("ueberfaellig"), jetzt: zaehle("jetzt"), bald: zaehle("bald"),
       ok: zaehle("ok"), ueberbestand: zaehle("ueberbestand"), kein_absatz: zaehle("kein_absatz"), unbekannt: zaehle("unbekannt"),

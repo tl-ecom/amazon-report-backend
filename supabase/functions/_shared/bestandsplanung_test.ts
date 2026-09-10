@@ -227,3 +227,17 @@ Deno.test("Parameter: Produkt vor Firma vor Standard, Herkunft je Feld", () => {
   assertEquals(p.quelle.min_reichweite_tage, "standard");
   assert(p.max_reichweite_tage > 0);
 });
+
+// --- Eigenes Lager aus Sellerboard ---
+
+Deno.test("eigenes Lager: manuell schlaegt Sellerboard, sonst Sellerboard, sonst unbekannt", async () => {
+  const { effektivesLager, anrechenbarBestellt } = await import("./bestandsplanung.ts");
+  assertEquals(effektivesLager(40, 120), { menge: 40, quelle: "manuell" });
+  assertEquals(effektivesLager(0, 120), { menge: 0, quelle: "manuell" }); // 0 ist eine Aussage
+  assertEquals(effektivesLager(null, 120), { menge: 120, quelle: "sellerboard" });
+  assertEquals(effektivesLager(null, null), { menge: null, quelle: null });
+  // Beim Lieferanten bestellt laut Feed: nur ohne eigene Bestellungen anrechnen.
+  assertEquals(anrechenbarBestellt(500, 0), 500);
+  assertEquals(anrechenbarBestellt(500, 2), 0);
+  assertEquals(anrechenbarBestellt(null, 0), 0);
+});
