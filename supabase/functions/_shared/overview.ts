@@ -112,6 +112,9 @@ export interface Bewegung {
     umsatz: number; umsatz_vorher: number; umsatz_delta_prozent: number | null;
     ertrag: number | null; ertrag_vorher: number | null; ertrag_delta_prozent: number | null;
     produkte_mit_ertrag: number; produkte: number;
+    /** Umsatzgewichteter Anteil der Bestellungen, die Amazon schon abgerechnet
+     *  hat. Ohne ihn ist der Ertrag oben nicht lesbar. */
+    gebuehren_abdeckung: number | null;
   };
   umsatz: { gewinner: BewegungProdukt[]; verlierer: BewegungProdukt[] };
   ertrag: { gewinner: BewegungProdukt[]; verlierer: BewegungProdukt[] };
@@ -206,6 +209,15 @@ export function baueBewegungen(
       ertrag_delta_prozent: ertragGesamt != null && ertragVorherGesamt != null ? deltaProzent(ertragGesamt, ertragVorherGesamt) : null,
       produkte_mit_ertrag: ertragBekannt(aktuell).length,
       produkte: aktuell.length,
+      /**
+       * Anteil der Bestellungen im Fenster, die Amazon schon abgerechnet hat.
+       *
+       * Der Ertrag oben ist ohne diese Zahl nicht lesbar: Umsatz und Wareneinsatz
+       * stehen sofort fest, die GEBUEHREN kommen mit Wochen Verzug. Bei 35 %
+       * Abdeckung fehlen zwei Drittel der Gebuehren, und der Ertrag faellt um
+       * ein Vielfaches zu hoch aus — bei Vaneja 28.046 € statt rund 16.000 €.
+       */
+      gebuehren_abdeckung: abdeckung(aktuell),
     },
     umsatz: {
       gewinner: nachUmsatz.filter((z) => z.umsatz_delta > 0).slice(0, top),
@@ -240,6 +252,26 @@ async function ladeTitel(supabase: any, tenant_id: string): Promise<Map<string, 
   const m = new Map<string, string | null>();
   for (const r of data ?? []) m.set(String(r.asin), r.produktname ?? null);
   return m;
+}
+
+/**
+ * Umsatzgewichtete Abrechnungsquote des Fensters.
+ *
+ * Bewusst gewichtet und nicht als Mittelwert ueber Produkte: ein kleines
+ * Produkt mit einer einzigen abgerechneten Bestellung wuerde den Schnitt sonst
+ * genauso stark heben wie der Umsatztraeger.
+ */
+function abdeckung(produkte: any[]): number | null {
+  let umsatz = 0;
+  let gedeckt = 0;
+  for (const p of produkte) {
+    const u = Number(p?.umsatz) || 0;
+    const a = p?.gebuehren_abdeckung;
+    if (u <= 0 || a === null || a === undefined) continue;
+    umsatz += u;
+    gedeckt += u * Number(a);
+  }
+  return umsatz > 0 ? Math.round((gedeckt / umsatz) * 1000) / 1000 : null;
 }
 
 export async function pulseOverview(supabase: any, tenant_id: string): Promise<unknown> {
@@ -314,6 +346,20 @@ export async function pulseOverview(supabase: any, tenant_id: string): Promise<u
     pruefungen: hinweise.slice(0, 3),
     top_changes: (changesRes.data ?? []).map(mitTitel),
     warnungen: [
+      // Der Ertrag steht ganz oben auf der Seite. Ohne diesen Satz liest ihn
+      // jeder als Ergebnis, obwohl die Gebuehren noch fehlen.
+      ...(bewegung?.gesamt?.gebuehren_abdeckung != null
+        && bewegung.gesamt.gebuehren_abdeckung < 0.8
+        ? [
+          `Der „Ertrag nach Werbung" ist zu HOCH: Amazon hat erst `
+          + `${Math.round(bewegung.gesamt.gebuehren_abdeckung * 100)} % der `
+          + "Bestellungen dieses Zeitraums abgerechnet. Umsatz und Wareneinsatz "
+          + "stehen sofort fest, die Gebühren kommen mit Wochen Verzug — der "
+          + "fehlende Teil ist noch nicht abgezogen. Belastbar wird die Zahl "
+          + "erst, wenn der Zeitraum abgerechnet ist; die Produktsicht nennt die "
+          + "Abdeckung je Artikel.",
+        ]
+        : []),
       ...(sales?.konsistenz && !sales.konsistenz.ok
         ? ["Sales-Daten: byDate und byAsin weichen ab — Zahlen prüfen."]
         : []),
