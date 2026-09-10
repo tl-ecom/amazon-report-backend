@@ -710,8 +710,12 @@ export async function cashflowUebersicht(
       + "fortgeschrieben, nicht bestätigt.",
     );
   }
+  // Diese beiden Saetze standen frueher unter `warnungen`. Sie sind aber keine
+  // Datenstands-Warnung, sondern die Erklaerung zu den Zahlen im Geldlauf —
+  // und dort, direkt neben den Zahlen, stehen sie jetzt.
+  const geldlaufHinweise: string[] = [];
   if (muster.sperre_erkennbar && muster.frueheste_tage !== null) {
-    warnungen.push(
+    geldlaufHinweise.push(
       "Amazon hält das Geld zurück: Vom Verkauf bis zur Auszahlung vergehen "
       + `mindestens ${muster.frueheste_tage} Tage, im Mittel `
       + `${muster.median_tage} (gemessen an ${muster.belege} Bestellungen). `
@@ -721,7 +725,7 @@ export async function cashflowUebersicht(
     );
   }
   if (vorfinanz.sockel !== null) {
-    warnungen.push(
+    geldlaufHinweise.push(
       "Dauerhaft vorfinanziert allein für Werbung: rund "
       + `${vorfinanz.sockel.toFixed(0)} € (${vorfinanz.je_tag?.toFixed(0)} € je Tag `
       + `über ${vorfinanz.tage} Tage). Jede Erhöhung um 100 € je Tag bindet `
@@ -773,6 +777,7 @@ export async function cashflowUebersicht(
       quote_monat: quote.monat,
       quote_grund: quote.grund,
       vorfinanzierung: vorfinanz,
+      hinweise: geldlaufHinweise,
     },
 
     einbehalt: reserve,
