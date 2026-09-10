@@ -179,3 +179,32 @@ Deno.test("Kalender: ein Termin ohne Amazon-Daten steht mit offenem Betrag da", 
   assertEquals(ust.betrag, null);
   assertEquals(ust.grundlage.includes("der Betrag ist offen"), true);
 });
+
+Deno.test("Kalender: fehlender und unfertiger Monat im Quartal stehen dran", () => {
+  // Quartalsweise meldet ein Termin DREI Monate. Fehlt einer, summiert sich
+  // trotzdem eine plausibel aussehende Zahl auf — ein Drittel zu niedrig. Und
+  // der juengste Monat des Quartals ist am Termin noch nicht fertig abgerechnet,
+  // seine Umsatzsteuer waechst also noch. Beides muss im Satz stehen.
+  const p = zahlungsplan({
+    ...EINGABE,
+    rhythmus: { ...EINGABE.rhythmus, naechste: [] },
+    werbung: { ...EINGABE.werbung, art: "zu_wenig_daten", je_tag: null },
+    termine: [],
+    umsatzsteuer: {
+      faellig_am: "2026-10-10", betrag: 7270.61,
+      termine: [{
+        faellig_am: "2026-10-10", betrag: 7270.61,
+        zeitraum: ["2026-07", "2026-08", "2026-09"],
+        fehlende: ["2026-07"],
+        schwach: ["2026-09"],
+      }],
+    },
+    tage: 40,
+  }, HEUTE);
+
+  const ust = p.positionen.find((x) => x.art === "umsatzsteuer")!;
+  assertEquals(ust.betrag, -7270.61);
+  assertEquals(ust.grundlage.includes("2026-07, 2026-08, 2026-09"), true);
+  assertEquals(ust.grundlage.includes("Für 2026-07 liegen keine Daten vor"), true);
+  assertEquals(ust.grundlage.includes("2026-09 ist noch nicht fertig abgerechnet"), true);
+});

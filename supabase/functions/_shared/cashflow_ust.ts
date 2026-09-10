@@ -326,18 +326,27 @@ export function angemeldeteMonate(
  *
  * null, wenn für den Zeitraum keine Daten vorliegen — dann steht im Kalender
  * ein Termin ohne Betrag statt eines Betrags, den niemand geprüft hat.
+ *
+ * `fehlende` ist der wichtige Teil bei QUARTALSWEISER Anmeldung. Monatlich
+ * meldet man einen Monat: er ist da oder nicht. Quartalsweise meldet man drei,
+ * und wenn einer fehlt, summiert sich trotzdem eine plausibel aussehende Zahl
+ * auf — ein Drittel zu niedrig, ohne dass irgendwas auffaellt. Genau so eine
+ * Zahl ist schlimmer als gar keine, weil man danach disponiert.
  */
 export function zahllastFuerTermin(
   monate: UstMonat[], faellig_am: string | null,
   rhythmus: string | null, dauerfrist: boolean,
-): { betrag: number | null; zeitraum: string[] } {
-  if (!faellig_am || !rhythmus) return { betrag: null, zeitraum: [] };
+): { betrag: number | null; zeitraum: string[]; fehlende: string[] } {
+  if (!faellig_am || !rhythmus) return { betrag: null, zeitraum: [], fehlende: [] };
   const gesucht = angemeldeteMonate(faellig_am, rhythmus, dauerfrist);
   const treffer = monate.filter((m) => gesucht.includes(m.monat));
   const mitZahl = treffer.filter((m) => m.zahllast_aus_amazon !== null);
-  if (mitZahl.length === 0) return { betrag: null, zeitraum: gesucht };
+  const vorhanden = new Set(mitZahl.map((m) => m.monat));
+  const fehlende = gesucht.filter((m) => !vorhanden.has(m));
+  if (mitZahl.length === 0) return { betrag: null, zeitraum: gesucht, fehlende };
   return {
     betrag: r2(mitZahl.reduce((s, m) => s + (m.zahllast_aus_amazon ?? 0), 0)),
     zeitraum: gesucht,
+    fehlende,
   };
 }

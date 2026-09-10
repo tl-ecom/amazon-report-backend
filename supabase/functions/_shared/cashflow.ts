@@ -546,6 +546,14 @@ export function naechsteAnmeldung(
   return naechst ? naechst.toISOString().slice(0, 10) : null;
 }
 
+/**
+ * Ab dieser Abrechnungsquote gilt ein Monat fuer die Zahllast als belastbar.
+ *
+ * Dieselbe Schwelle wie beim Geldlauf, aus demselben Grund: darunter fehlen zu
+ * viele Abrechnungszeilen, und mit ihnen die Umsatzsteuer darauf.
+ */
+const ABDECKUNG_FUER_ZAHLLAST = 0.8;
+
 // --- DB-Schicht -------------------------------------------------------------
 
 export interface CashflowArgs { tage?: unknown }
@@ -654,6 +662,14 @@ export async function cashflowUebersicht(
   // Die Anmeldung am 10.09. betrifft den AUGUST, nicht den laufenden Monat.
   // Der juengste Monat mit Daten waere hier der angebrochene September gewesen
   // — der Kalender wies deshalb 0,00 € aus, wo 5.450 € faellig sind.
+  // Wie weit ist jeder Monat abgerechnet? Die Quoten-RPC liefert das schon.
+  // Gebraucht wird es gleich zweimal: fuer die Auszahlungsquote und dafuer, ob
+  // ein angemeldeter Monat ueberhaupt belastbar ist.
+  const abdeckungJeMonat = new Map<string, number>();
+  for (const q of (quoteRes?.data ?? []) as any[]) {
+    abdeckungJeMonat.set(String(q.monat), Number(q.abdeckung));
+  }
+
   // Alle Termine im Kalenderfenster, nicht nur der naechste. Das Fenster wird
   // genauso gebildet wie in zahlungsplan(), sonst faellt ein Randtermin durch.
   const planFenster = 60;
@@ -669,7 +685,20 @@ export async function cashflowUebersicht(
       stamm.ust_voranmeldung ?? null,
       stamm.ust_dauerfristverlaengerung === true,
     );
-    return { faellig_am: am, betrag: z.betrag, zeitraum: z.zeitraum };
+    // Ein Monat kann DA sein und trotzdem fast leer: die Umsatzsteuer haengt an
+    // den Abrechnungszeilen, und Amazon bucht sie mit Wochen Verzug. Bei Vaneja
+    // stand der September am 10.09. bei 31 € und wird auf rund 5.000 wachsen.
+    // Monatlich faellt das nicht auf, weil der gemeldete Monat immer schon
+    // abgerechnet ist. Quartalsweise gehoert der juengste Monat des Quartals
+    // dazu — und genau der ist noch unfertig.
+    const schwach = z.zeitraum.filter((m) => {
+      const a = abdeckungJeMonat.get(m);
+      return a !== undefined && a < ABDECKUNG_FUER_ZAHLLAST;
+    });
+    return {
+      faellig_am: am, betrag: z.betrag, zeitraum: z.zeitraum,
+      fehlende: z.fehlende, schwach,
+    };
   });
 
   const ustFaellig = zahllastFuerTermin(

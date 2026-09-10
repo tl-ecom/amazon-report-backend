@@ -152,7 +152,7 @@ Deno.test("Vorfinanzierung: ohne Messung keine Zahl", () => {
 // ausgezahlt. Der Kontostand im Seller Central zeigt nur die laufende Periode,
 // nicht das Geld, das wegen der Freigabesperre hinter der Zustellung hängt.
 
-Deno.test("Forderung: netto gerechnet, nicht brutto", () => {
+Deno.test("Forderung: nach Amazons Abzügen, aber MIT Umsatzsteuer", () => {
   const f = forderungAnAmazon(
     [
       { am: "2026-09-08", betrag: 1200 },  // rechnerisch vorbei, trotzdem offen
@@ -162,8 +162,10 @@ Deno.test("Forderung: netto gerechnet, nicht brutto", () => {
     14500, 0.47, 30, new Date("2026-09-10T09:00:00Z"),
   );
   assertEquals(f.betrag, 6700);
-  // Brutto steht daneben, ist aber NICHT die Forderung: davon gehen Gebühren,
-  // Werbung und Umsatzsteuer ab.
+  // Der Betrag vor Abzügen steht daneben, ist aber NICHT die Forderung: davon
+  // behält Amazon noch Gebühren und Werbung ein. Die Umsatzsteuer dagegen zahlt
+  // Amazon mit aus — sie steckt in den 6.700 € und geht erst zum
+  // Voranmeldungstermin ab, wo der Kalender sie als eigenen Posten führt.
   assertEquals(f.brutto, 14500);
   assertEquals(f.quote, 0.47);
   // Der 25.10. liegt jenseits von 30 Tagen und zählt nur in die Gesamtsumme.
@@ -179,7 +181,11 @@ Deno.test("Forderung: ohne Quote keine Zahl, aber eine Begründung", () => {
   // Null, nicht 0 — und der Bruttobetrag darf nicht als Forderung durchgehen.
   assertEquals(f.betrag, null);
   assertEquals(f.brutto, 14500);
-  assertEquals(f.grund?.includes("NICHT die"), true);
+  assertEquals(f.grund?.includes("NICHT die Forderung"), true);
+  // Die Umsatzsteuer darf hier NICHT als Abzug auftauchen: Amazon zahlt sie mit
+  // aus, der Verkäufer führt sie selbst ab. Sie als Abzug zu nennen wäre der
+  // Fehler, der denselben Betrag zweimal wegrechnet.
+  assertEquals(f.grund?.includes("Umsatzsteuer"), false);
 });
 
 Deno.test("Forderung: nichts offen ist kein Fehler", () => {

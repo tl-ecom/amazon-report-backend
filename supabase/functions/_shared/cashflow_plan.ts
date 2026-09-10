@@ -109,7 +109,16 @@ export interface PlanEingabe {
      * Tagen zwei — der zweite ist ein voller Monatsbetrag und darf nicht
      * fehlen. `faellig_am` bleibt fuer aeltere Aufrufer erhalten.
      */
-    termine?: Array<{ faellig_am: string; betrag: number | null; zeitraum: string[] }>;
+    termine?: Array<{
+      faellig_am: string; betrag: number | null; zeitraum: string[];
+      /** Monate des Zeitraums OHNE Daten. Bei einem Quartal sofort relevant. */
+      fehlende?: string[];
+      /**
+       * Monate MIT Daten, die Amazon aber noch kaum abgerechnet hat. Ihre
+       * Umsatzsteuer waechst noch — der Betrag ist heute zu niedrig.
+       */
+      schwach?: string[];
+    }>;
   };
   tage?: number;
 }
@@ -254,7 +263,21 @@ export function zahlungsplan(e: PlanEingabe, heute = new Date()): Zahlungsplan {
               + "steht, der Betrag ist offen."
             : "Betrag aus den Amazon-Daten dieses Zeitraums; Vorsteuer aus "
               + "Wareneinkauf und Betriebsausgaben fehlt, die echte Zahllast ist "
-              + "niedriger."),
+              + "niedriger.")
+          // Bei einem Quartal summiert sich auch ohne einen der drei Monate eine
+          // plausibel aussehende Zahl auf — ein Drittel zu niedrig. Das muss
+          // dranstehen, sonst disponiert jemand danach.
+          + ((t.fehlende?.length ?? 0) > 0
+            ? ` Für ${t.fehlende!.join(", ")} liegen keine Daten vor — der Betrag `
+              + "ist um diesen Teil des Zeitraums zu niedrig."
+            : "")
+          // Die Umsatzsteuer haengt an den Abrechnungszeilen, und die kommen mit
+          // Wochen Verzug. Ein noch offener Monat im Zeitraum laesst den Betrag
+          // weiter wachsen — bei einem Quartal ist das immer der letzte Monat.
+          + ((t.schwach?.length ?? 0) > 0
+            ? ` ${t.schwach!.join(", ")} ist noch nicht fertig abgerechnet — die `
+              + "Zahllast dafür wächst noch, der Termin ist also unterschätzt."
+            : ""),
       });
     }
   } else {

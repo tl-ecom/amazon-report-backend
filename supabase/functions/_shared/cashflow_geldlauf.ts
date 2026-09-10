@@ -234,15 +234,27 @@ export function vorfinanzierung(
 // Seller Central zeigt nur die laufende Abrechnungsperiode, nicht das Geld, das
 // wegen der Freigabesperre noch hinter der Zustellung hängt.
 //
-// Gerechnet wird NETTO: der Bruttoumsatz der offenen Bestellungen mal der
-// gemessenen Auszahlungsquote. Brutto wäre die falsche Zahl — Gebühren, Werbung
-// und Umsatzsteuer gehen ab, bevor irgendetwas fliesst. Bei Vaneja sind das
-// rund 53 % des Bruttoumsatzes, die gar nicht erst ankommen.
+// Gerechnet wird NACH AMAZONS ABZUEGEN: der Bruttoumsatz der offenen
+// Bestellungen mal der gemessenen Auszahlungsquote. Gebuehren und Werbung
+// behaelt Amazon direkt ein, sie kommen gar nicht erst an — bei Vaneja gut die
+// Haelfte des Bruttoumsatzes.
+//
+// Die UMSATZSTEUER geht hier NICHT ab. In Deutschland zahlt Amazon sie mit aus,
+// und der Verkaeufer fuehrt sie selbst ans Finanzamt ab. Sie ist im Betrag
+// enthalten und verlaesst das Konto erst zum Voranmeldungstermin — dort steht
+// sie im Kalender als eigener Abfluss. Sie hier abzuziehen hiesse, denselben
+// Betrag zweimal wegzurechnen.
+//
+// "Netto" waere deshalb das falsche Wort: gemeint ist netto gegenueber Amazon,
+// nicht netto gegenueber dem Finanzamt.
 
 export interface Forderung {
-  /** Erwarteter Zufluss aus allem, was verkauft und noch nicht abgerechnet ist. */
+  /**
+   * Was davon aufs Konto kommt: nach Amazons Abzuegen (Gebuehren, Werbung),
+   * aber MIT Umsatzsteuer — die fuehrt der Verkaeufer selbst ab.
+   */
   betrag: number | null;
-  /** Derselbe Bestand brutto — was die Kunden bezahlt haben. */
+  /** Derselbe Bestand vor Amazons Abzuegen — was die Kunden bezahlt haben. */
   brutto: number | null;
   /** Auszahlungsquote, mit der gerechnet wurde. */
   quote: number | null;
@@ -270,8 +282,8 @@ export function forderungAnAmazon(
   if (quote === null) {
     return leer(
       "Ohne gemessene Auszahlungsquote lässt sich aus dem offenen Umsatz kein "
-      + "Zufluss ableiten. Der Bruttobetrag steht daneben — er ist NICHT die "
-      + "Forderung, davon gehen Gebühren, Werbung und Umsatzsteuer ab.",
+      + "Zufluss ableiten. Der Betrag vor Abzügen steht daneben — er ist NICHT "
+      + "die Forderung, davon behält Amazon noch Gebühren und Werbung ein.",
     );
   }
   if (zufluesse.length === 0) {

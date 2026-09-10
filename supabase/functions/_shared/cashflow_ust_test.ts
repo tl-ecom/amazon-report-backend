@@ -249,3 +249,56 @@ Deno.test("Zahllast zum Termin: ohne Rhythmus keine Zuordnung", () => {
   assertEquals(zahllastFuerTermin(monate, "2026-09-10", null, false).betrag, null);
   assertEquals(zahllastFuerTermin(monate, null, "monatlich", false).betrag, null);
 });
+
+// --- Quartalsweise Anmeldung ------------------------------------------------
+//
+// Vaneja meldet quartalsweise. Damit meldet ein Termin DREI Monate, und der
+// gefährliche Fall ist nicht ein fehlender Termin, sondern ein fehlender Monat
+// darin: die Summe sieht plausibel aus und ist ein Drittel zu niedrig.
+
+Deno.test("Quartal: der Termin am 10.10. meldet Juli bis September", () => {
+  assertEquals(
+    angemeldeteMonate("2026-10-10", "vierteljaehrlich", false),
+    ["2026-07", "2026-08", "2026-09"],
+  );
+  // Mit Dauerfristverlängerung ist am 10.11. dasselbe Quartal fällig.
+  assertEquals(
+    angemeldeteMonate("2026-11-10", "vierteljaehrlich", true),
+    ["2026-07", "2026-08", "2026-09"],
+  );
+  // Jahreswechsel: der Januar-Termin meldet das Vorjahresquartal.
+  assertEquals(
+    angemeldeteMonate("2027-01-10", "vierteljaehrlich", false),
+    ["2026-10", "2026-11", "2026-12"],
+  );
+});
+
+Deno.test("Quartal: alle drei Monate werden summiert", () => {
+  const monate = [
+    { monat: "2026-07", zahllast_aus_amazon: 5454.73 },
+    { monat: "2026-08", zahllast_aus_amazon: 5450.5 },
+    { monat: "2026-09", zahllast_aus_amazon: 1820.11 },
+  ] as any;
+  const z = zahllastFuerTermin(monate, "2026-10-10", "vierteljaehrlich", false);
+  assertEquals(z.betrag, 12725.34);
+  assertEquals(z.fehlende, []);
+});
+
+Deno.test("Quartal: ein fehlender Monat wird benannt, nicht verschwiegen", () => {
+  const monate = [
+    { monat: "2026-08", zahllast_aus_amazon: 5450.5 },
+    { monat: "2026-09", zahllast_aus_amazon: 1820.11 },
+  ] as any;
+  const z = zahllastFuerTermin(monate, "2026-10-10", "vierteljaehrlich", false);
+  // Die Summe steht — aber sie ist um den Juli zu niedrig, und das gehört
+  // dazugesagt. Vorher kam hier nur 7.270,61 ohne jeden Vorbehalt heraus.
+  assertEquals(z.betrag, 7270.61);
+  assertEquals(z.zeitraum, ["2026-07", "2026-08", "2026-09"]);
+  assertEquals(z.fehlende, ["2026-07"]);
+});
+
+Deno.test("Quartal: kein einziger Monat da — Termin ohne Betrag", () => {
+  const z = zahllastFuerTermin([] as any, "2026-10-10", "vierteljaehrlich", false);
+  assertEquals(z.betrag, null);
+  assertEquals(z.fehlende.length, 3);
+});
