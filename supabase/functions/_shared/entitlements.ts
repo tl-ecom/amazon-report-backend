@@ -159,7 +159,7 @@ export const RESOURCE_FEATURE: Record<string, string> = {
 
 // BEWUSST NICHT gelistet, also immer erlaubt: stammdaten, stammdaten_setzen,
 // einstellungen, einstellungen_setzen, ust_faktor, ust_faktor_setzen,
-// steuerprofil_setzen.
+// steuerprofil_setzen, kontostand, kontostand_setzen.
 //
 // Das sind Angaben, die der Verkaeufer ueber SICH macht — Voranmeldungs-
 // Rhythmus, Sitzland, Vorsteuerabzug, Ziel-ACOS. Sie hingen frueher an
