@@ -329,7 +329,12 @@ export async function pulseOverview(supabase: any, tenant_id: string): Promise<u
     ? {
       monat: String(eaRoh.monat),
       von: eaRoh.von, bis: eaRoh.bis,
-      umsatz: r2(Number(eaRoh.umsatz_netto_cents) / 100),
+      // BRUTTO — produkt_uebersicht.umsatz_cents ist identisch mit
+      // orders_history.item_price_cents. Der Name sagt das jetzt auch: als
+      // "netto" gelesen hat die Rechnung die Steuer nie abgezogen und das
+      // Juli-Ergebnis um 8.821 € zu hoch ausgewiesen.
+      umsatz_brutto: r2(Number(eaRoh.umsatz_brutto_cents) / 100),
+      umsatzsteuer: r2(Number(eaRoh.umsatzsteuer_cents) / 100),
       wareneinsatz: r2(Number(eaRoh.wareneinsatz_cents) / 100),
       gebuehren: r2(Number(eaRoh.gebuehren_cents) / 100),
       werbung: r2(Number(eaRoh.werbung_cents) / 100),
@@ -338,8 +343,8 @@ export async function pulseOverview(supabase: any, tenant_id: string): Promise<u
       // sieht man sie nie wieder.
       erstattungen: r2(Number(eaRoh.erstattungen_cents) / 100),
       ertrag: r2(Number(eaRoh.ertrag_cents) / 100),
-      marge: Number(eaRoh.umsatz_netto_cents) > 0
-        ? Math.round((Number(eaRoh.ertrag_cents) / Number(eaRoh.umsatz_netto_cents)) * 1000) / 10
+      marge: Number(eaRoh.umsatz_brutto_cents) > 0
+        ? Math.round((Number(eaRoh.ertrag_cents) / Number(eaRoh.umsatz_brutto_cents)) * 1000) / 10
         : null,
       abdeckung: Number(eaRoh.abdeckung),
     }
