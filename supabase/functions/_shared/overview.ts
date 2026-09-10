@@ -282,7 +282,7 @@ export async function pulseOverview(supabase: any, tenant_id: string): Promise<u
   const vBis = tagVor(BEWEGUNG_TAGE + 1);
   const vVon = tagVor(2 * BEWEGUNG_TAGE);
 
-  const [salesRow, listingsRow, changesRes, titel, aktuell, vorher, adsRes, diagRes] = await Promise.all([
+  const [salesRow, listingsRow, changesRes, titel, aktuell, vorher, adsRes, ertragRes, diagRes] = await Promise.all([
     ladeLatest(supabase, tenant_id, SALES_TYPE),
     ladeLatest(supabase, tenant_id, LISTINGS_TYPE),
     supabase.from("change_events").select("asin, event_type, previous_value, new_value, relevance, effective_at, status")
@@ -291,6 +291,9 @@ export async function pulseOverview(supabase: any, tenant_id: string): Promise<u
     produktUebersicht(supabase, tenant_id, { von, bis }).catch(() => null) as Promise<any>,
     produktUebersicht(supabase, tenant_id, { von: vVon, bis: vBis }).catch(() => null) as Promise<any>,
     supabase.rpc("ads_summen", { p_tenant: tenant_id, p_von: von, p_bis: bis }),
+    // Ertrag ueber den juengsten KALENDERMONAT, der abgerechnet ist. Das
+    // Bewegungsfenster taugt dafuer nicht: dort fehlen die Gebuehren noch.
+    supabase.rpc("ertrag_abgerechnet", { p_tenant: tenant_id }),
     supabase.from("diagnoses").select("id", { count: "exact", head: true }).eq("tenant_id", tenant_id).eq("status", "offen"),
   ]);
 
@@ -317,6 +320,27 @@ export async function pulseOverview(supabase: any, tenant_id: string): Promise<u
     ? Math.round((werbung / bewegung.gesamt.umsatz) * 1000) / 10
     : null;
 
+  // Der ehrliche Ertrag: ein abgeschlossener Monat statt der letzten 30 Tage.
+  // Umsatz und Wareneinsatz stehen sofort fest, die GEBUEHREN kommen mit Wochen
+  // Verzug — im laufenden Fenster fehlen bei Vaneja rund 60 % davon, und der
+  // Ertrag faellt dadurch um ein Vielfaches zu hoch aus.
+  const eaRoh = ((ertragRes?.data ?? []) as any[])[0] ?? null;
+  const ertragMonat = eaRoh
+    ? {
+      monat: String(eaRoh.monat),
+      von: eaRoh.von, bis: eaRoh.bis,
+      umsatz: r2(Number(eaRoh.umsatz_netto_cents) / 100),
+      wareneinsatz: r2(Number(eaRoh.wareneinsatz_cents) / 100),
+      gebuehren: r2(Number(eaRoh.gebuehren_cents) / 100),
+      werbung: r2(Number(eaRoh.werbung_cents) / 100),
+      ertrag: r2(Number(eaRoh.ertrag_cents) / 100),
+      marge: Number(eaRoh.umsatz_netto_cents) > 0
+        ? Math.round((Number(eaRoh.ertrag_cents) / Number(eaRoh.umsatz_netto_cents)) * 1000) / 10
+        : null,
+      abdeckung: Number(eaRoh.abdeckung),
+    }
+    : null;
+
   const g = sales?.gesamt ?? {};
   return {
     status,
@@ -341,6 +365,11 @@ export async function pulseOverview(supabase: any, tenant_id: string): Promise<u
       preis_max: listings.preis_aktiv?.max ?? null,
     } : null,
     bewegung,
+    /**
+     * Ertrag eines ABGESCHLOSSENEN Monats. null = kein Monat der letzten sechs
+     * ist weit genug abgerechnet; dann wird nichts behauptet.
+     */
+    ertrag_monat: ertragMonat,
     werbung: { spend: werbung, tacos, zeitraum: { von, bis } },
     diagnosen_offen: diagRes?.count ?? null,
     pruefungen: hinweise.slice(0, 3),
@@ -351,13 +380,17 @@ export async function pulseOverview(supabase: any, tenant_id: string): Promise<u
       ...(bewegung?.gesamt?.gebuehren_abdeckung != null
         && bewegung.gesamt.gebuehren_abdeckung < 0.8
         ? [
-          `Der „Ertrag nach Werbung" ist zu HOCH: Amazon hat erst `
-          + `${Math.round(bewegung.gesamt.gebuehren_abdeckung * 100)} % der `
+          `Der „Ertrag nach Werbung" der letzten 30 Tage ist zu HOCH: Amazon hat `
+          + `erst ${Math.round(bewegung.gesamt.gebuehren_abdeckung * 100)} % der `
           + "Bestellungen dieses Zeitraums abgerechnet. Umsatz und Wareneinsatz "
           + "stehen sofort fest, die Gebühren kommen mit Wochen Verzug — der "
-          + "fehlende Teil ist noch nicht abgezogen. Belastbar wird die Zahl "
-          + "erst, wenn der Zeitraum abgerechnet ist; die Produktsicht nennt die "
-          + "Abdeckung je Artikel.",
+          + "fehlende Teil ist noch nicht abgezogen."
+          + (ertragMonat
+            ? ` Belastbar ist der abgeschlossene Monat ${ertragMonat.monat}: `
+              + `${ertragMonat.ertrag.toFixed(2)} € bei `
+              + `${Math.round(ertragMonat.abdeckung * 100)} % Abdeckung.`
+            : " Kein Monat der letzten sechs ist weit genug abgerechnet, um eine "
+              + "belastbare Zahl danebenzustellen."),
         ]
         : []),
       ...(sales?.konsistenz && !sales.konsistenz.ok
