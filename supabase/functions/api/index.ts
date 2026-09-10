@@ -44,7 +44,10 @@ import { aendereBestellung, bestandsplanung, erstelleBestellung, loescheBestellu
   from "../_shared/bestandsplanung.ts";
 import { boardReport } from "../_shared/board.ts";
 import { ertragVerlauf, listeEk, loescheEk, setzeEk } from "../_shared/ertrag.ts";
-import { ladeEinstellungen, ladeStammdaten, setzeAsinEinstellung, setzeEinstellungen, setzeStammdaten }
+import {
+  ladeEinstellungen, ladeKontostand, ladeStammdaten, setzeAsinEinstellung,
+  setzeEinstellungen, setzeKontostand, setzeStammdaten,
+}
   from "../_shared/einstellungen.ts";
 import { cashflowUebersicht } from "../_shared/cashflow.ts";
 import { importiereEkCsv, importiereEkVonUrl, speichereEkUrl } from "../_shared/sellerboard_import.ts";
@@ -402,6 +405,11 @@ Deno.serve(async (req) => {
         const r = await setzeStammdaten(service, tenantId, args as any);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
       }
+      // Kontostand des Geschaeftskontos — Startwert des Liquiditaetsverlaufs.
+      if (action === "kontostand_setzen") {
+        const r = await setzeKontostand(service, tenantId, args as any);
+        return json({ ok: true, action, tenant_id: tenantId, data: r });
+      }
       if (action === "einstellungen_setzen") {
         const r = await setzeEinstellungen(service, tenantId, args as any);
         return json({ ok: true, action, tenant_id: tenantId, data: r });
@@ -643,6 +651,9 @@ Deno.serve(async (req) => {
     // Terminbuchungen, Werbeabbuchung, Vorsteuer. Gemessen, nicht angenommen.
     if (resource === "cashflow") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await cashflowUebersicht(service, tenantId, args as any) });
+    }
+    if (resource === "kontostand") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await ladeKontostand(service, tenantId) });
     }
     if (resource === "stammdaten") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await ladeStammdaten(service, tenantId) });

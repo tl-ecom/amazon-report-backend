@@ -226,3 +226,81 @@ export function vorfinanzierung(
     je_100_euro_mehr: r2(100 * median_tage),
   };
 }
+
+// --- Forderung an Amazon ----------------------------------------------------
+//
+// Was Amazon dem Verkäufer gerade schuldet: verkauft, aber noch nicht
+// ausgezahlt. In keiner Amazon-Ansicht steht diese Zahl — der Kontostand im
+// Seller Central zeigt nur die laufende Abrechnungsperiode, nicht das Geld, das
+// wegen der Freigabesperre noch hinter der Zustellung hängt.
+//
+// Gerechnet wird NETTO: der Bruttoumsatz der offenen Bestellungen mal der
+// gemessenen Auszahlungsquote. Brutto wäre die falsche Zahl — Gebühren, Werbung
+// und Umsatzsteuer gehen ab, bevor irgendetwas fliesst. Bei Vaneja sind das
+// rund 53 % des Bruttoumsatzes, die gar nicht erst ankommen.
+
+export interface Forderung {
+  /** Erwarteter Zufluss aus allem, was verkauft und noch nicht abgerechnet ist. */
+  betrag: number | null;
+  /** Derselbe Bestand brutto — was die Kunden bezahlt haben. */
+  brutto: number | null;
+  /** Auszahlungsquote, mit der gerechnet wurde. */
+  quote: number | null;
+  /** Erster und letzter Tag, an dem daraus noch Geld erwartet wird. */
+  ab: string | null;
+  bis: string | null;
+  /** Davon innerhalb der nächsten `fenster_tage` Tage. */
+  im_fenster: number | null;
+  fenster_tage: number;
+  grund: string | null;
+}
+
+export function forderungAnAmazon(
+  zufluesse: Array<{ am: string; betrag: number }>,
+  brutto: number | null,
+  quote: number | null,
+  fenster_tage = 30,
+  heute = new Date(),
+): Forderung {
+  const leer = (grund: string): Forderung => ({
+    betrag: null, brutto, quote, ab: null, bis: null,
+    im_fenster: null, fenster_tage, grund,
+  });
+
+  if (quote === null) {
+    return leer(
+      "Ohne gemessene Auszahlungsquote lässt sich aus dem offenen Umsatz kein "
+      + "Zufluss ableiten. Der Bruttobetrag steht daneben — er ist NICHT die "
+      + "Forderung, davon gehen Gebühren, Werbung und Umsatzsteuer ab.",
+    );
+  }
+  if (zufluesse.length === 0) {
+    return leer(
+      "Es sind keine unabgerechneten Bestellungen offen, aus denen noch Geld "
+      + "erwartet wird.",
+    );
+  }
+
+  const heuteIso = new Date(heute).toISOString().slice(0, 10);
+  const grenze = new Date(new Date(heute).getTime() + fenster_tage * TAG)
+    .toISOString().slice(0, 10);
+
+  // Ein Zufluss, der rechnerisch in der Vergangenheit liegt, ist trotzdem noch
+  // nicht da — sonst waere die Bestellung abgerechnet. Er bleibt Forderung.
+  const summe = zufluesse.reduce((s, z) => s + z.betrag, 0);
+  const imFenster = zufluesse
+    .filter((z) => z.am <= grenze)
+    .reduce((s, z) => s + z.betrag, 0);
+
+  const tage = zufluesse.map((z) => z.am).sort();
+  return {
+    betrag: r2(summe),
+    brutto,
+    quote,
+    ab: tage[0] < heuteIso ? heuteIso : tage[0],
+    bis: tage[tage.length - 1],
+    im_fenster: r2(imFenster),
+    fenster_tage,
+    grund: null,
+  };
+}

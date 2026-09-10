@@ -19,8 +19,10 @@ import { ladeUstFaktor } from "./ust_lauf.ts";
 import { umsatzsteuerZahllast, zahllastFuerTermin, type UstZeile }
   from "./cashflow_ust.ts";
 import { zahlungsplan } from "./cashflow_plan.ts";
+import { liquiditaetsverlauf } from "./cashflow_liquiditaet.ts";
 import {
-  aufTermine, auszahlungsquote, erwarteteZufluesse, geldlaufMuster, vorfinanzierung,
+  aufTermine, auszahlungsquote, erwarteteZufluesse, forderungAnAmazon, geldlaufMuster,
+  vorfinanzierung,
   type OffenZeile, type QuoteZeile, type VerteilungZeile,
 } from "./cashflow_geldlauf.ts";
 // Kapitalbindung im Bestand: FBA, externes Lager, bestellte Ware — zum EK
@@ -565,7 +567,10 @@ export async function cashflowUebersicht(
     supabase.from("tenant_einstellungen")
       .select("umsatzsteuerpflichtig, vorsteuerabzug, ust_voranmeldung, "
         + "ust_dauerfristverlaengerung, ermaessigter_satz, oss_teilnahme, pan_eu, "
-        + "lager_ausland, lager_laender, stammdaten_bestaetigt_am, firmensitz_land")
+        + "lager_ausland, lager_laender, stammdaten_bestaetigt_am, firmensitz_land, "
+        // Startwert des Liquiditaetsverlaufs — der einzige Wert der Cash-Sicht,
+        // den Pulse nicht messen kann.
+        + "kontostand_cents, kontostand_am, kontostand_puffer_cents")
       .eq("tenant_id", tenant_id).maybeSingle(),
     // null, wenn weder Amazon noch eine externe Quelle Bestand liefert.
     kapitalbindung(supabase, tenant_id),
@@ -685,6 +690,11 @@ export async function cashflowUebersicht(
   );
   const vorfinanz = vorfinanzierung(muster.median_tage, werbung.je_tag);
 
+  // Was Amazon gerade schuldet. Steht in keiner Amazon-Ansicht: der Kontostand
+  // im Seller Central zeigt nur die laufende Periode, nicht das Geld, das wegen
+  // der Freigabesperre noch hinter der Zustellung haengt.
+  const forderung = forderungAnAmazon(zufluesse, gebunden.betrag, quote.quote);
+
   const plan = zahlungsplan({
     rhythmus,
     typische_auszahlung: typischeAuszahlung,
@@ -701,6 +711,16 @@ export async function cashflowUebersicht(
     },
     tage: 60,
   });
+
+  // Aus Bewegungen wird ein Kontoverlauf — aber nur, wenn ein Startwert
+  // hinterlegt ist. Ohne ihn bleibt der Kalender eine Liste, und das ist
+  // ehrlicher als ein Saldo, der bei 0 € beginnt.
+  const liquiditaet = liquiditaetsverlauf(
+    plan.positionen,
+    stamm.kontostand_cents == null ? null : Number(stamm.kontostand_cents) / 100,
+    stamm.kontostand_am ?? null,
+    stamm.kontostand_puffer_cents == null ? null : Number(stamm.kontostand_puffer_cents) / 100,
+  );
 
   const warnungen: string[] = [];
   if (rhythmus.belege < 3) {
@@ -765,6 +785,10 @@ export async function cashflowUebersicht(
     // Geld" ist die Frage, die man zuerst hat.
     kalender: plan,
 
+    // Derselbe Kalender als Kontoverlauf: reicht es. Leer, solange kein
+    // Kontostand hinterlegt ist — der Grund steht in `hinweise`.
+    liquiditaet,
+
     // Der Geldlauf erklaert, warum Gewinn und Kontostand auseinanderlaufen:
     // er misst, wie lange Amazon das Geld haelt.
     geldlauf: {
@@ -781,6 +805,8 @@ export async function cashflowUebersicht(
     },
 
     einbehalt: reserve,
+    // Verkauft, aber noch nicht ausgezahlt — netto, also was tatsaechlich kommt.
+    forderung,
     gebundenes_geld: gebunden,
     // Kapital im Bestand (zum EK): FBA, externes Lager, bestellt, Inbound —
     // getrennt, damit „Geld bei Amazon" und „Geld im eigenen Lager" nicht in

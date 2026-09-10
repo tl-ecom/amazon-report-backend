@@ -7,8 +7,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
   aufTermine, auszahlungsquote, erwarteteZufluesse, geldlaufMuster,
-  vorfinanzierung, type QuoteZeile, type VerteilungZeile,
-} from "./cashflow_geldlauf.ts";
+  vorfinanzierung, type QuoteZeile, type VerteilungZeile, forderungAnAmazon} from "./cashflow_geldlauf.ts";
 
 // Vanejas echte Monatszahlen, in Cent.
 const MONATE: QuoteZeile[] = [
@@ -145,4 +144,46 @@ Deno.test("Vorfinanzierung: der Sockel, der nie zurückkommt", () => {
 Deno.test("Vorfinanzierung: ohne Messung keine Zahl", () => {
   assertEquals(vorfinanzierung(null, -386.85).sockel, null);
   assertEquals(vorfinanzierung(18, null).sockel, null);
+});
+
+// --- Forderung an Amazon ----------------------------------------------------
+//
+// Die Zahl, die in keiner Amazon-Ansicht steht: verkauft, aber noch nicht
+// ausgezahlt. Der Kontostand im Seller Central zeigt nur die laufende Periode,
+// nicht das Geld, das wegen der Freigabesperre hinter der Zustellung hängt.
+
+Deno.test("Forderung: netto gerechnet, nicht brutto", () => {
+  const f = forderungAnAmazon(
+    [
+      { am: "2026-09-08", betrag: 1200 },  // rechnerisch vorbei, trotzdem offen
+      { am: "2026-09-18", betrag: 3400 },
+      { am: "2026-10-25", betrag: 2100 },
+    ],
+    14500, 0.47, 30, new Date("2026-09-10T09:00:00Z"),
+  );
+  assertEquals(f.betrag, 6700);
+  // Brutto steht daneben, ist aber NICHT die Forderung: davon gehen Gebühren,
+  // Werbung und Umsatzsteuer ab.
+  assertEquals(f.brutto, 14500);
+  assertEquals(f.quote, 0.47);
+  // Der 25.10. liegt jenseits von 30 Tagen und zählt nur in die Gesamtsumme.
+  assertEquals(f.im_fenster, 4600);
+  assertEquals(f.bis, "2026-10-25");
+  // Ein Tag in der Vergangenheit wird auf heute gezogen: das Geld ist noch da,
+  // nur der Rechenweg liegt zurück.
+  assertEquals(f.ab, "2026-09-10");
+});
+
+Deno.test("Forderung: ohne Quote keine Zahl, aber eine Begründung", () => {
+  const f = forderungAnAmazon([], 14500, null, 30, new Date("2026-09-10T09:00:00Z"));
+  // Null, nicht 0 — und der Bruttobetrag darf nicht als Forderung durchgehen.
+  assertEquals(f.betrag, null);
+  assertEquals(f.brutto, 14500);
+  assertEquals(f.grund?.includes("NICHT die"), true);
+});
+
+Deno.test("Forderung: nichts offen ist kein Fehler", () => {
+  const f = forderungAnAmazon([], null, 0.47, 30, new Date("2026-09-10T09:00:00Z"));
+  assertEquals(f.betrag, null);
+  assertEquals(f.grund?.includes("keine unabgerechneten"), true);
 });
