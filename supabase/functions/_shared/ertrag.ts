@@ -10,13 +10,40 @@ function euroZuCents(v: unknown): number {
 }
 
 /** EK-Einträge + die tatsächlich verkauften ASINs (damit man weiß, was zu bepreisen ist). */
+/**
+ * Produkttitel fuer die EK-Liste, gekuerzt.
+ *
+ * Amazon-Titel sind regelmaessig 200 Zeichen lang und bestehen zur Haelfte aus
+ * Suchbegriffen. In einer Tabellenzeile macht das die Zeile unlesbar, ohne etwas
+ * hinzuzufuegen: erkennbar ist ein Produkt an den ersten Worten.
+ */
+const TITEL_MAX = 85;
+
+export function kuerzeTitel(titel: string | null | undefined, max = TITEL_MAX): string | null {
+  const t = String(titel ?? "").trim();
+  if (!t) return null;
+  if (t.length <= max) return t;
+  // An der letzten Wortgrenze abschneiden, sonst endet die Zeile mitten im Wort.
+  const roh = t.slice(0, max - 1);
+  const grenze = roh.lastIndexOf(" ");
+  return `${(grenze > max * 0.6 ? roh.slice(0, grenze) : roh).trimEnd()}…`;
+}
+
 export async function listeEk(supabase: any, tenant_id: string): Promise<unknown> {
-  const [ekRes, ordersRes] = await Promise.all([
+  const [ekRes, ordersRes, asinRes] = await Promise.all([
     supabase.from("asin_ek").select("id, asin, ek_cents, gueltig_ab, updated_at")
       .eq("tenant_id", tenant_id).order("asin").order("gueltig_ab", { ascending: false }),
     supabase.from("orders_history").select("asin, quantity").eq("tenant_id", tenant_id),
+    // Titel aus dem Katalog: eine ASIN allein sagt niemandem, welches Produkt
+    // gemeint ist — und einen EK trägt man je Produkt ein, nicht je Kennung.
+    supabase.from("asins").select("asin, produktname").eq("tenant_id", tenant_id),
   ]);
   if (ekRes.error) throw new Error(`asin_ek read: ${ekRes.error.message}`);
+
+  const titel = new Map<string, string | null>();
+  for (const a of asinRes?.data ?? []) {
+    titel.set(String(a.asin), kuerzeTitel(a.produktname));
+  }
 
   // Verkaufte Einheiten je ASIN aufsummieren (für die "welche ASIN braucht EK"-Liste).
   const proAsin = new Map<string, number>();
@@ -25,10 +52,14 @@ export async function listeEk(supabase: any, tenant_id: string): Promise<unknown
     proAsin.set(o.asin, (proAsin.get(o.asin) ?? 0) + (Number(o.quantity) || 0));
   }
   const asins = [...proAsin.entries()]
-    .map(([asin, einheiten]) => ({ asin, einheiten }))
+    .map(([asin, einheiten]) => ({ asin, einheiten, produktname: titel.get(asin) ?? null }))
     .sort((a, b) => b.einheiten - a.einheiten);
 
-  return { ek: ekRes.data ?? [], asins };
+  const ek = (ekRes.data ?? []).map((e: any) => ({
+    ...e, produktname: titel.get(String(e.asin)) ?? null,
+  }));
+
+  return { ek, asins };
 }
 
 /** EK anlegen/ändern (ein Wert je ASIN + gueltig_ab). */

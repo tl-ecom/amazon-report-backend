@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { ertragVerlauf, setzeEk } from "./ertrag.ts";
+import { ertragVerlauf, setzeEk, kuerzeTitel} from "./ertrag.ts";
 
 function rpcClient(rows: unknown, finance: unknown[] = []) {
   const fin: any = {
@@ -78,4 +78,37 @@ Deno.test("setzeEk: fehlende ASIN / Datum / negativer EK werfen", async () => {
   await assertRejects(() => setzeEk(upsertClient().client, "t", "", 5, "2026-01-01") as any, Error, "ASIN");
   await assertRejects(() => setzeEk(upsertClient().client, "t", "B01", 5, "") as any, Error, "gueltig_ab");
   await assertRejects(() => setzeEk(upsertClient().client, "t", "B01", -1, "2026-01-01") as any, Error, "EK-Betrag");
+});
+
+// --- Produkttitel in der EK-Liste -------------------------------------------
+//
+// Eine ASIN allein sagt niemandem, welches Produkt gemeint ist — und einen EK
+// trägt man je Produkt ein, nicht je Kennung. Amazon-Titel sind aber regelmäßig
+// 200 Zeichen lang und zur Hälfte Suchbegriffe; ungekürzt machen sie die
+// Tabellenzeile unlesbar, ohne etwas hinzuzufügen.
+
+Deno.test("Titel: kurze Titel bleiben unangetastet", () => {
+  assertEquals(kuerzeTitel("Edelstahl-Trinkflasche 750 ml"), "Edelstahl-Trinkflasche 750 ml");
+  // Leer ist nicht leerer String, sondern null: "kein Titel bekannt".
+  assertEquals(kuerzeTitel(""), null);
+  assertEquals(kuerzeTitel(null), null);
+  assertEquals(kuerzeTitel("   "), null);
+});
+
+Deno.test("Titel: lange Titel werden an der Wortgrenze gekürzt", () => {
+  const lang = "Edelstahl-Trinkflasche 750 ml isoliert auslaufsicher BPA-frei "
+    + "Thermosflasche für Sport Fahrrad Schule Büro Outdoor Wandern";
+  const k = kuerzeTitel(lang)!;
+  assertEquals(k.length <= 85, true);
+  // Nicht mitten im Wort abbrechen.
+  assertEquals(k.endsWith("…"), true);
+  assertEquals(k.includes("Thermosflasche"), true);
+  assertEquals(lang.startsWith(k.slice(0, -1)), true);
+});
+
+Deno.test("Titel: ein Wort ohne Leerzeichen wird hart geschnitten", () => {
+  // Ohne Rückfallebene käme hier ein einzelnes "…" heraus.
+  const k = kuerzeTitel("A".repeat(200))!;
+  assertEquals(k.length, 85);
+  assertEquals(k, `${"A".repeat(84)}…`);
 });
