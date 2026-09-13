@@ -20,6 +20,7 @@ import { umsatzsteuerZahllast, zahllastFuerTermin, type UstZeile }
   from "./cashflow_ust.ts";
 import { zahlungsplan } from "./cashflow_plan.ts";
 import { liquiditaetsverlauf } from "./cashflow_liquiditaet.ts";
+import { tageImMonat, werbeSzenarien, type DbEingabe } from "./cashflow_werbung.ts";
 import {
   aufTermine, auszahlungsquote, erwarteteZufluesse, forderungAnAmazon, geldlaufMuster,
   vorfinanzierung,
@@ -563,7 +564,9 @@ export async function cashflowUebersicht(
 ): Promise<unknown> {
   const tage = Math.min(365, Math.max(30, Number(args.tage) || 120));
 
-  const [basisRes, zeitRes, ustRes, laufRes, quoteRes, faktor, stammRes, kapital] = await Promise.all([
+  const [
+    basisRes, zeitRes, ustRes, laufRes, quoteRes, faktor, stammRes, kapital, ertragRes,
+  ] = await Promise.all([
     supabase.rpc("cashflow_basis", { p_tenant: tenant_id, p_tage: tage }),
     supabase.rpc("cashflow_zeitpunkte", { p_tenant: tenant_id, p_tage: tage }),
     supabase.rpc("cashflow_umsatzsteuer", { p_tenant: tenant_id, p_tage: tage }),
@@ -582,6 +585,9 @@ export async function cashflowUebersicht(
       .eq("tenant_id", tenant_id).maybeSingle(),
     // null, wenn weder Amazon noch eine externe Quelle Bestand liefert.
     kapitalbindung(supabase, tenant_id),
+    // Deckungsbeitrag aus dem juengsten ABGERECHNETEN Monat. Nur er taugt als
+    // Massstab: im laufenden Monat fehlen die Gebuehren noch.
+    supabase.rpc("ertrag_abgerechnet", { p_tenant: tenant_id }),
   ]);
   if (basisRes.error) throw new Error(`cashflow_basis: ${basisRes.error.message}`);
 
@@ -719,6 +725,21 @@ export async function cashflowUebersicht(
   );
   const vorfinanz = vorfinanzierung(muster.median_tage, werbung.je_tag);
 
+  // --- Was-waere-wenn: mehr Werbebudget ------------------------------------
+  const ertragMonat = ((ertragRes?.data ?? []) as any[])[0] ?? null;
+  const db: DbEingabe | null = ertragMonat
+    ? {
+      monat: String(ertragMonat.monat),
+      netto_umsatz: (Number(ertragMonat.umsatz_brutto_cents) - Number(ertragMonat.umsatzsteuer_cents)) / 100,
+      // Deckungsbeitrag VOR Werbung: das Ergebnis plus die Werbung, die darin
+      // schon abgezogen ist.
+      db_vor_werbung: (Number(ertragMonat.ertrag_cents) + Number(ertragMonat.werbung_cents)) / 100,
+      werbung: Number(ertragMonat.werbung_cents) / 100,
+      tage_im_monat: tageImMonat(String(ertragMonat.monat)),
+    }
+    : null;
+  const werbeplan = werbeSzenarien(werbung.je_tag, muster.median_tage, db);
+
   // Was Amazon gerade schuldet. Steht in keiner Amazon-Ansicht: der Kontostand
   // im Seller Central zeigt nur die laufende Periode, nicht das Geld, das wegen
   // der Freigabesperre noch hinter der Zustellung haengt.
@@ -832,6 +853,10 @@ export async function cashflowUebersicht(
       vorfinanzierung: vorfinanz,
       hinweise: geldlaufHinweise,
     },
+
+    // Was eine Budgeterhoehung mit dem Konto macht — und ab welchem ACOS sie
+    // sich traegt. Beides aus gemessenen Werten, ohne Umsatzprognose.
+    werbeplan,
 
     einbehalt: reserve,
     // Verkauft, aber noch nicht ausgezahlt — netto, also was tatsaechlich kommt.
