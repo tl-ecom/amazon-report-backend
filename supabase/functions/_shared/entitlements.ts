@@ -154,6 +154,12 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   get_search_query_performance: "sqp",
   get_diagnoses: "diagnosen",
   get_change_log: "aenderungen",
+  // Neues Feature: haengt am eigenen Schalter und ist damit standardmaessig aus.
+  // BEIDE Namen muessen hier stehen — der MCP-Toolname und der Resource-Name der
+  // API. Ein nicht gelisteter Schluessel gilt als offen, und dann waere das
+  // Feature ueber die Weboberflaeche erreichbar, obwohl es im Tarif aus ist.
+  get_ads_changelog: "ads_changelog",
+  ads_changelog: "ads_changelog",
   get_strategy_overview: "strategie",
 };
 

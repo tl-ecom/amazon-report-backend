@@ -50,6 +50,7 @@ import {
 }
   from "../_shared/einstellungen.ts";
 import { cashflowUebersicht } from "../_shared/cashflow.ts";
+import { adsChangelog } from "../_shared/ads_changelog.ts";
 import { importiereEkCsv, importiereEkVonUrl, speichereEkUrl } from "../_shared/sellerboard_import.ts";
 import {
   bestandVerbindungStatus, pruefeBestandVerbindung, setzeBestandEinstellungen, speichereBestandUrl,
@@ -651,6 +652,9 @@ Deno.serve(async (req) => {
     // Terminbuchungen, Werbeabbuchung, Vorsteuer. Gemessen, nicht angenommen.
     if (resource === "cashflow") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await cashflowUebersicht(service, tenantId, args as any) });
+    }
+    if (resource === "ads_changelog") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsChangelog(service, tenantId, (args ?? {}) as any) });
     }
     if (resource === "kontostand") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await ladeKontostand(service, tenantId) });

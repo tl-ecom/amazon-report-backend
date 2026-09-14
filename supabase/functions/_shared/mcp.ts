@@ -472,6 +472,41 @@ const TOOLS: ToolDef[] = [
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("sqp", args) : pulseNichtVerfuegbar()),
   },
   {
+    name: "get_ads_changelog",
+    description:
+      "Gebots- und Statusaenderungen je Ziel (Keyword/Target), mit den Kennzahlen der " +
+      "7 Tage davor und danach. Beantwortet: lag der ACoS-Sprung an einer Aenderung oder " +
+      "an Amazon? " +
+      "WICHTIG zur Einordnung: die Liste ist aus den TAGESSTAENDEN abgeleitet, nicht aus " +
+      "Amazons Protokoll — sie sieht deshalb auch Aenderungen, die jemand direkt in der " +
+      "Amazon-Konsole gemacht hat, aber KEINE, die am selben Tag zurueckgenommen wurde. " +
+      "Ein Ziel bekommt nur an Tagen eine Zeile, an denen Amazon etwas meldet; wo Tage " +
+      "fehlen, ist der Aenderungstag nur auf ein Fenster genau ('luecke_tage', " +
+      "'datierung'). " +
+      "Der Vergleich davor/danach ist ein NEBENEINANDER, kein Beweis: in denselben sieben " +
+      "Tagen aendern sich Wettbewerb, Saison und Auktion mit. Nur Ereignisse mit " +
+      "'vergleichbar': true haben genug Traffic und vollen Nachlauf; sonst steht in " +
+      "'grund', warum nicht. Nur die verbundenen Ads-Marktplaetze (heute Deutschland).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        von: { type: "string", description: "Erster Tag (YYYY-MM-DD). Ohne Angabe die letzten 90 Tage." },
+        bis: { type: "string", description: "Letzter Tag (YYYY-MM-DD)." },
+        campaign_id: { type: "string", description: "Nur diese Kampagne." },
+        nur_auswertbar: {
+          type: "boolean",
+          description:
+            "true = nur Aenderungen mit mindestens 5 Klicks VOR und NACH der Aenderung. " +
+            "Bei Vaneja sind das 74 von 783 — der Rest sind Ziele ohne Traffic, bei denen " +
+            "ein Vorher/Nachher Zufall waere.",
+        },
+        limit: { type: "number", description: "Hoechstzahl Ereignisse (Standard 200, max 2000)." },
+      },
+      additionalProperties: false,
+    },
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_changelog", args) : pulseNichtVerfuegbar()),
+  },
+  {
     name: "get_diagnoses",
     description:
       "Pulse-Diagnosen (regelbasiert, KEINE Kausalitätsbehauptung): Beobachtung, Begründung, " +
