@@ -183,4 +183,7 @@ Deno.test("Grenzen werden mitgeliefert, nicht vorausgesetzt", () => {
   assertEquals(GRENZEN.some((g) => g.includes("WÖCHENTLICH")), true);
   assertEquals(GRENZEN.some((g) => g.includes("Sternezahl")), true);
   assertEquals(GRENZEN.some((g) => g.includes("Marktplatz")), true);
+  // Ein Wert, der noch nicht verstanden ist, darf nicht als Kennzahl
+  // durchgehen — lieber der Vorbehalt als eine plausible Fehlinterpretation.
+  assertEquals(GRENZEN.some((g) => g.includes("NOCH NICHT bestätigt")), true);
 });

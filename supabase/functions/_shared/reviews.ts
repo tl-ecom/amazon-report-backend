@@ -282,6 +282,11 @@ export const GRENZEN = [
   + "Central oder ein Drittanbieter.",
   "Rezensionen sind je Marktplatz verschieden. Die Themen gelten für den "
   + "abgefragten Marktplatz, nicht für das Produkt insgesamt.",
+  "`anteil_kategorie` ist NOCH NICHT bestätigt: beim ersten Abruf war der Wert "
+  + "bei allen negativen Themen einer ASIN identisch, während der Sterne-"
+  + "Einfluss variierte. Er ist dort also vermutlich kein Wert je Thema. Bis "
+  + "das geklärt ist, bitte nicht als Kategorie-Vergleich lesen — die "
+  + "Rohantwort steht in `roh`.",
 ];
 
 // --- Lesezugriff ------------------------------------------------------------
