@@ -74,6 +74,28 @@ Deno.serve(async (req) => {
     if (ctxErr) return json({ error: "auth_context-Lookup fehlgeschlagen", detail: ctxErr.message }, 500);
     if (!ctx?.profile_id) return json({ error: "Kein ads-auth_context für diesen Tenant" }, 404);
 
+    // Welcher Marktplatz? Ohne Angabe der des verbundenen Profils — das
+    // bisherige Verhalten. Ein Ads-Profil gilt je Marktplatz, deshalb reicht
+    // kein anderer Scope-Header, es muss die richtige profile_id sein.
+    const gewuenscht = String(body.marktplatz ?? "").trim() || null;
+    let profileId = String(ctx.profile_id);
+    let marktplatz = "A1PA6795UKMFR9";
+
+    const { data: profile } = await supabase.from("ads_profile")
+      .select("profile_id, marktplatz, aktiv").eq("tenant_id", tenant_id);
+    const eigenes = (profile ?? []).find((p: any) => String(p.profile_id) === String(ctx.profile_id));
+    if (eigenes?.marktplatz) marktplatz = String(eigenes.marktplatz);
+
+    if (gewuenscht) {
+      const treffer = (profile ?? []).find((p: any) => String(p.marktplatz) === gewuenscht);
+      if (!treffer) return json({ error: `Kein Werbe-Profil fuer Marktplatz ${gewuenscht}` }, 404);
+      if (treffer.aktiv !== true) {
+        return json({ error: `Das Profil fuer ${gewuenscht} ist nicht freigeschaltet.` }, 409);
+      }
+      profileId = String(treffer.profile_id);
+      marktplatz = String(treffer.marktplatz);
+    }
+
     const clientId = await readSecret(supabase, ctx.client_id_secret);
     const clientSecret = await readSecret(supabase, ctx.client_secret_secret);
     const refreshToken = await readSecret(supabase, ctx.refresh_token_secret);
@@ -84,7 +106,7 @@ Deno.serve(async (req) => {
 
     const headers = {
       "Amazon-Advertising-API-ClientId": clientId,
-      "Amazon-Advertising-API-Scope": ctx.profile_id,
+      "Amazon-Advertising-API-Scope": profileId,
       "Authorization": `Bearer ${accessToken}`,
     };
 
@@ -114,14 +136,14 @@ Deno.serve(async (req) => {
 
     // ---- Stufe 2: schreiben. Ein Stempel für den ganzen Lauf.
     const gesehen_am = new Date().toISOString();
-    const kampagnen = baueKampagnenRows(tenant_id, roh.kampagnen, gesehen_am);
-    const gruppen = baueAnzeigengruppenRows(tenant_id, roh.anzeigengruppen, gesehen_am);
-    const ziele = baueZieleRows(tenant_id, roh, gesehen_am);
+    const kampagnen = baueKampagnenRows(tenant_id, roh.kampagnen, gesehen_am, marktplatz);
+    const gruppen = baueAnzeigengruppenRows(tenant_id, roh.anzeigengruppen, gesehen_am, marktplatz);
+    const ziele = baueZieleRows(tenant_id, roh, gesehen_am, marktplatz);
 
     const schreib = [
-      await upsert(supabase, "ads_kampagnen", "tenant_id,campaign_id", kampagnen),
-      await upsert(supabase, "ads_anzeigengruppen", "tenant_id,ad_group_id", gruppen),
-      await upsert(supabase, "ads_ziele", "tenant_id,art,ziel_id", ziele),
+      await upsert(supabase, "ads_kampagnen", "tenant_id,marktplatz,campaign_id", kampagnen),
+      await upsert(supabase, "ads_anzeigengruppen", "tenant_id,marktplatz,ad_group_id", gruppen),
+      await upsert(supabase, "ads_ziele", "tenant_id,marktplatz,art,ziel_id", ziele),
     ];
     const schreibFehler = schreib.filter((s) => s.fehler).map((s) => s.fehler);
 

@@ -90,6 +90,43 @@ Deno.serve(async (req) => {
       return json({ error: "profile_id fehlt im ads-auth_context" }, 400);
     }
 
+    // Welcher Marktplatz? Ohne Angabe der des verbundenen Profils — genau das
+    // bisherige Verhalten. Mit Angabe wird das passende Profil aus ads_profile
+    // gesucht; ein Ads-Profil gilt je Marktplatz, deshalb reicht ein anderer
+    // Scope-Header nicht, es muss die richtige profile_id sein.
+    const gewuenscht = String(body.marktplatz ?? "").trim() || null;
+    let profileId = String(ctx.profile_id);
+    let marktplatz = "A1PA6795UKMFR9";
+    let waehrung = "EUR";
+
+    const { data: profile } = await supabase.from("ads_profile")
+      .select("profile_id, marktplatz, waehrung, aktiv")
+      .eq("tenant_id", tenant_id);
+
+    const eigenes = (profile ?? []).find((p: any) => String(p.profile_id) === String(ctx.profile_id));
+    if (eigenes?.marktplatz) { marktplatz = String(eigenes.marktplatz); waehrung = String(eigenes.waehrung ?? "EUR"); }
+
+    if (gewuenscht) {
+      const treffer = (profile ?? []).find((p: any) => String(p.marktplatz) === gewuenscht);
+      if (!treffer) {
+        return json({
+          error: `Kein Werbe-Profil fuer Marktplatz ${gewuenscht}`,
+          hinweis: "Profile mit ads_profile_holen(tenant) auffrischen. Ein Ads-Profil "
+            + "gilt je Marktplatz — ohne passendes Profil gibt es dort keine Ads-Daten.",
+        }, 404);
+      }
+      if (treffer.aktiv !== true) {
+        return json({
+          error: `Das Profil fuer ${gewuenscht} ist nicht freigeschaltet.`,
+          hinweis: "In ads_profile aktiv=true setzen. Bewusst kein Automatismus: ein "
+            + "zusaetzliches Profil kostet API-Kontingent und bewegt Zahlen.",
+        }, 409);
+      }
+      profileId = String(treffer.profile_id);
+      marktplatz = String(treffer.marktplatz);
+      waehrung = String(treffer.waehrung ?? "EUR");
+    }
+
     const clientId = await readSecret(supabase, ctx.client_id_secret);
     const clientSecret = await readSecret(supabase, ctx.client_secret_secret);
     const refreshToken = await readSecret(supabase, ctx.refresh_token_secret);
@@ -102,7 +139,7 @@ Deno.serve(async (req) => {
 
     const adsHeaders = {
       "Amazon-Advertising-API-ClientId": clientId,
-      "Amazon-Advertising-API-Scope": ctx.profile_id,
+      "Amazon-Advertising-API-Scope": profileId,
       "Authorization": `Bearer ${accessToken}`,
     };
 
@@ -216,7 +253,7 @@ Deno.serve(async (req) => {
     let verlauf: { zeilen: number; fehler?: string };
 
     if (reportTyp !== STANDARD_TYP) {
-      verlauf = await schreibeBericht(supabase, reportTyp, tenant_id, rows);
+      verlauf = await schreibeBericht(supabase, reportTyp, tenant_id, rows, { marktplatz, waehrung });
       if (verlauf.fehler) {
         await markJobFatal(supabase, tenant_id, reportId, verlauf.fehler);
         return json({ error: "Speichern fehlgeschlagen", detail: verlauf.fehler }, 500);
@@ -235,6 +272,9 @@ Deno.serve(async (req) => {
           .eq("tenant_id", tenant_id)
           .eq("source", "ads")
           .eq("report_type", reportTyp)
+          // Nur den eigenen Marktplatz zuruecksetzen: sonst nimmt ein
+          // franzoesischer Lauf dem deutschen Report das is_latest weg.
+          .eq("marktplatz", marktplatz)
           .eq("is_latest", true);
         if (updErr) {
           await markJobFatal(supabase, tenant_id, reportId, updErr.message);
@@ -246,6 +286,7 @@ Deno.serve(async (req) => {
         tenant_id,
         source: "ads",
         report_type: reportTyp,
+        marktplatz,
         payload: { format: "ads_v3", rows },
         data_timestamp: dataTimestamp,
         is_provisional: isProvisional,
@@ -262,7 +303,7 @@ Deno.serve(async (req) => {
       // Bewusst NICHT blockierend: Der Rohreport liegt bereits in report_data, ein
       // Fehler beim Verdichten darf den Job nicht auf FATAL setzen. Das Sync-Fenster
       // ueberlappt taeglich, der naechste Lauf holt dieselben Tage ohnehin erneut.
-      verlauf = await schreibeAdsVerlauf(supabase, tenant_id, rows);
+      verlauf = await schreibeAdsVerlauf(supabase, tenant_id, rows, { marktplatz, waehrung });
     }
 
     await supabase

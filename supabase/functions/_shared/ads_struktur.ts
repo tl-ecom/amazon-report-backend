@@ -64,7 +64,7 @@ function datum(x: unknown): string | null {
   return /^\d{4}-\d{2}-\d{2}/.test(t) ? t.slice(0, 10) : null;
 }
 
-export function baueKampagnenRows(tenant_id: string, kampagnen: any[], gesehen_am: string) {
+export function baueKampagnenRows(tenant_id: string, kampagnen: any[], gesehen_am: string, marktplatz = "A1PA6795UKMFR9") {
   const out: Record<string, unknown>[] = [];
   for (const c of kampagnen) {
     const id = s(c?.campaignId);
@@ -94,12 +94,13 @@ export function baueKampagnenRows(tenant_id: string, kampagnen: any[], gesehen_a
       start_datum: datum(c?.startDate),
       end_datum: datum(c?.endDate),
       gesehen_am,
+      marktplatz,
     });
   }
   return out;
 }
 
-export function baueAnzeigengruppenRows(tenant_id: string, gruppen: any[], gesehen_am: string) {
+export function baueAnzeigengruppenRows(tenant_id: string, gruppen: any[], gesehen_am: string, marktplatz = "A1PA6795UKMFR9") {
   const out: Record<string, unknown>[] = [];
   for (const g of gruppen) {
     const id = s(g?.adGroupId);
@@ -112,6 +113,7 @@ export function baueAnzeigengruppenRows(tenant_id: string, gruppen: any[], geseh
       state: s(g?.state) || null,
       standard_gebot_cents: cents(g?.defaultBid),
       gesehen_am,
+      marktplatz,
     });
   }
   return out;
@@ -123,7 +125,7 @@ export function baueAnzeigengruppenRows(tenant_id: string, gruppen: any[], geseh
  * und wird nicht durch das Standardgebot ersetzt. Wer den Effektivwert will,
  * rechnet ihn beim Lesen aus beidem.
  */
-export function baueZieleRows(tenant_id: string, roh: StrukturRohdaten, gesehen_am: string) {
+export function baueZieleRows(tenant_id: string, roh: StrukturRohdaten, gesehen_am: string, marktplatz = "A1PA6795UKMFR9") {
   const out: Record<string, unknown>[] = [];
 
   const zeile = (
@@ -146,6 +148,7 @@ export function baueZieleRows(tenant_id: string, roh: StrukturRohdaten, gesehen_
       state: s(x?.state) || null,
       gebot_cents: gebot,
       gesehen_am,
+      marktplatz,
     });
   };
 

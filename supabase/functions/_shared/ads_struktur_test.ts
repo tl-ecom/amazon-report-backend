@@ -78,6 +78,10 @@ Deno.test("Ziele: Keyword mit eigenem Gebot, Keyword ohne Gebot bleibt null", ()
   assertEquals(rows[0], {
     tenant_id: T, art: "keyword", ziel_id: "1", campaign_id: "10", ad_group_id: "20",
     text: "staubsauger beutel", match_type: "EXACT", state: "ENABLED", gebot_cents: 42, gesehen_am: STEMPEL,
+    // Ohne Marktplatz im Schluessel wuerde ein franzoesischer Lauf die
+    // deutschen Zeilen derselben Kampagne ueberschreiben. Ohne Angabe gilt
+    // Deutschland — der Bestand, nicht die Zukunft.
+    marktplatz: "A1PA6795UKMFR9",
   });
   // Das ist die leere Zelle der Bulk-Datei — sie darf nicht zu 0 werden.
   assertEquals(rows[1].gebot_cents, null);

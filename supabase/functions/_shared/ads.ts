@@ -430,6 +430,7 @@ export function baueAdsDailyRows(
   tenant_id: string,
   rows: Record<string, any>[],
   adProduct: AdProduct = "SP",
+  mp: MarktplatzKontext = STANDARD_MARKTPLATZ,
 ): Record<string, unknown>[] {
   interface Eintrag {
     datum: string;
@@ -491,6 +492,8 @@ export function baueAdsDailyRows(
     orders: e.akku.orders,
     einheiten: e.akku.einheiten,
     updated_at: jetzt,
+    marktplatz: mp.marktplatz,
+    waehrung: mp.waehrung,
   }));
 }
 
@@ -519,6 +522,24 @@ export function baueAdsDailyRows(
 
 export type AdProduct = "SP" | "SB" | "SD";
 
+/**
+ * Zu welchem Marktplatz gehoert ein Bericht?
+ *
+ * Bis September 2026 gab es die Frage nicht: Pulse holte Ads-Daten gegen genau
+ * ein Profil, und ein Ads-Profil gilt je Marktplatz. Mit einem zweiten Profil
+ * ist der Marktplatz Teil des Schluessels — ohne ihn wuerde ein franzoesischer
+ * Lauf die deutschen Zeilen derselben Kampagne und desselben Tages
+ * ueberschreiben.
+ *
+ * Die WAEHRUNG haengt mit dran, weil sie nicht ueberall EUR ist: Vanejas
+ * Profile umfassen PLN, SEK und GBP. Betraege verschiedener Waehrungen zu
+ * summieren waere eine falsche Zahl, die wie eine richtige aussieht.
+ */
+export interface MarktplatzKontext {
+  marktplatz: string;
+  waehrung: string;
+}
+
 export type AdsReportTyp =
   | "sp-advertised-product"
   | "sp-search-term"
@@ -539,6 +560,18 @@ const AD_PRODUCT_API: Record<AdProduct, string> = {
   SD: "SPONSORED_DISPLAY",
 };
 
+/**
+ * Der Marktplatz, unter dem alles Bisherige lief.
+ *
+ * Als Vorgabe gesetzt, damit bestehende Aufrufer unveraendert weiterlaufen.
+ * Neue Aufrufer geben ihn an — wer ihn vergisst, bekommt Deutschland und nicht
+ * etwa `null`, das spaeter still durch die Schluessel rutschen wuerde.
+ */
+export const STANDARD_MARKTPLATZ: MarktplatzKontext = {
+  marktplatz: "A1PA6795UKMFR9",
+  waehrung: "EUR",
+};
+
 const METRIKEN_SP = ["impressions", "clicks", "cost", "purchases7d", "unitsSoldClicks7d", "sales7d"];
 const METRIKEN_SB = ["impressions", "clicks", "cost", "purchases", "unitsSold", "sales"];
 const METRIKEN_SD = ["impressions", "clicks", "cost", "purchases", "unitsSold", "sales"];
@@ -551,7 +584,7 @@ interface ReportDef {
   /** Zieltabelle und Konfliktspalten fuer den Upsert. */
   tabelle: string;
   onConflict: string;
-  rows: (tenant_id: string, rows: Record<string, any>[]) => Record<string, unknown>[];
+  rows: (tenant_id: string, rows: Record<string, any>[], mp: MarktplatzKontext) => Record<string, unknown>[];
 }
 
 /**
@@ -597,7 +630,7 @@ function centsOderNull(x: unknown): number | null {
  * Bei Auto- und Product-Targeting liefert Amazon die Zielangabe in `targeting`
  * statt `keyword`; SB nennt das Feld `keywordText`. Alles landet in ziel_text.
  */
-export function baueSuchbegriffRows(tenant_id: string, rows: Record<string, any>[], adProduct: AdProduct = "SP"): Record<string, unknown>[] {
+export function baueSuchbegriffRows(tenant_id: string, rows: Record<string, any>[], adProduct: AdProduct = "SP", mp: MarktplatzKontext = STANDARD_MARKTPLATZ): Record<string, unknown>[] {
   interface Eintrag {
     datum: string; campaign_id: string; ad_group_id: string; ziel_id: string; suchbegriff: string;
     campaign_name: string | null; ad_group_name: string | null; ziel_text: string | null; match_type: string | null;
@@ -651,11 +684,13 @@ export function baueSuchbegriffRows(tenant_id: string, rows: Record<string, any>
     orders: e.akku.orders,
     einheiten: e.akku.einheiten,
     updated_at: jetzt,
+    marktplatz: mp.marktplatz,
+    waehrung: mp.waehrung,
   }));
 }
 
 /** Platzierungs-Zeilen → ads_placement_daily. Schlüssel: Anzeigentyp, Tag, Kampagne, Platzierung. */
-export function bauePlacementRows(tenant_id: string, rows: Record<string, any>[], adProduct: AdProduct = "SP"): Record<string, unknown>[] {
+export function bauePlacementRows(tenant_id: string, rows: Record<string, any>[], adProduct: AdProduct = "SP", mp: MarktplatzKontext = STANDARD_MARKTPLATZ): Record<string, unknown>[] {
   interface Eintrag {
     datum: string; campaign_id: string; platzierung: string; campaign_name: string | null; akku: AdsAkku;
   }
@@ -692,6 +727,8 @@ export function bauePlacementRows(tenant_id: string, rows: Record<string, any>[]
     orders: e.akku.orders,
     einheiten: e.akku.einheiten,
     updated_at: jetzt,
+    marktplatz: mp.marktplatz,
+    waehrung: mp.waehrung,
   }));
 }
 
@@ -704,7 +741,7 @@ export function bauePlacementRows(tenant_id: string, rows: Record<string, any>[]
  * Gebot und Zustand sind Momentaufnahmen aus dem Report, kein Summenwert —
  * bei mehreren Zeilen je Schlüssel gewinnt die zuletzt gesehene.
  */
-export function baueZieleRows(tenant_id: string, rows: Record<string, any>[], adProduct: AdProduct = "SP"): Record<string, unknown>[] {
+export function baueZieleRows(tenant_id: string, rows: Record<string, any>[], adProduct: AdProduct = "SP", mp: MarktplatzKontext = STANDARD_MARKTPLATZ): Record<string, unknown>[] {
   interface Eintrag {
     datum: string; campaign_id: string; ad_group_id: string; ziel_id: string;
     campaign_name: string | null; ad_group_name: string | null; text: string | null; match_type: string | null;
@@ -761,6 +798,8 @@ export function baueZieleRows(tenant_id: string, rows: Record<string, any>[], ad
     orders: e.akku.orders,
     einheiten: e.akku.einheiten,
     updated_at: jetzt,
+    marktplatz: mp.marktplatz,
+    waehrung: mp.waehrung,
   }));
 }
 
@@ -769,11 +808,11 @@ export function baueZieleRows(tenant_id: string, rows: Record<string, any>[], ad
 // gegenseitig ueberschreiben.
 const TAGESREIHE = {
   tabelle: "ads_daily",
-  onConflict: "tenant_id,ad_product,datum,campaign_id,ad_group_id,asin,sku",
+  onConflict: "tenant_id,marktplatz,ad_product,datum,campaign_id,ad_group_id,asin,sku",
 };
-const SUCHBEGRIFFE = { tabelle: "ads_suchbegriffe_daily", onConflict: "tenant_id,ad_product,datum,campaign_id,ad_group_id,ziel_id,suchbegriff" };
-const PLACEMENT = { tabelle: "ads_placement_daily", onConflict: "tenant_id,ad_product,datum,campaign_id,platzierung" };
-const ZIELE = { tabelle: "ads_ziele_daily", onConflict: "tenant_id,ad_product,datum,campaign_id,ad_group_id,ziel_id" };
+const SUCHBEGRIFFE = { tabelle: "ads_suchbegriffe_daily", onConflict: "tenant_id,marktplatz,ad_product,datum,campaign_id,ad_group_id,ziel_id,suchbegriff" };
+const PLACEMENT = { tabelle: "ads_placement_daily", onConflict: "tenant_id,marktplatz,ad_product,datum,campaign_id,platzierung" };
+const ZIELE = { tabelle: "ads_ziele_daily", onConflict: "tenant_id,marktplatz,ad_product,datum,campaign_id,ad_group_id,ziel_id" };
 
 /**
  * Bauplan je Report-Typ. sp-advertised-product steht NICHT hier: es hat einen
@@ -783,17 +822,17 @@ export const ADS_REPORTS: Record<Exclude<AdsReportTyp, "sp-advertised-product">,
   "sp-search-term": {
     adProduct: "SP", reportTypeId: "spSearchTerm", groupBy: ["searchTerm"],
     columns: ["date", "campaignId", "campaignName", "adGroupId", "adGroupName", "keywordId", "keyword", "matchType", "targeting", "searchTerm", ...METRIKEN_SP],
-    ...SUCHBEGRIFFE, rows: (t, r) => baueSuchbegriffRows(t, r, "SP"),
+    ...SUCHBEGRIFFE, rows: (t, r, mp) => baueSuchbegriffRows(t, r, "SP", mp),
   },
   "sp-placement": {
     adProduct: "SP", reportTypeId: "spCampaigns", groupBy: ["campaign", "campaignPlacement"],
     columns: ["date", "campaignId", "campaignName", "placementClassification", ...METRIKEN_SP],
-    ...PLACEMENT, rows: (t, r) => bauePlacementRows(t, r, "SP"),
+    ...PLACEMENT, rows: (t, r, mp) => bauePlacementRows(t, r, "SP", mp),
   },
   "sp-targeting": {
     adProduct: "SP", reportTypeId: "spTargeting", groupBy: ["targeting"],
     columns: ["date", "campaignId", "campaignName", "adGroupId", "adGroupName", "keywordId", "keyword", "matchType", "targeting", "keywordType", "keywordBid", "adKeywordStatus", ...METRIKEN_SP],
-    ...ZIELE, rows: (t, r) => baueZieleRows(t, r, "SP"),
+    ...ZIELE, rows: (t, r, mp) => baueZieleRows(t, r, "SP", mp),
   },
   // Die beiden Kostenquellen, die bisher fehlten. Sie schreiben in dieselbe
   // Tabelle wie Sponsored Products (ads_daily), unterschieden nur durch
@@ -802,27 +841,27 @@ export const ADS_REPORTS: Record<Exclude<AdsReportTyp, "sp-advertised-product">,
   "sd-advertised-product": {
     adProduct: "SD", reportTypeId: "sdAdvertisedProduct", groupBy: ["advertiser"],
     columns: SD_ADVERTISED_PRODUCT_COLUMNS,
-    ...TAGESREIHE, rows: (t, r) => baueAdsDailyRows(t, r, "SD"),
+    ...TAGESREIHE, rows: (t, r, mp) => baueAdsDailyRows(t, r, "SD", mp),
   },
   "sb-campaigns": {
     adProduct: "SB", reportTypeId: "sbCampaigns", groupBy: ["campaign"],
     columns: SB_CAMPAIGN_COLUMNS,
-    ...TAGESREIHE, rows: (t, r) => baueAdsDailyRows(t, r, "SB"),
+    ...TAGESREIHE, rows: (t, r, mp) => baueAdsDailyRows(t, r, "SB", mp),
   },
   "sb-search-term": {
     adProduct: "SB", reportTypeId: "sbSearchTerm", groupBy: ["searchTerm"],
     columns: ["date", "campaignId", "campaignName", "adGroupId", "adGroupName", "keywordId", "keywordText", "matchType", "searchTerm", ...METRIKEN_SB],
-    ...SUCHBEGRIFFE, rows: (t, r) => baueSuchbegriffRows(t, r, "SB"),
+    ...SUCHBEGRIFFE, rows: (t, r, mp) => baueSuchbegriffRows(t, r, "SB", mp),
   },
   "sb-targeting": {
     adProduct: "SB", reportTypeId: "sbTargeting", groupBy: ["targeting"],
     columns: ["date", "campaignId", "campaignName", "adGroupId", "adGroupName", "keywordId", "keywordText", "matchType", "keywordBid", "adKeywordStatus", ...METRIKEN_SB],
-    ...ZIELE, rows: (t, r) => baueZieleRows(t, r, "SB"),
+    ...ZIELE, rows: (t, r, mp) => baueZieleRows(t, r, "SB", mp),
   },
   "sd-targeting": {
     adProduct: "SD", reportTypeId: "sdTargeting", groupBy: ["targeting"],
     columns: ["date", "campaignId", "campaignName", "adGroupId", "adGroupName", "targetingId", "targetingText", "targetingExpression", ...METRIKEN_SD],
-    ...ZIELE, rows: (t, r) => baueZieleRows(t, r, "SD"),
+    ...ZIELE, rows: (t, r, mp) => baueZieleRows(t, r, "SD", mp),
   },
 };
 
@@ -870,10 +909,11 @@ export async function schreibeBericht(
   typ: string,
   tenant_id: string,
   rows: Record<string, any>[],
+  mp: MarktplatzKontext = STANDARD_MARKTPLATZ,
 ): Promise<AdsVerlaufErgebnis> {
   const def = (ADS_REPORTS as Record<string, ReportDef>)[typ];
   if (!def) return { zeilen: 0, fehler: `Kein Speicherweg fuer ${typ}` };
-  return schreibeTageszeilen(supabase, def.tabelle, def.onConflict, def.rows(tenant_id, rows));
+  return schreibeTageszeilen(supabase, def.tabelle, def.onConflict, def.rows(tenant_id, rows, mp));
 }
 
 /** Batchweiser Upsert in eine der Tagestabellen. */
@@ -900,9 +940,10 @@ export async function schreibeTageszeilen(
 export async function schreibeAdsVerlauf(
   supabase: any,
   tenant_id: string,
-  rows: Record<string, any>[]
+  rows: Record<string, any>[],
+  mp: MarktplatzKontext = STANDARD_MARKTPLATZ,
 ): Promise<AdsVerlaufErgebnis> {
-  const zeilen = baueAdsDailyRows(tenant_id, rows);
+  const zeilen = baueAdsDailyRows(tenant_id, rows, "SP", mp);
   if (zeilen.length === 0) return { zeilen: 0 };
 
   const BATCH = 500;
@@ -910,7 +951,7 @@ export async function schreibeAdsVerlauf(
     const { error } = await supabase
       .from("ads_daily")
       .upsert(zeilen.slice(i, i + BATCH), {
-        onConflict: "tenant_id,datum,campaign_id,ad_group_id,asin,sku",
+        onConflict: "tenant_id,marktplatz,ad_product,datum,campaign_id,ad_group_id,asin,sku",
       });
     if (error) return { zeilen: 0, fehler: `ads_daily: ${error.message}` };
   }
