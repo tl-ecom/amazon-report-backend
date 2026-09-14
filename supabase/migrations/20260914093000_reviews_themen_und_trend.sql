@@ -109,3 +109,7 @@ update public.tarif_features
  where not (features ? 'reviews');
 
 notify pgrst, 'reload schema';
+
+-- Rohantwort auch bei leerem Ergebnis behalten: sonst ist nicht
+-- unterscheidbar, ob Amazon nichts hat oder der Parser die Feldnamen verfehlt.
+alter table public.reviews_laeufe add column if not exists roh jsonb;

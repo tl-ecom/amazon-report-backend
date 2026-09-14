@@ -193,6 +193,10 @@ Deno.serve(async (req) => {
         themen: themen.length, trendpunkte: trendZahl,
         meldung: themen.length > 0 ? null
           : "Amazon hat geantwortet, nennt für diese ASIN aber keine Themen.",
+        // Bei NULL Themen die Rohantwort behalten. Sonst ist nicht
+        // unterscheidbar, ob Amazon nichts hat oder ob der Parser die
+        // Feldnamen verfehlt — und genau das ist die Frage, die man dann hat.
+        roh: themen.length === 0 ? themenRes.daten : null,
       });
       ergebnisse.push({ asin, status: themen.length > 0 ? "fertig" : "leer", themen: themen.length, trendpunkte: trendZahl });
       await schlaf(PAUSE_MS);
