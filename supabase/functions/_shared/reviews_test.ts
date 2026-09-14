@@ -11,35 +11,42 @@ import {
   parseThemen, parseTrend, type TrendPunkt,
 } from "./reviews.ts";
 
+// Form aus dem ECHTEN Abruf (Vanejas Biomuelleimer, 14.09.2026). Drei Dinge
+// weichen von der Doku ab, und alle drei haetten stillschweigend null ergeben:
+// die Themen stecken unter `topics`, die Nennungen heissen `numberOfMentions`,
+// und auf Kategorieebene ist occurrencePercentage ein OBJEKT mit `allProducts`.
 const THEMEN_ANTWORT = {
-  positiveTopics: [{
-    topic: "Sturdy",
-    asinMetrics: { mentions: 48, occurrencePercentage: 12.4, starRatingImpact: 0.31 },
-    parentAsinMetrics: { occurrencePercentage: 11.0 },
-    browseNodeMetrics: { occurrencePercentage: 6.2 },
-    reviewSnippets: ["very sturdy", "feels solid"],
-    subtopics: [{ topic: "Stable base", mentions: 12 }],
-  }],
-  negativeTopics: [{
-    topic: "Packaging",
-    asinMetrics: { mentions: 19, occurrencePercentage: 4.9, starRatingImpact: -0.42 },
-    parentAsinMetrics: { occurrencePercentage: 5.1 },
-    browseNodeMetrics: { occurrencePercentage: 1.8 },
-    reviewSnippets: ["arrived crushed"],
-  }],
+  asin: "B0D7D2NMT4",
+  topics: {
+    positiveTopics: [{
+      topic: "Stabilität",
+      asinMetrics: { numberOfMentions: 48, occurrencePercentage: 12.4, starRatingImpact: 0.31 },
+      parentAsinMetrics: { occurrencePercentage: 11.0 },
+      browseNodeMetrics: { occurrencePercentage: { allProducts: 6.2 } },
+      reviewSnippets: ["sehr stabil", "wirkt solide"],
+      subtopics: [{ topic: "Standfestigkeit", numberOfMentions: 12 }],
+    }],
+    negativeTopics: [{
+      topic: "Geruch",
+      asinMetrics: { numberOfMentions: 19, occurrencePercentage: 4.9, starRatingImpact: -0.42 },
+      parentAsinMetrics: { occurrencePercentage: 5.1 },
+      browseNodeMetrics: { occurrencePercentage: { allProducts: 1.8 } },
+      reviewSnippets: ["stinkende Brühe"],
+    }],
+  },
 };
 
 Deno.test("Themen: Metriken je Ebene, Richtung getrennt", () => {
   const z = parseThemen(THEMEN_ANTWORT);
   assertEquals(z.length, 2);
 
-  const gut = z.find((x) => x.thema === "Sturdy")!;
+  const gut = z.find((x) => x.thema === "Stabilität")!;
   assertEquals(gut.richtung, "positiv");
   assertEquals(gut.nennungen, 48);
   assertEquals(gut.anteil, 12.4);
   assertEquals(gut.stern_einfluss, 0.31);
 
-  const schlecht = z.find((x) => x.thema === "Packaging")!;
+  const schlecht = z.find((x) => x.thema === "Geruch")!;
   assertEquals(schlecht.richtung, "negativ");
   // Der Vergleich zur Kategorie ist der eigentliche Wert: 4,9 % gegen 1,8 %
   // heisst, das Problem ist hier groesser als ueblich.
@@ -52,7 +59,7 @@ Deno.test("Themen: unbekanntes Feld wird null, nicht 0", () => {
   // "kein Einfluss auf die Sterne" und "Feld nicht gefunden" sind verschiedene
   // Aussagen. Eine 0 wuerde die zweite als die erste ausgeben.
   const z = parseThemen({
-    negativeTopics: [{ topic: "Smell", asinMetrics: { mentions: 7 } }],
+    topics: { negativeTopics: [{ topic: "Geruch", asinMetrics: { numberOfMentions: 7 } }] },
   });
   assertEquals(z[0].nennungen, 7);
   assertEquals(z[0].stern_einfluss, null);
@@ -64,24 +71,24 @@ Deno.test("Themen: Rohantwort bleibt erhalten", () => {
   // Die Feldnamen der API sind nur teilweise dokumentiert. Was der Parser
   // heute nicht erkennt, muss nachtraeglich auswertbar bleiben.
   const z = parseThemen(THEMEN_ANTWORT);
-  assertEquals((z[0].roh as any).topic, "Sturdy");
-  assertEquals((z[0].unterthemen as any[])[0].topic, "Stable base");
+  assertEquals((z[0].roh as any).topic, "Stabilität");
+  assertEquals((z[0].unterthemen as any[])[0].topic, "Standfestigkeit");
 });
 
 Deno.test("Themen: ohne Themenname keine Zeile", () => {
-  const z = parseThemen({ negativeTopics: [{ asinMetrics: { mentions: 9 } }, { topic: "  " }] });
+  const z = parseThemen({ topics: { negativeTopics: [{ asinMetrics: { numberOfMentions: 9 } }, { topic: "  " }] } });
   assertEquals(z.length, 0);
 });
 
 const TREND_ANTWORT = {
-  negativeTopics: [{
+  topics: { negativeTopics: [{
     topic: "Packaging",
     trendMetrics: [
       { dateRange: { startDate: "2026-07-01", endDate: "2026-07-31" }, asinMetrics: { occurrencePercentage: 2.1 } },
       { dateRange: { startDate: "2026-08-01", endDate: "2026-08-31" }, asinMetrics: { occurrencePercentage: 4.9 },
-        browseNodeMetrics: { occurrencePercentage: 1.8 } },
+        browseNodeMetrics: { occurrencePercentage: { allProducts: 1.8 } } },
     ],
-  }],
+  }] },
 };
 
 Deno.test("Trend: eine Zeile je Thema und Zeitraum", () => {
@@ -97,7 +104,7 @@ Deno.test("Trend: eine Zeile je Thema und Zeitraum", () => {
 
 Deno.test("Trend: Punkt ohne Datum wird verworfen, nicht geraten", () => {
   const t = parseTrend({
-    negativeTopics: [{ topic: "Smell", trendMetrics: [{ asinMetrics: { occurrencePercentage: 3 } }] }],
+    topics: { negativeTopics: [{ topic: "Geruch", trendMetrics: [{ asinMetrics: { occurrencePercentage: 3 } }] }] },
   });
   assertEquals(t.length, 0);
 });
@@ -110,8 +117,8 @@ function reihe(...anteile: Array<number | null>): TrendPunkt[] {
 
 Deno.test("Diagnose: neues Thema wird gemeldet", () => {
   const a = auffaelligeThemen(
-    new Map([["Packaging", reihe(0, 4.9)]]),
-    new Map([["Packaging", 19]]),
+    new Map([["Geruch", reihe(0, 4.9)]]),
+    new Map([["Geruch", 19]]),
   );
   assertEquals(a.length, 1);
   assertEquals(a[0].art, "neu");
@@ -121,8 +128,8 @@ Deno.test("Diagnose: neues Thema wird gemeldet", () => {
 
 Deno.test("Diagnose: Verdopplung wird gemeldet, mit Vorbehalt", () => {
   const a = auffaelligeThemen(
-    new Map([["Packaging", reihe(2.1, 4.9)]]),
-    new Map([["Packaging", 19]]),
+    new Map([["Geruch", reihe(2.1, 4.9)]]),
+    new Map([["Geruch", 19]]),
   );
   assertEquals(a[0].art, "verdoppelt");
   assertEquals(a[0].faktor, 2.33);
@@ -136,8 +143,8 @@ Deno.test("Diagnose: kleine Zahlen loesen keinen Alarm aus", () => {
   // Themen je ASIN passiert das jede Woche irgendwo — und wer jede Woche Zufall
   // gemeldet bekommt, liest die Meldung nicht mehr.
   const a = auffaelligeThemen(
-    new Map([["Smell", reihe(1.0, 2.2)]]),
-    new Map([["Smell", 4]]),
+    new Map([["Handhabung", reihe(1.0, 2.2)]]),
+    new Map([["Handhabung", 4]]),
   );
   assertEquals(a, []);
   assertEquals(NENNUNGEN_MIN, 5);
@@ -148,21 +155,21 @@ Deno.test("Diagnose: ohne Nennungen wird nicht gemeldet", () => {
   // Ein Prozentsprung ohne Mengenangabe ist nicht einzuordnen. Unbekannt gilt
   // nicht als gross genug.
   const a = auffaelligeThemen(
-    new Map([["Smell", reihe(1.0, 9.0)]]),
-    new Map([["Smell", null]]),
+    new Map([["Handhabung", reihe(1.0, 9.0)]]),
+    new Map([["Handhabung", null]]),
   );
   assertEquals(a, []);
 });
 
 Deno.test("Diagnose: ein einzelner Monat ist kein Trend", () => {
-  const a = auffaelligeThemen(new Map([["Smell", reihe(9.0)]]), new Map([["Smell", 40]]));
+  const a = auffaelligeThemen(new Map([["Handhabung", reihe(9.0)]]), new Map([["Handhabung", 40]]));
   assertEquals(a, []);
 });
 
 Deno.test("Diagnose: leichter Anstieg bleibt still", () => {
   const a = auffaelligeThemen(
-    new Map([["Packaging", reihe(4.0, 5.2)]]),
-    new Map([["Packaging", 30]]),
+    new Map([["Geruch", reihe(4.0, 5.2)]]),
+    new Map([["Geruch", 30]]),
   );
   assertEquals(a, []);
 });
@@ -170,7 +177,9 @@ Deno.test("Diagnose: leichter Anstieg bleibt still", () => {
 Deno.test("Grenzen werden mitgeliefert, nicht vorausgesetzt", () => {
   // Ohne diese Saetze liest jemand die Themen als Rezensionsauswertung und
   // sucht die Sterne.
-  assertEquals(GRENZEN.some((g) => g.includes("ENGLISCH")), true);
+  // Am echten Abruf gemessen: Amazon liefert DEUTSCH, obwohl die Doku
+  // "nur Englisch" sagt.
+  assertEquals(GRENZEN.some((g) => g.includes("DEUTSCH")), true);
   assertEquals(GRENZEN.some((g) => g.includes("WÖCHENTLICH")), true);
   assertEquals(GRENZEN.some((g) => g.includes("Sternezahl")), true);
   assertEquals(GRENZEN.some((g) => g.includes("Marktplatz")), true);

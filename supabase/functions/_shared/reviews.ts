@@ -36,6 +36,24 @@ function text(o: any, ...namen: string[]): string | null {
   return null;
 }
 
+/**
+ * Zahl, die auch in einem Objekt stecken darf.
+ *
+ * Auf Browse-Node-Ebene liefert Amazon `occurrencePercentage: {allProducts: 1.71}`
+ * statt einer Zahl. Wer hier nur auf Zahlen prueft, bekommt null und haelt den
+ * Kategorievergleich fuer nicht vorhanden — genau die Angabe, die den Themen
+ * ihren Wert gibt.
+ */
+function zahlTief(o: any, name: string, ...innen: string[]): number | null {
+  const direkt = zahl(o, name);
+  if (direkt !== null) return direkt;
+  const w = o?.[name];
+  if (w && typeof w === "object") {
+    return zahl(w, ...(innen.length ? innen : ["allProducts", "value", "all"]));
+  }
+  return null;
+}
+
 /** Erstes Objekt, das unter einem der Namen steht. */
 function objekt(o: any, ...namen: string[]): any {
   for (const n of namen) {
@@ -81,13 +99,13 @@ export function parseThemen(antwort: any): ThemenZeile[] {
       raus.push({
         richtung,
         thema,
-        nennungen: zahl(asinM, "mentions", "mentionCount", "reviewMentions", "count"),
+        nennungen: zahl(asinM, "numberOfMentions", "mentions", "mentionCount", "count"),
         anteil: zahl(asinM, "occurrencePercentage", "percentage", "occurrence"),
         // Wie stark dieses Thema die Sternebewertung zieht. Bei negativen
         // Themen ist das die Zahl, die entscheidet, ob es sich zu handeln lohnt.
         stern_einfluss: zahl(asinM, "starRatingImpact", "ratingImpact", "impact"),
-        anteil_parent: zahl(parentM, "occurrencePercentage", "percentage", "occurrence"),
-        anteil_kategorie: zahl(nodeM, "occurrencePercentage", "percentage", "occurrence"),
+        anteil_parent: zahlTief(parentM, "occurrencePercentage"),
+        anteil_kategorie: zahlTief(nodeM, "occurrencePercentage"),
         schnipsel: t?.reviewSnippets ?? t?.snippets ?? null,
         unterthemen: t?.subtopics ?? null,
         roh: t,
@@ -95,8 +113,11 @@ export function parseThemen(antwort: any): ThemenZeile[] {
     }
   };
 
-  seite(antwort?.positiveTopics, "positiv");
-  seite(antwort?.negativeTopics, "negativ");
+  // Die echte Antwort schachtelt unter `topics`. Der Wurzel-Fall bleibt als
+  // Rueckfall stehen: kostet nichts und faengt eine Formaenderung ab.
+  const wurzel = objekt(antwort, "topics") ?? antwort;
+  seite(wurzel?.positiveTopics, "positiv");
+  seite(wurzel?.negativeTopics, "negativ");
   return raus;
 }
 
@@ -124,7 +145,7 @@ export function parseTrend(antwort: any): TrendZeile[] {
     for (const t of Array.isArray(liste) ? liste : []) {
       const thema = text(t, "topic", "name", "topicName");
       if (!thema) continue;
-      const punkte = t?.trendMetrics ?? t?.trends ?? t?.metrics;
+      const punkte = t?.trendMetrics ?? t?.trends ?? t?.metrics ?? t?.trend;
       for (const p of Array.isArray(punkte) ? punkte : []) {
         const spanne = objekt(p, "dateRange") ?? p;
         const von = tag(spanne?.startDate ?? spanne?.start ?? p?.date);
@@ -139,17 +160,18 @@ export function parseTrend(antwort: any): TrendZeile[] {
           thema,
           monat: von,
           bis: tag(spanne?.endDate ?? spanne?.end),
-          anteil: zahl(asinM, "occurrencePercentage", "percentage", "occurrence"),
-          anteil_parent: zahl(parentM, "occurrencePercentage", "percentage", "occurrence"),
-          anteil_kategorie: zahl(nodeM, "occurrencePercentage", "percentage", "occurrence"),
+          anteil: zahlTief(asinM, "occurrencePercentage"),
+          anteil_parent: zahlTief(parentM, "occurrencePercentage"),
+          anteil_kategorie: zahlTief(nodeM, "occurrencePercentage"),
           roh: p,
         });
       }
     }
   };
 
-  seite(antwort?.positiveTopics, "positiv");
-  seite(antwort?.negativeTopics, "negativ");
+  const wurzel = objekt(antwort, "topics") ?? antwort;
+  seite(wurzel?.positiveTopics, "positiv");
+  seite(wurzel?.negativeTopics, "negativ");
   return raus;
 }
 
@@ -250,8 +272,9 @@ export function auffaelligeThemen(
  * wo die Sterne sind.
  */
 export const GRENZEN = [
-  "Themennamen kommen von Amazon auf ENGLISCH, auch für Amazon.de — das ist "
-  + "eine Eigenschaft der Schnittstelle, kein Fehler.",
+  "Themennamen kommen in der Sprache des Marktplatzes: bei Amazon.de auf "
+  + "DEUTSCH. Amazons Dokumentation sagt „nur Englisch\" — am echten Abruf "
+  + "gemessen stimmt das nicht.",
   "Die Daten werden von Amazon WÖCHENTLICH aufgefrischt. Ein Abruf am Folgetag "
   + "liefert dieselben Zahlen.",
   "Sternezahl, Anzahl der Bewertungen und der Wortlaut einzelner Rezensionen "
