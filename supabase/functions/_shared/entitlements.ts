@@ -160,6 +160,8 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   // Feature ueber die Weboberflaeche erreichbar, obwohl es im Tarif aus ist.
   get_ads_changelog: "ads_changelog",
   ads_changelog: "ads_changelog",
+  get_review_themes: "reviews",
+  reviews: "reviews",
   get_strategy_overview: "strategie",
 };
 

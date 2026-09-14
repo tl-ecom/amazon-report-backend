@@ -83,7 +83,7 @@ Deno.test("tools/list nennt alle Tools mit Schema", async () => {
     "get_inventory_overview",
     "get_cashflow",
     "get_products", "get_kpi_history", "get_profit_history", "get_search_query_performance",
-    "get_ads_changelog",
+    "get_ads_changelog", "get_review_themes",
     "get_diagnoses", "get_change_log", "get_strategy_overview",
   ]);
   // Jedes Tool MUSS ein inputSchema haben, sonst lehnen manche Clients es ab.
@@ -91,7 +91,7 @@ Deno.test("tools/list nennt alle Tools mit Schema", async () => {
 });
 
 Deno.test("toolListe ist stabil", () => {
-  assertEquals(toolListe().length, 25);
+  assertEquals(toolListe().length, 26);
 });
 
 Deno.test("Pulse-Tools rufen ladePulse mit der richtigen Datenart", async () => {
@@ -108,7 +108,7 @@ Deno.test("Pulse-Tools rufen ladePulse mit der richtigen Datenart", async () => 
     ["get_ads_verlauf", "ads_verlauf"],
     ["get_ads_struktur", "ads_struktur"], ["get_ads_suchbegriffe", "ads_suchbegriffe"],
     ["get_ads_platzierungen", "ads_platzierungen"], ["get_ads_ziele", "ads_ziele"],
-    ["get_ads_changelog", "ads_changelog"],
+    ["get_ads_changelog", "ads_changelog"], ["get_review_themes", "reviews"],
   ];
   for (const [tool, art] of paare) {
     await dispatch({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: {} } }, ctx);

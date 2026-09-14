@@ -507,6 +507,30 @@ const TOOLS: ToolDef[] = [
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_changelog", args) : pulseNichtVerfuegbar()),
   },
   {
+    name: "get_review_themes",
+    description:
+      "Rezensionsthemen je ASIN aus Amazons Customer-Feedback-API (dieselben Daten wie " +
+      "der Product Opportunity Explorer): welche Themen Kunden positiv und negativ nennen, " +
+      "mit Nennungen, Einfluss auf die Sternebewertung, Vergleich zur Kategorie und der " +
+      "Veraenderung gegenueber dem Vormonat. 'auffaellig' nennt negative Themen, die NEU " +
+      "auftauchen oder sich verdoppelt haben — nur ab 5 Nennungen, darunter ist es Zufall. " +
+      "Ohne 'asin' die Liste der ASINs, fuer die Daten vorliegen. " +
+      "WICHTIG: Themennamen kommen von Amazon auf ENGLISCH, auch fuer Amazon.de. Die Daten " +
+      "werden WOECHENTLICH aufgefrischt. Sternezahl, Anzahl der Bewertungen und der " +
+      "Wortlaut einzelner Rezensionen sind NICHT enthalten — die gibt keine SP-API her. " +
+      "Rezensionen sind je Marktplatz verschieden.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        asin: { type: "string", description: "Child-ASIN. Weglassen fuer die Liste der verfuegbaren ASINs." },
+        marktplatz: { type: "string", description: "Marketplace-ID. Ohne Angabe der der Verbindung." },
+        limit: { type: "number", description: "Hoechstzahl Themen (Standard 50)." },
+      },
+      additionalProperties: false,
+    },
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("reviews", args) : pulseNichtVerfuegbar()),
+  },
+  {
     name: "get_diagnoses",
     description:
       "Pulse-Diagnosen (regelbasiert, KEINE Kausalitätsbehauptung): Beobachtung, Begründung, " +
