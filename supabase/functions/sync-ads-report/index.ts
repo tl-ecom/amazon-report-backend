@@ -137,11 +137,14 @@ Deno.serve(async (req) => {
     const accessToken = await getAccessToken(clientId, clientSecret, refreshToken);
     if (!accessToken) return json({ error: "Access-Token fehlgeschlagen" }, 502);
 
-    const adsHeaders = {
+    // Die Header werden ERST nach dem Wiederaufnehmen gebaut: dort kann sich
+    // das Profil noch aendern, und ein Report gehoert zu genau dem Profil, das
+    // ihn angefordert hat.
+    const baueHeaders = () => ({
       "Amazon-Advertising-API-ClientId": clientId,
       "Amazon-Advertising-API-Scope": profileId,
       "Authorization": `Bearer ${accessToken}`,
-    };
+    });
 
     // ---- Stufe 1: anfordern ODER laufenden Report wiederaufnehmen ----
     let reportId: string;
@@ -164,6 +167,18 @@ Deno.serve(async (req) => {
       istBackfill = job.config?.backfill === true;
       // Der Typ steht am Job, nicht am Aufruf — die Wiederaufnahme kennt ihn nicht.
       if (istReportTyp(job.report_type)) reportTyp = job.report_type;
+      // Genauso der Marktplatz. Ohne das schriebe ein wiederaufgenommener
+      // franzoesischer Report seine Zeilen unter Deutschland — still falsch.
+      const jobMarkt = job.config?.marktplatz ? String(job.config.marktplatz) : null;
+      if (jobMarkt && jobMarkt !== marktplatz) {
+        const p = (profile ?? []).find((x: any) => String(x.marktplatz) === jobMarkt);
+        if (!p) {
+          return json({ error: `Job gehoert zu Marktplatz ${jobMarkt}, fuer den es kein Profil gibt` }, 409);
+        }
+        profileId = String(p.profile_id);
+        marktplatz = jobMarkt;
+        waehrung = String(p.waehrung ?? "EUR");
+      }
     } else {
       const f = baueFenster({
         days: body.days === undefined ? DEFAULT_DAYS : Number(body.days),
@@ -177,7 +192,7 @@ Deno.serve(async (req) => {
 
       const anfrage = baueReportRequest(reportTyp, startDate, endDate);
       if (!anfrage) return json({ error: `Kein Report-Bauplan fuer ${reportTyp}` }, 400);
-      const created = await erstelleReport(adsHeaders, anfrage, deadline);
+      const created = await erstelleReport(baueHeaders(), anfrage, deadline);
       if (!created.ok) return json({ error: "Ads-Report anfordern fehlgeschlagen", detail: created.detail }, 502);
       reportId = created.reportId!;
 
@@ -187,10 +202,15 @@ Deno.serve(async (req) => {
         report_type: reportTyp,
         status: "PROCESSING",
         amazon_report_id: reportId,
-        config: { startDate, endDate, include_volatile: includeVolatile, backfill: istBackfill },
+        // Der Marktplatz gehoert an den JOB, nicht nur an den Aufruf: beim
+        // Wiederaufnehmen kennt der Aufruf ihn nicht mehr, und ein
+        // franzoesischer Report wuerde dann als deutscher geschrieben.
+        config: { startDate, endDate, include_volatile: includeVolatile, backfill: istBackfill, marktplatz },
       });
       if (insErr) return json({ error: "Job speichern fehlgeschlagen", detail: insErr.message }, 500);
     }
+
+    const adsHeaders = baueHeaders();
 
     // ---- Stufe 2: pollen bis COMPLETED / FAILED / Budget ----
     let delay = POLL_START_MS;
