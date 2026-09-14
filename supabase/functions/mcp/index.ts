@@ -179,7 +179,7 @@ Deno.serve(async (req) => {
         case "sqp": {
           const asin = String((pulseArgs?.asin as string) ?? "").trim();
           return asin
-            ? await listeSqp(supabase, tenant_id, asin, pulseArgs?.periode, pulseArgs?.von)
+            ? await listeSqp(supabase, tenant_id, asin, pulseArgs?.periode, pulseArgs?.von, pulseArgs?.marktplatz)
             : await sqpAsins(supabase, tenant_id);
         }
         case "diagnosen": return await listeDiagnosen(supabase, tenant_id);

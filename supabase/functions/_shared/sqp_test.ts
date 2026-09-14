@@ -1,5 +1,5 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert@1";
-import { alsPeriode, letzterZeitraum, parseSqpReport, zeitraumFuer, zeitraumListe } from "./sqp.ts";
+import { alsPeriode, letzterZeitraum, parseSqpReport, zeitraumFuer, zeitraumListe, alsMarktplatz, marktplatzName} from "./sqp.ts";
 
 const beispiel = {
   dataByAsin: [
@@ -107,4 +107,52 @@ Deno.test("Periode fällt auf WEEK zurück, Datum wird geprüft", () => {
   assertEquals(alsPeriode("QUARTER"), "WEEK");
   assertEquals(alsPeriode(undefined), "WEEK");
   assertThrows(() => zeitraumFuer("WEEK", "letzte Woche"));
+});
+
+// --- Marktplatz -------------------------------------------------------------
+//
+// Der Bericht lief immer gegen den Marktplatz der Verbindung, also Deutschland.
+// Frankreich war damit nicht abrufbar. Gefaehrlicher als "nicht moeglich" waere
+// gewesen, es ohne eigenen Schluessel zuzulassen: Suchbegriffe und Kaufanteile
+// sind je Land voellig verschieden, ein franzoesischer Abruf haette die
+// deutschen Zeilen derselben ASIN und Woche ueberschrieben.
+
+Deno.test("Marktplatz: Kuerzel, Name und ID werden erkannt", () => {
+  assertEquals(alsMarktplatz("fr"), "A13V1IB3VIYZZH");
+  assertEquals(alsMarktplatz("FR"), "A13V1IB3VIYZZH");
+  assertEquals(alsMarktplatz("Amazon.fr"), "A13V1IB3VIYZZH");
+  assertEquals(alsMarktplatz("A13V1IB3VIYZZH"), "A13V1IB3VIYZZH");
+  assertEquals(alsMarktplatz("de"), "A1PA6795UKMFR9");
+  assertEquals(alsMarktplatz("co.uk"), "A1F83G8C2ARO7P");
+});
+
+Deno.test("Marktplatz: nichts angegeben heisst nichts angegeben", () => {
+  // null = "nimm den der Verbindung". Nicht Deutschland raten.
+  assertEquals(alsMarktplatz(undefined), null);
+  assertEquals(alsMarktplatz(""), null);
+  assertEquals(alsMarktplatz("   "), null);
+});
+
+Deno.test("Marktplatz: Unbekanntes wird abgelehnt, nicht ersetzt", () => {
+  // Ein Tippfehler im Land darf nicht als deutsche Zahlen zurueckkommen —
+  // das waere still falsch statt sichtbar kaputt.
+  let geworfen = false;
+  try {
+    alsMarktplatz("frankreich");
+  } catch (e) {
+    geworfen = true;
+    assertEquals(String((e as Error).message).includes("nicht erkannt"), true);
+    // Die Fehlermeldung nennt die erlaubten Werte, statt nur zu meckern.
+    assertEquals(String((e as Error).message).includes("fr (A13V1IB3VIYZZH)"), true);
+  }
+  assertEquals(geworfen, true);
+});
+
+Deno.test("Marktplatz: Name zur ID, unbekannte ID bleibt stehen", () => {
+  assertEquals(marktplatzName("A13V1IB3VIYZZH"), "Amazon.fr");
+  assertEquals(marktplatzName("A1PA6795UKMFR9"), "Amazon.de");
+  // Amazon legt Marktplaetze an, ohne uns zu fragen. Eine unbekannte ID als
+  // "unbekannt" anzuzeigen waere weniger nuetzlich als die ID selbst.
+  assertEquals(marktplatzName("AXXXNEU"), "AXXXNEU");
+  assertEquals(marktplatzName(null), "—");
 });

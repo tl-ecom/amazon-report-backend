@@ -666,7 +666,7 @@ Deno.serve(async (req) => {
     }
     if (resource === "sqp") {
       const a = (args ?? {}) as Record<string, unknown>;
-      return json({ ok: true, resource, tenant_id: tenantId, data: await listeSqp(service, tenantId, String(a.asin ?? ""), a.periode, a.von) });
+      return json({ ok: true, resource, tenant_id: tenantId, data: await listeSqp(service, tenantId, String(a.asin ?? ""), a.periode, a.von, a.marktplatz) });
     }
     if (resource === "reimbursements_radar") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await radarDaten(service, tenantId) });

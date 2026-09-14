@@ -445,16 +445,27 @@ const TOOLS: ToolDef[] = [
   {
     name: "get_search_query_performance",
     description:
-      "Search-Query-Performance (Brand Analytics) je ASIN: eigene vs. Markt-CTR/CVR und " +
-      "Kaufanteil pro Suchbegriff. Mit 'asin' → die Suchbegriffe dieser ASIN; ohne 'asin' → " +
-      "Liste der ASINs, für die Daten vorliegen. READ-ONLY: liefert nur bereits abgerufene " +
-      "Zeiträume ('vorhanden' in der Antwort), stößt selbst keinen Report bei Amazon an.",
+      "Search-Query-Performance (Brand Analytics) je ASIN UND Marktplatz: eigene vs. " +
+      "Markt-CTR/CVR und Kaufanteil pro Suchbegriff. Mit 'asin' → die Suchbegriffe dieser " +
+      "ASIN; ohne 'asin' → Liste der ASINs, für die Daten vorliegen. " +
+      "Suchbegriffe und Kaufanteile sind je LAND verschieden — 'marktplatz' waehlt es aus " +
+      "(z. B. 'fr'); ohne Angabe gilt der Marktplatz der Amazon-Verbindung, meist Deutschland. " +
+      "Welche Laender und Zeitraeume schon abgerufen sind, steht in 'vorhanden' der Antwort. " +
+      "READ-ONLY: liefert nur bereits abgerufene Zeitraeume, stoesst selbst keinen Report " +
+      "bei Amazon an.",
     inputSchema: {
       type: "object",
       properties: {
         asin: { type: "string", description: "ASIN, deren Suchbegriffe geliefert werden. Weglassen für die Liste verfügbarer ASINs." },
         periode: { type: "string", enum: ["WEEK", "MONTH"], description: "Wochen- oder Monatssicht. Standard: WEEK." },
         von: { type: "string", description: "Erster Tag des Zeitraums (YYYY-MM-DD). Weglassen für den zuletzt abgerufenen Zeitraum." },
+        marktplatz: {
+          type: "string",
+          description:
+            "Marktplatz: Kuerzel wie 'de', 'fr', 'it', 'es', 'nl', 'be', 'pl', 'se', 'co.uk' " +
+            "oder die Amazon-Marketplace-ID. Weglassen fuer den Marktplatz der Verbindung. " +
+            "Eine unbekannte Angabe wird abgelehnt und NICHT still durch Deutschland ersetzt.",
+        },
       },
       additionalProperties: false,
     },

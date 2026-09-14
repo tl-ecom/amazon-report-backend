@@ -11,8 +11,8 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
-  alsPeriode, letzterZeitraum, merkeLauf, parseSqpReport,
-  type Periode, type Zeitraum, zeitraumFuer,
+  alsMarktplatz, alsPeriode, letzterZeitraum, marktplatzName, merkeLauf,
+  parseSqpReport, type Periode, type Zeitraum, zeitraumFuer,
 } from "../_shared/sqp.ts";
 
 const SP_ENDPOINT = "https://sellingpartnerapi-eu.amazon.com";
@@ -25,7 +25,9 @@ const DEADLINE_MS = 130000;
 const FATAL_MELDUNG =
   "Amazon hat den Report abgelehnt. Meist ist der Zeitraum noch nicht veröffentlicht — " +
   "er steht erst einige Tage nach seinem Ende bereit. Sonst gibt es für diese ASIN keine " +
-  "Brand-Analytics-Daten (die gibt es nur für markenregistrierte ASINs).";
+  "Brand-Analytics-Daten: die gibt es nur für markenregistrierte ASINs, und nur auf " +
+  "Marktplätzen, auf denen die Marke eingetragen ist und tatsächlich verkauft wird. " +
+  "Bei einem Abruf für ein anderes Land ist das der häufigste Grund.";
 
 Deno.serve(async (req) => {
   const start = Date.now();
@@ -33,14 +35,16 @@ Deno.serve(async (req) => {
 
   // Erst gesetzt, wenn Tenant/ASIN/Zeitraum feststehen — vorher gibt es keinen
   // Lauf, den man festhalten könnte.
-  let lauf: { tenant_id: string; asin: string; periode: Periode; zeitraum: Zeitraum } | null = null;
+  let lauf: {
+    tenant_id: string; asin: string; periode: Periode; zeitraum: Zeitraum; marktplatz: string;
+  } | null = null;
 
   /** Antwortet UND hält den Fehlschlag fest. */
   async function gescheitert(meldung: string, antwort: Record<string, unknown>, status: number, report_id?: string) {
     if (lauf) {
       await merkeLauf(supabase, lauf.tenant_id, lauf.asin, lauf.periode, lauf.zeitraum, {
         status: "fehler", meldung, report_id: report_id ?? null,
-      });
+      }, lauf.marktplatz);
     }
     return json(antwort, status);
   }
@@ -56,18 +60,31 @@ Deno.serve(async (req) => {
     const zeitraum = body.von ? zeitraumSicher(periode, String(body.von)) : letzterZeitraum(periode);
     if (!zeitraum) return json({ error: "Zeitraum ungültig — 'von' als YYYY-MM-DD erwartet", von: body.von }, 400);
     const { von, bis } = zeitraum;
-    lauf = { tenant_id, asin, periode, zeitraum };
 
-    // Der Cron ruft ohne Zeitraum auf und geht nicht über sqp_anstossen — dann
-    // gibt es hier noch keinen Eintrag. Also selbst einen anlegen.
-    await merkeLauf(supabase, tenant_id, asin, periode, zeitraum, { status: "laeuft" });
+    // Der Marktplatz muss VOR dem Lauf-Eintrag feststehen: er ist Teil des
+    // Schluessels. Ohne ihn landete ein franzoesischer Abruf auf der deutschen
+    // Zeile — dieselbe ASIN, dieselbe Woche, voellig andere Zahlen.
+    let gewuenschterMarktplatz: string | null;
+    try {
+      gewuenschterMarktplatz = alsMarktplatz(body.marktplatz);
+    } catch (e) {
+      return json({ error: String((e as Error)?.message ?? e) }, 400);
+    }
 
     const { data: ctx, error: ctxErr } = await supabase.from("auth_contexts")
       .select("client_id_secret, client_secret_secret, refresh_token_secret, marketplace_id")
       .eq("tenant_id", tenant_id).eq("source", "sp").single();
     if (ctxErr || !ctx) {
-      return await gescheitert("Amazon-Verbindung nicht gefunden.", { error: "auth_context nicht gefunden" }, 404);
+      return json({ error: "auth_context nicht gefunden" }, 404);
     }
+
+    // Ohne Angabe der Marktplatz der Verbindung — das bisherige Verhalten.
+    const marktplatz = gewuenschterMarktplatz ?? String(ctx.marketplace_id);
+    lauf = { tenant_id, asin, periode, zeitraum, marktplatz };
+
+    // Der Cron ruft ohne Zeitraum auf und geht nicht über sqp_anstossen — dann
+    // gibt es hier noch keinen Eintrag. Also selbst einen anlegen.
+    await merkeLauf(supabase, tenant_id, asin, periode, zeitraum, { status: "laeuft" }, marktplatz);
 
     const clientId = await readSecret(supabase, ctx.client_id_secret);
     const clientSecret = await readSecret(supabase, ctx.client_secret_secret);
@@ -86,7 +103,7 @@ Deno.serve(async (req) => {
       headers: { "x-amz-access-token": accessToken, "Content-Type": "application/json" },
       body: JSON.stringify({
         reportType: REPORT_TYPE,
-        marketplaceIds: [ctx.marketplace_id],
+        marketplaceIds: [marktplatz],
         // Beide Grenzen um Mitternacht — genau so nimmt Amazon den Zeitraum an.
         // Mit T23:59:59Z am Ende kommt der Report als FATAL zurück.
         dataStartTime: `${von}T00:00:00Z`, dataEndTime: `${bis}T00:00:00Z`,
@@ -122,7 +139,7 @@ Deno.serve(async (req) => {
       await merkeLauf(supabase, tenant_id, asin, periode, zeitraum, {
         status: "leer", zeilen: 0, report_id: reportId,
         meldung: "Amazon hat den Report geliefert, aber ohne Suchanfragen für diesen Zeitraum.",
-      });
+      }, marktplatz);
       return json({ ok: true, asin, periode, zeilen: 0, hinweis: "Report DONE ohne Dokument (keine Daten)" });
     }
 
@@ -161,12 +178,18 @@ Deno.serve(async (req) => {
 
     // 4) Speichern: nur die Zeilen DIESES Zeitraums ersetzen — ältere Wochen und
     // Monate bleiben stehen, damit man in der App zurückblättern kann.
+    // Nur die Zeilen DIESES Marktplatzes ersetzen — sonst loeschte ein
+    // franzoesischer Abruf die deutschen Zeilen derselben Woche mit.
     await supabase.from("sqp_rows").delete()
-      .eq("tenant_id", tenant_id).eq("asin", asin).eq("periode", periode).eq("zeitraum_von", von);
+      .eq("tenant_id", tenant_id).eq("marktplatz", marktplatz).eq("asin", asin)
+      .eq("periode", periode).eq("zeitraum_von", von);
     if (zeilen.length > 0) {
       const jetzt = new Date().toISOString();
       const { error: insErr } = await supabase.from("sqp_rows").insert(
-        zeilen.map((z) => ({ tenant_id, asin, periode, ...z, zeitraum_von: von, zeitraum_bis: bis, updated_at: jetzt })),
+        zeilen.map((z) => ({
+          tenant_id, marktplatz, asin, periode, ...z,
+          zeitraum_von: von, zeitraum_bis: bis, updated_at: jetzt,
+        })),
       );
       if (insErr) {
         return await gescheitert("Die Zeilen ließen sich nicht speichern.",
@@ -181,8 +204,11 @@ Deno.serve(async (req) => {
       meldung: zeilen.length > 0
         ? undefined
         : "Amazon hat den Report geliefert, aber ohne Suchanfragen für diesen Zeitraum.",
+    }, marktplatz);
+    return json({
+      ok: true, asin, periode, zeilen: zeilen.length, zeitraum: { von, bis },
+      marktplatz, marktplatz_name: marktplatzName(marktplatz),
     });
-    return json({ ok: true, asin, periode, zeilen: zeilen.length, zeitraum: { von, bis } });
   } catch (e) {
     return await gescheitert(`Unerwarteter Fehler: ${String(e)}`, { error: "Ausnahme", detail: String(e) }, 500);
   }
