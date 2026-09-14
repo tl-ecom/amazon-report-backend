@@ -18,7 +18,19 @@ import {
 const SP_ENDPOINT = "https://sellingpartnerapi-eu.amazon.com";
 const REPORT_TYPE = "GET_BRAND_ANALYTICS_SEARCH_QUERY_PERFORMANCE_REPORT";
 const POLL_MS = 5000;
-const DEADLINE_MS = 130000;
+const DEADLINE_MS = 240000;
+
+/**
+ * Amazon laesst bei DIESEM Report-Typ etwa eine Anfrage je Minute zu (Burst
+ * knapp 15). Beim Nachladen mehrerer Wochen ist der Burst nach wenigen Minuten
+ * weg, und createReport antwortet mit 429 QuotaExceeded.
+ *
+ * Vorher war das ein harter Fehlschlag: der Lauf stand auf "fehler", obwohl gar
+ * nichts kaputt war — Amazon wollte nur, dass man wartet. Genau so ein Eintrag
+ * bringt jemanden dazu, von Hand nachzutreten statt kurz zu warten.
+ */
+const QUOTA_WARTE_MS = 65000;
+const QUOTA_VERSUCHE = 3;
 
 // Was der Nutzer bei einem abgelehnten Report lesen soll. Amazon nennt keinen
 // Grund, deshalb hier die beiden, die es in der Praxis sind.
@@ -97,23 +109,39 @@ Deno.serve(async (req) => {
       return await gescheitert("Anmeldung bei Amazon fehlgeschlagen.", { error: "Access-Token fehlgeschlagen" }, 502);
     }
 
-    // 1) Report anfordern
-    const createResp = await fetch(`${SP_ENDPOINT}/reports/2021-06-30/reports`, {
-      method: "POST",
-      headers: { "x-amz-access-token": accessToken, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        reportType: REPORT_TYPE,
-        marketplaceIds: [marktplatz],
-        // Beide Grenzen um Mitternacht — genau so nimmt Amazon den Zeitraum an.
-        // Mit T23:59:59Z am Ende kommt der Report als FATAL zurück.
-        dataStartTime: `${von}T00:00:00Z`, dataEndTime: `${bis}T00:00:00Z`,
-        reportOptions: { reportPeriod: periode, asin },
-      }),
-    });
-    const createData = await createResp.json().catch(() => ({}));
-    if (!createResp.ok) {
-      return await gescheitert(`Amazon nahm die Anfrage nicht an (HTTP ${createResp.status}).`,
-        { error: "createReport Fehler", status: createResp.status, detail: createData }, 502);
+    // 1) Report anfordern. Bei 429 warten und erneut: das ist kein Fehler,
+    // sondern Amazons Drosselung.
+    let createResp: Response | null = null;
+    let createData: any = {};
+    for (let versuch = 1; versuch <= QUOTA_VERSUCHE; versuch++) {
+      createResp = await fetch(`${SP_ENDPOINT}/reports/2021-06-30/reports`, {
+        method: "POST",
+        headers: { "x-amz-access-token": accessToken, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reportType: REPORT_TYPE,
+          marketplaceIds: [marktplatz],
+          // Beide Grenzen um Mitternacht — genau so nimmt Amazon den Zeitraum an.
+          // Mit T23:59:59Z am Ende kommt der Report als FATAL zurück.
+          dataStartTime: `${von}T00:00:00Z`, dataEndTime: `${bis}T00:00:00Z`,
+          reportOptions: { reportPeriod: periode, asin },
+        }),
+      });
+      createData = await createResp.json().catch(() => ({}));
+      if (createResp.status !== 429) break;
+      // Kein weiterer Versuch, wenn dafuer die Zeit nicht mehr reicht: dann
+      // lieber ehrlich melden als in die Frist laufen.
+      if (versuch === QUOTA_VERSUCHE || Date.now() - start + QUOTA_WARTE_MS > DEADLINE_MS) break;
+      await schlaf(QUOTA_WARTE_MS);
+    }
+    if (!createResp || !createResp.ok) {
+      const gedrosselt = createResp?.status === 429;
+      return await gescheitert(
+        gedrosselt
+          ? "Amazon drosselt gerade: Für diesen Report ist etwa eine Anfrage je Minute "
+            + "erlaubt, und das Kontingent ist aufgebraucht. Das ist kein Fehler — "
+            + "in ein paar Minuten erneut versuchen."
+          : `Amazon nahm die Anfrage nicht an (HTTP ${createResp?.status}).`,
+        { error: "createReport Fehler", status: createResp?.status ?? 0, detail: createData }, 502);
     }
     const reportId = createData.reportId;
 
