@@ -28,6 +28,12 @@
 //   negative_target_anlegen  Negativ-ASINs auf Anzeigengruppenebene anlegen
 //                            {campaignId, adGroupId?, asins[]}. Nur mit bestaetigung=true.
 //                            Duplikat-Schutz, Spur in ads_aenderungen_log.
+//   profile                  Werbeprofile des Ads-Kontos auflisten (DE, FR, ...)
+//
+// Werbeprofil: standardmäßig das im auth_context hinterlegte. Optional kann JEDE
+// Aktion ein anderes Profil DESSELBEN Ads-Kontos ansprechen (body.profile_id) —
+// z. B. Frankreich statt Deutschland. Die angeforderte profile_id wird gegen die
+// Profilliste des Access Tokens geprüft; ein fremdes Konto ist so nicht erreichbar.
 //
 // Spec (Advertising API v3, Sponsored Products, verifiziert 2026-09):
 //   POST /sp/campaigns/list   Content-Type/Accept application/vnd.spCampaign.v3+json
@@ -136,13 +142,47 @@ Deno.serve(async (req) => {
     const accessToken = await getAccessToken(clientId, clientSecret, refreshToken);
     if (!accessToken) return json({ error: "Access-Token fehlgeschlagen (Refresh-Token abgelaufen?)" }, 502);
 
-    const ads = new AdsClient(clientId, ctx.profile_id, accessToken);
+    // Welche Werbeprofile hängen an diesem Zugang? (DE, FR, ...)
+    if (action === "profile") {
+      const liste = await ladeProfile(clientId, accessToken);
+      if (!liste) return json({ error: "Profilliste konnte nicht geladen werden." }, 502);
+      return json({
+        tenant_id: tenantId,
+        verbunden: String(ctx.profile_id),
+        profile: liste.map((p: any) => ({
+          profile_id: String(p.profileId),
+          land: p.countryCode ?? null,
+          waehrung: p.currencyCode ?? null,
+          typ: p.accountInfo?.type ?? null,
+          name: p.accountInfo?.name ?? null,
+          verbunden: String(p.profileId) === String(ctx.profile_id),
+        })),
+      });
+    }
+
+    // Profil auflösen: Standard ist das verbundene; ein anderes nur, wenn es zum
+    // selben Ads-Konto gehört (Prüfung gegen die Profilliste des Tokens).
+    let profileId = String(ctx.profile_id);
+    const gewuenscht = str(body.profile_id);
+    if (gewuenscht && gewuenscht !== profileId) {
+      const liste = await ladeProfile(clientId, accessToken);
+      if (!liste) return json({ error: "Profilliste konnte nicht geladen werden." }, 502);
+      if (!liste.some((p: any) => String(p.profileId) === gewuenscht)) {
+        return json({
+          error: `Profil ${gewuenscht} gehört nicht zu dieser Ads-Verbindung.`,
+          verfuegbar: liste.map((p: any) => ({ profile_id: String(p.profileId), land: p.countryCode ?? null })),
+        }, 403);
+      }
+      profileId = gewuenscht;
+    }
+
+    const ads = new AdsClient(clientId, profileId, accessToken);
 
     if (action === "kampagnen") {
       const status = liste(body.status, ["ENABLED", "PAUSED"]);
       const r = await ads.kampagnen(status);
       if (!r.ok) return json({ error: "Kampagnen laden fehlgeschlagen", detail: r.detail }, 502);
-      return json({ tenant_id: tenantId, profile_id: ctx.profile_id, kampagnen: r.daten });
+      return json({ tenant_id: tenantId, profile_id: profileId, kampagnen: r.daten });
     }
 
     if (action === "gebote" || action === "vorschau") {
@@ -537,7 +577,7 @@ Deno.serve(async (req) => {
       return json({ campaignId: cid, name: c.name, vorher: c.state, nachher: state, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : e.detail, ...(logErr ? { log_fehler: logErr } : {}) });
     }
 
-    return json({ error: "Unbekannte action. Erlaubt: firmen, kampagnen, gebote, vorschau, pruefen, setzen, platzierung, platzierung_setzen, budget_setzen, kampagne_zustand, negatives, keyword_anlegen, negative_anlegen, negative_targets, negative_target_anlegen, sb_kampagnen, sb_kampagne_zustand, sb_budget_setzen, sb_negatives, sb_negatives_anlegen" }, 400);
+    return json({ error: "Unbekannte action. Erlaubt: firmen, profile, kampagnen, gebote, vorschau, pruefen, setzen, platzierung, platzierung_setzen, budget_setzen, kampagne_zustand, negatives, keyword_anlegen, negative_anlegen, negative_targets, negative_target_anlegen, sb_kampagnen, sb_kampagne_zustand, sb_budget_setzen, sb_negatives, sb_negatives_anlegen" }, 400);
   } catch (e) {
     return json({ error: "Ausnahme", detail: String(e) }, 500);
   }
@@ -737,6 +777,16 @@ function liste(x: unknown, standard: string[]): string[] {
   if (Array.isArray(x)) return x.map((v) => String(v).trim()).filter(Boolean);
   if (typeof x === "string" && x.trim()) return x.split(",").map((v) => v.trim()).filter(Boolean);
   return standard;
+}
+
+/** Alle Werbeprofile des Access Tokens (ohne Scope-Header — den ermitteln wir ja gerade). */
+async function ladeProfile(clientId: string, accessToken: string): Promise<any[] | null> {
+  const resp = await fetch(`${ADS_ENDPOINT}/v2/profiles`, {
+    headers: { "Amazon-Advertising-API-ClientId": clientId, "Authorization": `Bearer ${accessToken}` },
+  });
+  if (!resp.ok) return null;
+  const data = await resp.json().catch(() => null);
+  return Array.isArray(data) ? data : null;
 }
 
 async function getAccessToken(cid: string, csec: string, rt: string): Promise<string | null> {

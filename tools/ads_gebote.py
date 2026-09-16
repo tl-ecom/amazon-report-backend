@@ -38,6 +38,10 @@ Ablauf:
         python tools/ads_gebote.py zustand-setzen --firma Vaneja --kampagne 12345 --state PAUSED --grund "..."
         python tools/ads_gebote.py sb-budget-setzen --firma Vaneja --kampagne 12345 --budget 17.5 --grund "..."
         python tools/ads_gebote.py negative-anlegen --firma Vaneja --kampagne 12345 --text "a" --text "b" --grund "..."
+  Anderes Werbeprofil (z. B. Frankreich) — gilt fuer JEDEN Befehl:
+        python tools/ads_gebote.py profile --firma Vaneja
+        python tools/ads_gebote.py kampagnen --firma Vaneja --profil 1012975072464757
+
         python tools/ads_gebote.py negative-asins --firma Vaneja --kampagne 12345
         python tools/ads_gebote.py negative-asin-anlegen --firma Vaneja --kampagne 12345 --asin B0XXXXXXXX --asin B0YYYYYYYY --grund "..."
      Beide zeigen erst den Ist-Stand, fragen nach (ausser --ja) und schreiben dann.
@@ -118,7 +122,12 @@ def token():
     return d["access_token"]
 
 
+PROFIL = None  # --profil: Ads-Profil-ID, ueberschreibt das verbundene Profil (z. B. FR statt DE)
+
+
 def ruf(body):
+    if PROFIL and "profile_id" not in body:
+        body = {**body, "profile_id": PROFIL}
     r = requests.post(
         FUNKTION,
         headers={"Authorization": f"Bearer {token()}", "apikey": ANON_KEY, "Content-Type": "application/json"},
@@ -192,6 +201,13 @@ def tabelle(zeilen, spalten):
 
 
 # ----------------------------------------------------------------- Befehle
+
+def cmd_profile(args):
+    tenant, name = firma_id(args.firma)
+    d = ruf({"action": "profile", "company_id": tenant})
+    print(f"Firma: {name}   verbundenes Profil: {d['verbunden']}   Profile im Ads-Konto: {len(d['profile'])}")
+    tabelle(d["profile"], ["profile_id", "land", "waehrung", "typ", "name", "verbunden"])
+
 
 def cmd_firmen(args):
     tabelle(ruf({"action": "firmen"})["firmen"], ["name", "tenant_id", "profile_id", "marketplace_id", "status"])
@@ -652,14 +668,23 @@ def main():
     p = argparse.ArgumentParser(description="Gebote fuer Sponsored Products lesen/setzen (nur Coach, nur lokal).")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("login", help="einmalig anmelden (Passwort wird abgefragt)")
+    # --profil gilt fuer jeden Befehl: welches Ads-Profil angesprochen wird.
+    gemeinsam = argparse.ArgumentParser(add_help=False)
+    gemeinsam.add_argument("--profil", default=None,
+                           help="Ads-Profil-ID (z. B. Frankreich). Standard: das verbundene Profil. Liste: Befehl 'profile'.")
+
+    s = sub.add_parser("login", help="einmalig anmelden (Passwort wird abgefragt)", parents=[gemeinsam])
     s.add_argument("--email")
     s.set_defaults(fn=login)
 
-    s = sub.add_parser("firmen", help="Firmen mit Ads-Verbindung")
+    s = sub.add_parser("firmen", help="Firmen mit Ads-Verbindung", parents=[gemeinsam])
     s.set_defaults(fn=cmd_firmen)
 
-    s = sub.add_parser("kampagnen", help="Kampagnen einer Firma")
+    s = sub.add_parser("profile", help="Werbeprofile des Ads-Kontos (DE, FR, ...)", parents=[gemeinsam])
+    s.add_argument("--firma", required=True)
+    s.set_defaults(fn=cmd_profile)
+
+    s = sub.add_parser("kampagnen", help="Kampagnen einer Firma", parents=[gemeinsam])
     s.add_argument("--firma", required=True)
     s.add_argument("--status", default="ENABLED,PAUSED", help="ENABLED,PAUSED,ARCHIVED")
     s.set_defaults(fn=cmd_kampagnen)
@@ -672,11 +697,11 @@ def main():
         s.add_argument("--nur", choices=["keyword", "target"], default=None, help="nur Keywords oder nur Product-Targets")
         s.add_argument("--treffer", action="append", default=None, help="nur diese Zeilen: Keyword-/Target-ID oder Textteil, mehrfach moeglich")
 
-    s = sub.add_parser("gebote", help="aktuelle Gebote ansehen")
+    s = sub.add_parser("gebote", help="aktuelle Gebote ansehen", parents=[gemeinsam])
     auswahl(s)
     s.set_defaults(fn=cmd_gebote)
 
-    s = sub.add_parser("vorschau", help="Aenderung berechnen, nichts schreiben")
+    s = sub.add_parser("vorschau", help="Aenderung berechnen, nichts schreiben", parents=[gemeinsam])
     auswahl(s)
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--prozent", type=float, help="z. B. -20 (senken) oder 10 (erhoehen)")
@@ -686,7 +711,7 @@ def main():
     s.add_argument("--max", type=float, help="nicht ueber diesen Wert")
     s.set_defaults(fn=cmd_vorschau)
 
-    s = sub.add_parser("tabelle", help="Excel-Massnahmenblatt einlesen -> Vorschau (schreibt nichts)")
+    s = sub.add_parser("tabelle", help="Excel-Massnahmenblatt einlesen -> Vorschau (schreibt nichts)", parents=[gemeinsam])
     s.add_argument("--firma", required=True)
     s.add_argument("--datei", default=None, help="Pfad zur .xlsx (Standard: neueste in tools/eingang)")
     s.add_argument("--blatt", default="Gebotsänderungen", help="Blattname (Standard: Gebotsänderungen)")
@@ -697,24 +722,24 @@ def main():
         s.add_argument("--grund", default=None, help="kurze Begruendung fuers Log")
         s.add_argument("--ja", action="store_true", help="ohne Rueckfrage")
 
-    s = sub.add_parser("platzierung", help="Platzierungs-Modifier von SP-Kampagnen ansehen")
+    s = sub.add_parser("platzierung", help="Platzierungs-Modifier von SP-Kampagnen ansehen", parents=[gemeinsam])
     s.add_argument("--firma", required=True)
     s.add_argument("--kampagne", action="append", required=True)
     s.set_defaults(fn=cmd_platzierung)
 
-    s = sub.add_parser("platzierung-setzen", help="Platzierungs-Modifier einer SP-Kampagne setzen")
+    s = sub.add_parser("platzierung-setzen", help="Platzierungs-Modifier einer SP-Kampagne setzen", parents=[gemeinsam])
     schreib(s)
     s.add_argument("--kampagne", required=True, help="campaignId oder eindeutiger Namensteil")
     s.add_argument("--placement", default="PLACEMENT_TOP", choices=["PLACEMENT_TOP", "PLACEMENT_PRODUCT_PAGE", "PLACEMENT_REST_OF_SEARCH"])
     s.add_argument("--prozent", type=int, required=True, help="0-900")
     s.set_defaults(fn=cmd_platzierung_setzen)
 
-    s = sub.add_parser("negatives", help="SP-Negatives (Anzeigengruppe + Kampagne) ansehen")
+    s = sub.add_parser("negatives", help="SP-Negatives (Anzeigengruppe + Kampagne) ansehen", parents=[gemeinsam])
     s.add_argument("--firma", required=True)
     s.add_argument("--kampagne", action="append", required=True)
     s.set_defaults(fn=cmd_negatives)
 
-    s = sub.add_parser("keyword-anlegen", help="SP-Keyword anlegen")
+    s = sub.add_parser("keyword-anlegen", help="SP-Keyword anlegen", parents=[gemeinsam])
     schreib(s)
     s.add_argument("--kampagne", required=True)
     s.add_argument("--adgroup", default=None, help="adGroupId, noetig wenn die Kampagne mehrere hat")
@@ -723,7 +748,7 @@ def main():
     s.add_argument("--gebot", type=float, required=True)
     s.set_defaults(fn=cmd_keyword_anlegen)
 
-    s = sub.add_parser("negative-anlegen", help="SP-Negatives (Anzeigengruppe) anlegen, --text mehrfach moeglich")
+    s = sub.add_parser("negative-anlegen", help="SP-Negatives (Anzeigengruppe) anlegen, --text mehrfach moeglich", parents=[gemeinsam])
     schreib(s)
     s.add_argument("--kampagne", required=True)
     s.add_argument("--adgroup", default=None)
@@ -731,67 +756,69 @@ def main():
     s.add_argument("--match", default="NEGATIVE_EXACT", choices=["NEGATIVE_EXACT", "NEGATIVE_PHRASE"])
     s.set_defaults(fn=cmd_negative_anlegen)
 
-    s = sub.add_parser("negative-asins", help="SP-Negativ-Produkt-Targets (ASIN) ansehen")
+    s = sub.add_parser("negative-asins", help="SP-Negativ-Produkt-Targets (ASIN) ansehen", parents=[gemeinsam])
     s.add_argument("--firma", required=True)
     s.add_argument("--kampagne", action="append", required=True)
     s.set_defaults(fn=cmd_negative_asins)
 
-    s = sub.add_parser("negative-asin-anlegen", help="SP-Negativ-ASINs (Anzeigengruppe) anlegen, --asin mehrfach")
+    s = sub.add_parser("negative-asin-anlegen", help="SP-Negativ-ASINs (Anzeigengruppe) anlegen, --asin mehrfach", parents=[gemeinsam])
     schreib(s)
     s.add_argument("--kampagne", required=True, help="campaignId oder eindeutiger Namensteil")
     s.add_argument("--adgroup", default=None, help="adGroupId, noetig wenn die Kampagne mehrere hat")
     s.add_argument("--asin", action="append", required=True, help="ASIN, mehrfach moeglich")
     s.set_defaults(fn=cmd_negative_asin_anlegen)
 
-    s = sub.add_parser("sb-kampagnen", help="Sponsored-Brands-Kampagnen ansehen")
+    s = sub.add_parser("sb-kampagnen", help="Sponsored-Brands-Kampagnen ansehen", parents=[gemeinsam])
     s.add_argument("--firma", required=True)
     s.add_argument("--kampagne", action="append", default=None, help="campaignId, optional")
     s.add_argument("--status", default="ENABLED,PAUSED")
     s.set_defaults(fn=cmd_sb_kampagnen)
 
-    s = sub.add_parser("sb-zustand", help="SB-Kampagne pausieren/aktivieren")
+    s = sub.add_parser("sb-zustand", help="SB-Kampagne pausieren/aktivieren", parents=[gemeinsam])
     schreib(s)
     s.add_argument("--kampagne", required=True, help="SB campaignId")
     s.add_argument("--state", required=True, choices=["PAUSED", "ENABLED"])
     s.set_defaults(fn=cmd_sb_zustand)
 
-    s = sub.add_parser("sb-budget-setzen", help="Tagesbudget einer SB-Kampagne setzen")
+    s = sub.add_parser("sb-budget-setzen", help="Tagesbudget einer SB-Kampagne setzen", parents=[gemeinsam])
     schreib(s)
     s.add_argument("--kampagne", required=True, help="SB campaignId")
     s.add_argument("--budget", type=float, required=True, help="neues Tagesbudget in Profil-Waehrung (Amazon-Minimum 1)")
     s.set_defaults(fn=cmd_sb_budget_setzen)
 
-    s = sub.add_parser("sb-negatives", help="Negatives einer SB-Kampagne ansehen")
+    s = sub.add_parser("sb-negatives", help="Negatives einer SB-Kampagne ansehen", parents=[gemeinsam])
     s.add_argument("--firma", required=True)
     s.add_argument("--kampagne", required=True, help="SB campaignId")
     s.set_defaults(fn=cmd_sb_negatives)
 
-    s = sub.add_parser("sb-negatives-anlegen", help="Negatives in einer SB-Kampagne anlegen")
+    s = sub.add_parser("sb-negatives-anlegen", help="Negatives in einer SB-Kampagne anlegen", parents=[gemeinsam])
     schreib(s)
     s.add_argument("--kampagne", required=True, help="SB campaignId")
     s.add_argument("--text", action="append", required=True, help="Keyword-Text, mehrfach moeglich")
     s.add_argument("--match", default="negativeExact", choices=["negativeExact", "negativePhrase"])
     s.set_defaults(fn=cmd_sb_negatives_anlegen)
 
-    s = sub.add_parser("budget-setzen", help="Tagesbudget einer SP-Kampagne setzen")
+    s = sub.add_parser("budget-setzen", help="Tagesbudget einer SP-Kampagne setzen", parents=[gemeinsam])
     schreib(s)
     s.add_argument("--kampagne", required=True, help="campaignId oder eindeutiger Namensteil")
     s.add_argument("--budget", type=float, required=True, help="neues Tagesbudget in Profil-Waehrung (Amazon-Minimum 1)")
     s.set_defaults(fn=cmd_budget_setzen)
 
-    s = sub.add_parser("zustand-setzen", help="SP-Kampagne pausieren/aktivieren")
+    s = sub.add_parser("zustand-setzen", help="SP-Kampagne pausieren/aktivieren", parents=[gemeinsam])
     schreib(s)
     s.add_argument("--kampagne", required=True, help="campaignId oder eindeutiger Namensteil")
     s.add_argument("--state", required=True, choices=["PAUSED", "ENABLED"])
     s.set_defaults(fn=cmd_zustand_setzen)
 
-    s = sub.add_parser("setzen", help="die letzte Vorschau bei Amazon anwenden")
+    s = sub.add_parser("setzen", help="die letzte Vorschau bei Amazon anwenden", parents=[gemeinsam])
     s.add_argument("--firma", required=True)
     s.add_argument("--grund", default=None, help="kurze Begruendung fuers Log")
     s.add_argument("--ja", action="store_true", help="ohne Rueckfrage")
     s.set_defaults(fn=cmd_setzen)
 
     args = p.parse_args()
+    global PROFIL
+    PROFIL = getattr(args, "profil", None)
     args.fn(args)
 
 
