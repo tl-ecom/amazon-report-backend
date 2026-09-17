@@ -89,3 +89,9 @@ verify_jwt = true
 # tools/ads_gebote.py.
 [functions.ads-gebote]
 verify_jwt = true
+
+# Gebotsautomatik Stufe 1: rechnet Zielgebote und legt sie in
+# ads_gebot_vorschlaege ab. Schreibt NICHTS nach Amazon — dafuer bleibt
+# ads-gebote der einzige Weg. pg_cron/manuell mit service_role -> verify_jwt = true.
+[functions.ads-vorschlag]
+verify_jwt = true
