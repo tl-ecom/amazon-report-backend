@@ -962,13 +962,25 @@ nimmt `p_marktplatz` mit `ads_haupt_marktplatz()` als Default.
    `get_ads_ziele` (neues `ADS_ZEITRAUM_SCHEMA`, damit die sechs anderen
    Werkzeuge auf `ZEITRAUM_SCHEMA` unveraendert bleiben).
 
-**Noch offen — bewusst nicht halb gemacht:**
-`public.ads_changelog(uuid, date, date, text, integer, integer)` liest an elf
-Stellen aus `ads_ziele_daily` **ohne** Marktplatz-Filter und hat keinen
-`p_marktplatz`. `adsChangelog` weist eine Marktplatz-Anfrage deshalb mit einer
-klaren Meldung ab, statt stillschweigend zu mischen. Sobald FR live ist, muss
-die SQL-Funktion denselben Parameter bekommen wie `ads_summen` — bis dahin
-liefert `get_ads_changelog` alle Profile gemeinsam.
+**Korrektur am selben Tag — `ads_changelog` war laengst fertig:**
+Ich hatte `get_ads_changelog` zunaechst als nicht marktplatzfaehig ausgeklammert,
+weil die **lokale** Datei `20260914084000_ads_changelog_funktion.sql` keinen
+`p_marktplatz` kennt. Die **laufende** Funktion in der Datenbank hat ihn — samt
+`mp`-CTE und Filter an allen elf `ads_ziele_daily`-Stellen. Sie kam ueber eine
+der 22 Migrationen, die remote angewendet sind, aber hier als Datei fehlen. Der
+Riegel in `adsChangelog` ist deshalb wieder raus; der Leser reicht `p_marktplatz`
+jetzt durch wie die anderen. **Lehre: bei diesem Repo die laufende Definition
+per `pg_get_functiondef` pruefen, nicht die lokale Migrationsdatei.**
+
+**Offen: die Migrationshistorie ist auseinandergelaufen.**
+22 Migrationen sind remote angewendet, ohne dass es lokal eine Datei gibt
+(u. a. `20260914080914`–`20260914090957`, `20260914194046`, `20260917112019`);
+12 lokale Dateien sind nie angekommen (u. a. `20260914090000_ads_profile.sql`,
+`20260917130000`). `supabase db push` wuerde deshalb zwoelf Migrationen anwenden
+statt einer — dieser Stand wurde am 29.09. einzeln ueber die Supabase-API
+eingespielt, nicht per Push. Vor dem naechsten Push die fehlenden Dateien aus
+der anderen Arbeitskopie holen. Der Function-Code ist davon NICHT betroffen:
+ein Diff der deployten Bundles gegen `main` ergab 37 von 37 Dateien identisch.
 
 **Inbetriebnahme — zwei Schritte, beide bewusst manuell:**
 

@@ -18,6 +18,8 @@
 //  - BEHAUPTET: nichts. Der Vergleich davor/danach ist ein Nebeneinander.
 //    In denselben sieben Tagen ändern sich Wettbewerb, Saison und Auktion mit.
 
+import { marktplatzKopf } from "./ads_marktplatz.ts";
+
 function r2(n: number): number { return Math.round(n * 100) / 100; }
 
 /**
@@ -167,20 +169,7 @@ function alsDatum(v: unknown): string | null {
 export async function adsChangelog(
   supabase: any, tenant_id: string, args: ChangelogArgs & { marktplatz?: unknown } = {},
 ): Promise<unknown> {
-  // NOCH NICHT MARKTPLATZFAEHIG. Die SQL-Funktion ads_changelog liest an elf
-  // Stellen aus ads_ziele_daily, ohne nach marktplatz zu filtern. Solange nur
-  // ein Profil synchronisiert wird, ist das richtig. Sobald ein zweites dazu
-  // kommt, mischt sie Laender — und zwar still. Deshalb lieber eine klare
-  // Absage als eine plausibel aussehende Zahl.
-  const gewuenscht = String((args as { marktplatz?: unknown }).marktplatz ?? "").trim();
-  if (gewuenscht) {
-    return {
-      fehler: "get_ads_changelog kann noch nicht nach Marktplatz filtern.",
-      hinweis: "Die SQL-Funktion ads_changelog braucht dafuer einen p_marktplatz-Parameter "
-        + "(analog ads_summen). Bis dahin liefert sie alle Profile gemeinsam.",
-      marktplatz_angefragt: gewuenscht,
-    };
-  }
+  const kopf = await marktplatzKopf(supabase, tenant_id, args);
 
   const nurAuswertbar = args.nur_auswertbar === true || String(args.nur_auswertbar) === "true";
   const limit = Math.max(1, Math.min(Number(args.limit) || 200, 2000));
@@ -192,6 +181,7 @@ export async function adsChangelog(
     p_campaign_id: args.campaign_id ? String(args.campaign_id) : null,
     p_limit: limit,
     p_min_klicks: nurAuswertbar ? KLICKS_FUER_VERGLEICH : 0,
+    p_marktplatz: kopf.marktplatz,
   });
   if (error) throw new Error(`ads_changelog: ${error.message}`);
 
@@ -226,6 +216,7 @@ export async function adsChangelog(
   }
 
   return {
+    ...kopf,
     zeitraum: {
       von: alsDatum(args.von), bis: alsDatum(args.bis),
       hinweis: alsDatum(args.von) ? null : "Ohne Angabe die letzten 90 Tage.",

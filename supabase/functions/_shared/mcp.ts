@@ -515,6 +515,7 @@ const TOOLS: ToolDef[] = [
         von: { type: "string", description: "Erster Tag (YYYY-MM-DD). Ohne Angabe die letzten 90 Tage." },
         bis: { type: "string", description: "Letzter Tag (YYYY-MM-DD)." },
         campaign_id: { type: "string", description: "Nur diese Kampagne." },
+        marktplatz: { type: "string", description: "Marktplatz-ID, z. B. A13V1IB3VIYZZH fuer Frankreich. Ohne Angabe der Marktplatz der SP-Verbindung. Ein Werbe-Profil gilt je Marktplatz — Zahlen verschiedener Laender werden nie gemischt. Welche freigeschaltet sind, steht in jeder Antwort unter verfuegbare_marktplaetze." },
         nur_auswertbar: {
           type: "boolean",
           description:
