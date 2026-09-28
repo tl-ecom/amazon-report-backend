@@ -18,6 +18,7 @@
 // Werbeprofils und steht nicht in den Objekten.
 
 import { targetText } from "./gebote.ts";
+import { marktplatzKopf } from "./ads_marktplatz.ts";
 
 /** Objektarten in ads_ziele. Keyword- und Target-IDs kommen aus getrennten
  *  Namensräumen bei Amazon; die Art gehört deshalb in den Schlüssel. */
@@ -223,12 +224,17 @@ export const NEGATIV_ARTEN: ZielArt[] = [
 export async function adsStruktur(
   supabase: any,
   tenant_id: string,
-  opts?: { campaign_id?: unknown; nur_aktive?: unknown },
+  opts?: { campaign_id?: unknown; nur_aktive?: unknown; marktplatz?: unknown },
 ): Promise<unknown> {
+  // Ohne diesen Filter wuerden die Direktabfragen unten Kampagnen aus allen
+  // Profilen in eine Liste werfen — Kampagnen-IDs sind je Profil vergeben.
+  const kopf = await marktplatzKopf(supabase, tenant_id, opts);
+
   const { data: standRow, error: standErr } = await supabase
     .from("ads_kampagnen")
     .select("gesehen_am")
     .eq("tenant_id", tenant_id)
+    .eq("marktplatz", kopf.marktplatz)
     .order("gesehen_am", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -244,7 +250,8 @@ export async function adsStruktur(
   const nurAktive = opts?.nur_aktive !== false;
   const campaignId = typeof opts?.campaign_id === "string" && opts.campaign_id.trim() ? opts.campaign_id.trim() : null;
 
-  let kq = supabase.from("ads_kampagnen").select("*").eq("tenant_id", tenant_id).eq("gesehen_am", stand);
+  let kq = supabase.from("ads_kampagnen").select("*").eq("tenant_id", tenant_id)
+    .eq("marktplatz", kopf.marktplatz).eq("gesehen_am", stand);
   if (campaignId) kq = kq.eq("campaign_id", campaignId);
   else if (nurAktive) kq = kq.neq("state", "ARCHIVED");
   const { data: kampagnen, error: kErr } = await kq.order("name");
@@ -255,12 +262,13 @@ export async function adsStruktur(
 
   const { data: gruppen, error: gErr } = await supabase
     .from("ads_anzeigengruppen").select("*")
-    .eq("tenant_id", tenant_id).eq("gesehen_am", stand).in("campaign_id", ids);
+    .eq("tenant_id", tenant_id).eq("marktplatz", kopf.marktplatz)
+    .eq("gesehen_am", stand).in("campaign_id", ids);
   if (gErr) throw new Error(`ads_anzeigengruppen: ${gErr.message}`);
 
   // Zähler je Kampagne aus SQL, damit die Übersicht nicht alle Ziele lädt.
   const { data: zaehler, error: zErr } = await supabase.rpc("ads_ziele_zaehler", {
-    p_tenant: tenant_id, p_stand: stand,
+    p_tenant: tenant_id, p_stand: stand, p_marktplatz: kopf.marktplatz,
   });
   if (zErr) throw new Error(`ads_ziele_zaehler: ${zErr.message}`);
   const zProKampagne = new Map<string, Record<string, number>>();
@@ -277,7 +285,8 @@ export async function adsStruktur(
   if (campaignId) {
     const { data, error } = await supabase
       .from("ads_ziele").select("art, ziel_id, campaign_id, ad_group_id, text, match_type, state, gebot_cents")
-      .eq("tenant_id", tenant_id).eq("gesehen_am", stand).eq("campaign_id", campaignId)
+      .eq("tenant_id", tenant_id).eq("marktplatz", kopf.marktplatz)
+      .eq("gesehen_am", stand).eq("campaign_id", campaignId)
       .order("art").order("text");
     if (error) throw new Error(`ads_ziele: ${error.message}`);
     ziele = (data ?? []) as ZielZeile[];
@@ -323,6 +332,7 @@ export async function adsStruktur(
   });
 
   return {
+    ...kopf,
     stand,
     waehrungshinweis: "Beträge in der Währung des Werbeprofils.",
     kampagnen: ausgabe,

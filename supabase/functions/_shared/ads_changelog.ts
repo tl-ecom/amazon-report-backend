@@ -165,8 +165,23 @@ function alsDatum(v: unknown): string | null {
 }
 
 export async function adsChangelog(
-  supabase: any, tenant_id: string, args: ChangelogArgs = {},
+  supabase: any, tenant_id: string, args: ChangelogArgs & { marktplatz?: unknown } = {},
 ): Promise<unknown> {
+  // NOCH NICHT MARKTPLATZFAEHIG. Die SQL-Funktion ads_changelog liest an elf
+  // Stellen aus ads_ziele_daily, ohne nach marktplatz zu filtern. Solange nur
+  // ein Profil synchronisiert wird, ist das richtig. Sobald ein zweites dazu
+  // kommt, mischt sie Laender — und zwar still. Deshalb lieber eine klare
+  // Absage als eine plausibel aussehende Zahl.
+  const gewuenscht = String((args as { marktplatz?: unknown }).marktplatz ?? "").trim();
+  if (gewuenscht) {
+    return {
+      fehler: "get_ads_changelog kann noch nicht nach Marktplatz filtern.",
+      hinweis: "Die SQL-Funktion ads_changelog braucht dafuer einen p_marktplatz-Parameter "
+        + "(analog ads_summen). Bis dahin liefert sie alle Profile gemeinsam.",
+      marktplatz_angefragt: gewuenscht,
+    };
+  }
+
   const nurAuswertbar = args.nur_auswertbar === true || String(args.nur_auswertbar) === "true";
   const limit = Math.max(1, Math.min(Number(args.limit) || 200, 2000));
 

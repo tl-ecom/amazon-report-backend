@@ -922,3 +922,70 @@ Sellerboard baut den Export **beim ersten Abruf** („Report not ready, try agai
 in several minutes", HTTP 200, 49 Bytes). Der Import behandelt das als
 „noch nicht bereit": kein Fehlerstatus, `zuletzt_versuch` bleibt stehen, der
 stuendliche Cron versucht es erneut.
+
+## Nachtrag 29.09.2026 — Zweites Werbe-Profil (Frankreich) einspielbar gemacht
+
+**Anlass:** Vanejas Obst-Etagere laeuft in DE und FR. Pulse lieferte nur DE —
+nicht leer, sondern gar nicht vorhanden. Ein Ads-Profil gilt je Marktplatz.
+
+**Was schon da war (14.09.):** Schema, Ingest und SQL-Leser sind vollstaendig
+marktplatzfaehig. `marktplatz` ist Teil jedes Primaerschluessels, `ads_profile`
+haelt die gesehenen Profile mit `aktiv`, `sync-ads-report` und
+`sync-ads-struktur` nehmen `marktplatz` im Body, und jede SQL-Lesefunktion
+nimmt `p_marktplatz` mit `ads_haupt_marktplatz()` als Default.
+
+**Was gefehlt hat — drei Stellen:**
+
+1. **Der Anstoss.** `cron_ads_alle_tenants` und `cron_ads_struktur_alle_tenants`
+   liefen ueber `auth_contexts` und riefen die Functions ohne `marktplatz`. Jeder
+   Mandant zog genau das eine verbundene Profil.
+   → `20260929120000_ads_cron_je_profil.sql`: beide Crons laufen jetzt
+   **je Mandant UND je freigeschaltetem Profil**. Neu:
+   `internal.ads_aktive_marktplaetze(tenant)` und eine Ueberladung
+   `internal.stosse_ads_struktur_an(tenant, marktplatz)`.
+   **Sicherheitsnetz:** Ohne aktives Profil laeuft ein Mandant exakt wie vorher,
+   ein Durchgang ohne Land. Diese Migration aendert fuer niemanden etwas,
+   solange niemand ein Profil freischaltet.
+
+2. **Die TypeScript-Leser.** Sie gaben `p_marktplatz` nie weiter, und
+   `adsStruktur` las sogar direkt aus den Tabellen ohne Filter — mit einem
+   zweiten Profil haette es Kampagnen zweier Laender in eine Liste geworfen.
+   → Neu `_shared/ads_marktplatz.ts` (`marktplatzFuer`, `verfuegbareMarktplaetze`,
+   `marktplatzKopf`). Angepasst: `ads_verlauf.ts`, `ads_struktur.ts`,
+   `ads_berichte.ts` (Suchbegriffe, Platzierungen, Ziele). Jede Antwort nennt
+   jetzt `marktplatz` und `verfuegbare_marktplaetze` — sonst merkt niemand,
+   dass ein Land fehlt.
+
+3. **Die MCP-Werkzeuge.** Ohne Parameter konnte niemand ein anderes Land
+   verlangen. → `marktplatz` in den Schemata von `get_ads_verlauf`,
+   `get_ads_struktur`, `get_ads_suchbegriffe`, `get_ads_platzierungen`,
+   `get_ads_ziele` (neues `ADS_ZEITRAUM_SCHEMA`, damit die sechs anderen
+   Werkzeuge auf `ZEITRAUM_SCHEMA` unveraendert bleiben).
+
+**Noch offen — bewusst nicht halb gemacht:**
+`public.ads_changelog(uuid, date, date, text, integer, integer)` liest an elf
+Stellen aus `ads_ziele_daily` **ohne** Marktplatz-Filter und hat keinen
+`p_marktplatz`. `adsChangelog` weist eine Marktplatz-Anfrage deshalb mit einer
+klaren Meldung ab, statt stillschweigend zu mischen. Sobald FR live ist, muss
+die SQL-Funktion denselben Parameter bekommen wie `ads_summen` — bis dahin
+liefert `get_ads_changelog` alle Profile gemeinsam.
+
+**Inbetriebnahme — zwei Schritte, beide bewusst manuell:**
+
+```sql
+-- 1. Profile auffrischen: holt, was der Ads-Token sieht (aktiv bleibt false).
+select public.ads_profile_holen('<tenant_id>');
+select profile_id, country_code, marktplatz, waehrung, aktiv
+  from public.ads_profile where tenant_id = '<tenant_id>';
+
+-- 2. Frankreich freischalten. Kostet API-Kontingent und bewegt Zahlen —
+--    deshalb kein Automatismus.
+update public.ads_profile set aktiv = true
+ where tenant_id = '<tenant_id>' and marktplatz = 'A13V1IB3VIYZZH';
+```
+
+Danach zieht der naechtliche Lauf FR mit. Fuer sofortige Daten:
+`select internal.stosse_ads_sync_an('<tenant_id>', '{"days":30,"marktplatz":"A13V1IB3VIYZZH"}'::jsonb);`
+und `select internal.stosse_ads_struktur_an('<tenant_id>', 'A13V1IB3VIYZZH');`
+
+**Vanejas FR-Profil:** `1012975072464757`, Marktplatz `A13V1IB3VIYZZH`.

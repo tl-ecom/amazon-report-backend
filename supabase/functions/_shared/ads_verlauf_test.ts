@@ -8,15 +8,28 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { adsVerlauf, begrenzeZeitraum, TEILNEHMER_MAX_TAGE, zeitraumAus } from "./ads_verlauf.ts";
 
+const TEST_MARKT = "A1PA6795UKMFR9";
+
 function client(rows: unknown[]) {
   const calls: any[] = [];
   return {
     calls,
     client: {
       rpc: (name: string, args: unknown) => {
+        // Die Marktplatz-Aufloesung ist Infrastruktur, kein Pruefgegenstand —
+        // sie bleibt aus `calls` heraus, damit die Indizes stabil bleiben.
+        if (name === "ads_haupt_marktplatz") {
+          return Promise.resolve({ data: TEST_MARKT, error: null });
+        }
         calls.push({ name, args });
         return Promise.resolve({ data: rows, error: null });
       },
+      // ads_profile fuer verfuegbare_marktplaetze; leer reicht.
+      from: () => ({
+        select: () => ({
+          eq: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }),
+        }),
+      }),
     } as any,
   };
 }
@@ -127,7 +140,9 @@ Deno.test("Verlauf: fragt ads_summen mit dem aufgeloesten Zeitraum", async () =>
   const c = client([summe({ ebene: "gesamt" })]);
   await adsVerlauf(c.client, "tenant-1", ZEITRAUM, { coach: true });
   assertEquals(c.calls[0].name, "ads_summen");
-  assertEquals(c.calls[0].args, { p_tenant: "tenant-1", p_von: "2026-06-01", p_bis: "2026-06-03" });
+  assertEquals(c.calls[0].args, {
+    p_tenant: "tenant-1", p_von: "2026-06-01", p_bis: "2026-06-03", p_marktplatz: TEST_MARKT,
+  });
 });
 
 // --- Sicht: Teilnehmer 30 Tage, Coach unbegrenzt ---
@@ -163,4 +178,20 @@ Deno.test("begrenzeZeitraum: Zeitraum komplett vor der Grenze wird auf die Grenz
   const r = begrenzeZeitraum({ von: "2026-05-01", bis: "2026-06-01" }, { coach: false }, new Date("2026-09-06T12:00:00Z"));
   assertEquals(r.von, "2026-08-07");
   assertEquals(r.bis, "2026-08-07");
+});
+
+Deno.test("Verlauf: nennt den gelesenen Marktplatz in der Antwort", async () => {
+  const c = client([summe({ ebene: "gesamt" })]);
+  const r = await adsVerlauf(c.client, "t", ZEITRAUM, { coach: true }) as any;
+  assertEquals(r.marktplatz, TEST_MARKT);
+  assertEquals(Array.isArray(r.verfuegbare_marktplaetze), true);
+});
+
+Deno.test("Verlauf: ein angefragter Marktplatz schlaegt den Haupt-Marktplatz", async () => {
+  const c = client([summe({ ebene: "gesamt" })]);
+  const r = await adsVerlauf(
+    c.client, "t", { ...ZEITRAUM, marktplatz: "A13V1IB3VIYZZH" }, { coach: true },
+  ) as any;
+  assertEquals(r.marktplatz, "A13V1IB3VIYZZH");
+  assertEquals(c.calls[0].args.p_marktplatz, "A13V1IB3VIYZZH");
 });

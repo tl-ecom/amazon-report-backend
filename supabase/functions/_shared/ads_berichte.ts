@@ -11,6 +11,7 @@
 // die Antwort sagt das, statt es zu verstecken.
 
 import { type AdProduct, ATTRIBUTION_TAGE, FORMELN, istVorlaeufig, kennzahlenAusSummen, VOLATIL_TAGE } from "./ads.ts";
+import { marktplatzKopf } from "./ads_marktplatz.ts";
 import { begrenzeZeitraum, type Sicht, TEILNEHMER, zeitraumAus } from "./ads_verlauf.ts";
 
 interface Summen {
@@ -97,17 +98,18 @@ function attributionsHinweis(typen: Set<string>): string[] {
 export async function adsSuchbegriffe(
   supabase: any,
   tenant_id: string,
-  opts?: { tage?: unknown; von?: unknown; bis?: unknown; campaign_id?: unknown; limit?: unknown; ad_product?: unknown },
+  opts?: { tage?: unknown; von?: unknown; bis?: unknown; campaign_id?: unknown; limit?: unknown; ad_product?: unknown; marktplatz?: unknown },
   sicht: Sicht = TEILNEHMER,
 ): Promise<unknown> {
   const { von, bis, hinweis: sichtHinweis } = begrenzeZeitraum(zeitraumAus(opts), sicht);
+  const kopf = await marktplatzKopf(supabase, tenant_id, opts);
   const campaign = typeof opts?.campaign_id === "string" && opts.campaign_id.trim() ? opts.campaign_id.trim() : null;
   const limit = Number(opts?.limit) > 0 ? Math.min(Number(opts?.limit), 5000) : 500;
   const adProduct = adProductAus(opts?.ad_product);
 
   const [summenRes, abdeckungRes] = await Promise.all([
-    supabase.rpc("ads_suchbegriffe_summen", { p_tenant: tenant_id, p_von: von, p_bis: bis, p_campaign: campaign, p_limit: limit, p_ad_product: adProduct }),
-    supabase.rpc("ads_tagesreihen_abdeckung", { p_tenant: tenant_id }),
+    supabase.rpc("ads_suchbegriffe_summen", { p_tenant: tenant_id, p_von: von, p_bis: bis, p_campaign: campaign, p_limit: limit, p_ad_product: adProduct, p_marktplatz: kopf.marktplatz }),
+    supabase.rpc("ads_tagesreihen_abdeckung", { p_tenant: tenant_id, p_marktplatz: kopf.marktplatz }),
   ]);
   if (summenRes.error) throw new Error(`ads_suchbegriffe_summen: ${summenRes.error.message}`);
   if (abdeckungRes.error) throw new Error(`ads_tagesreihen_abdeckung: ${abdeckungRes.error.message}`);
@@ -134,6 +136,7 @@ export async function adsSuchbegriffe(
   const abdeckungen = (abdeckungRes.data ?? []) as Abdeckung[];
 
   return {
+    ...kopf,
     zeitraum: { von, bis },
     kampagne: campaign,
     ad_product: adProduct,
@@ -161,15 +164,16 @@ export async function adsSuchbegriffe(
 export async function adsPlatzierungen(
   supabase: any,
   tenant_id: string,
-  opts?: { tage?: unknown; von?: unknown; bis?: unknown; ad_product?: unknown },
+  opts?: { tage?: unknown; von?: unknown; bis?: unknown; ad_product?: unknown; marktplatz?: unknown },
   sicht: Sicht = TEILNEHMER,
 ): Promise<unknown> {
   const { von, bis, hinweis: sichtHinweis } = begrenzeZeitraum(zeitraumAus(opts), sicht);
+  const kopf = await marktplatzKopf(supabase, tenant_id, opts);
   const adProduct = adProductAus(opts?.ad_product);
 
   const [summenRes, abdeckungRes] = await Promise.all([
-    supabase.rpc("ads_placement_summen", { p_tenant: tenant_id, p_von: von, p_bis: bis, p_ad_product: adProduct }),
-    supabase.rpc("ads_tagesreihen_abdeckung", { p_tenant: tenant_id }),
+    supabase.rpc("ads_placement_summen", { p_tenant: tenant_id, p_von: von, p_bis: bis, p_ad_product: adProduct, p_marktplatz: kopf.marktplatz }),
+    supabase.rpc("ads_tagesreihen_abdeckung", { p_tenant: tenant_id, p_marktplatz: kopf.marktplatz }),
   ]);
   if (summenRes.error) throw new Error(`ads_placement_summen: ${summenRes.error.message}`);
   if (abdeckungRes.error) throw new Error(`ads_tagesreihen_abdeckung: ${abdeckungRes.error.message}`);
@@ -199,6 +203,7 @@ export async function adsPlatzierungen(
   const abdeckungen = (abdeckungRes.data ?? []) as Abdeckung[];
 
   return {
+    ...kopf,
     zeitraum: { von, bis },
     ad_product: adProduct,
     is_provisional: istVorlaeufig(bis),
@@ -225,17 +230,18 @@ export async function adsPlatzierungen(
 export async function adsZiele(
   supabase: any,
   tenant_id: string,
-  opts?: { tage?: unknown; von?: unknown; bis?: unknown; campaign_id?: unknown; limit?: unknown; ad_product?: unknown },
+  opts?: { tage?: unknown; von?: unknown; bis?: unknown; campaign_id?: unknown; limit?: unknown; ad_product?: unknown; marktplatz?: unknown },
   sicht: Sicht = TEILNEHMER,
 ): Promise<unknown> {
   const { von, bis, hinweis: sichtHinweis } = begrenzeZeitraum(zeitraumAus(opts), sicht);
+  const kopf = await marktplatzKopf(supabase, tenant_id, opts);
   const campaign = typeof opts?.campaign_id === "string" && opts.campaign_id.trim() ? opts.campaign_id.trim() : null;
   const limit = Number(opts?.limit) > 0 ? Math.min(Number(opts?.limit), 5000) : 500;
   const adProduct = adProductAus(opts?.ad_product);
 
   const [summenRes, abdeckungRes] = await Promise.all([
-    supabase.rpc("ads_ziele_summen", { p_tenant: tenant_id, p_von: von, p_bis: bis, p_campaign: campaign, p_limit: limit, p_ad_product: adProduct }),
-    supabase.rpc("ads_tagesreihen_abdeckung", { p_tenant: tenant_id }),
+    supabase.rpc("ads_ziele_summen", { p_tenant: tenant_id, p_von: von, p_bis: bis, p_campaign: campaign, p_limit: limit, p_ad_product: adProduct, p_marktplatz: kopf.marktplatz }),
+    supabase.rpc("ads_tagesreihen_abdeckung", { p_tenant: tenant_id, p_marktplatz: kopf.marktplatz }),
   ]);
   if (summenRes.error) throw new Error(`ads_ziele_summen: ${summenRes.error.message}`);
   if (abdeckungRes.error) throw new Error(`ads_tagesreihen_abdeckung: ${abdeckungRes.error.message}`);
@@ -263,6 +269,7 @@ export async function adsZiele(
   const abdeckungen = (abdeckungRes.data ?? []) as Abdeckung[];
 
   return {
+    ...kopf,
     zeitraum: { von, bis },
     kampagne: campaign,
     ad_product: adProduct,

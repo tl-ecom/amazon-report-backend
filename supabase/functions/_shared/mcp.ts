@@ -84,6 +84,24 @@ const ZEITRAUM_SCHEMA = {
   additionalProperties: false,
 };
 
+// Wie ZEITRAUM_SCHEMA, aber mit Marktplatz. Nur fuer Ads-Leser: die anderen
+// Werkzeuge auf ZEITRAUM_SCHEMA kennen keine Werbe-Profile.
+const ADS_ZEITRAUM_SCHEMA = {
+  type: "object",
+  properties: {
+    ...ZEITRAUM_SCHEMA.properties,
+    marktplatz: {
+      type: "string",
+      description:
+        "Marktplatz-ID, z. B. A13V1IB3VIYZZH fuer Frankreich. Ohne Angabe der Marktplatz der " +
+        "SP-Verbindung. Ein Werbe-Profil gilt je Marktplatz — Zahlen verschiedener Laender " +
+        "werden nie gemischt. Welche freigeschaltet sind, steht in jeder Antwort unter " +
+        "verfuegbare_marktplaetze.",
+    },
+  },
+  additionalProperties: false,
+};
+
 const TOOLS: ToolDef[] = [
   {
     name: "get_sales_overview",
@@ -211,7 +229,7 @@ const TOOLS: ToolDef[] = [
       "nehmen. Endet der Zeitraum in den letzten ~72h, ist er vorläufig (is_provisional). " +
       "Reichen die Daten nicht über den ganzen Zeitraum, steht das in `warnungen` — " +
       "fehlende Tage sind NICHT als 0 enthalten.",
-    inputSchema: ZEITRAUM_SCHEMA,
+    inputSchema: ADS_ZEITRAUM_SCHEMA,
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_verlauf", args) : pulseNichtVerfuegbar()),
   },
   {
@@ -228,6 +246,7 @@ const TOOLS: ToolDef[] = [
       type: "object",
       properties: {
         campaign_id: { type: "string", description: "Kampagnen-ID — dann mit allen Zielen und Negatives dieser Kampagne." },
+        marktplatz: { type: "string", description: "Marktplatz-ID, z. B. A13V1IB3VIYZZH fuer Frankreich. Ohne Angabe der Marktplatz der SP-Verbindung. Ein Werbe-Profil gilt je Marktplatz — Zahlen verschiedener Laender werden nie gemischt. Welche freigeschaltet sind, steht in jeder Antwort unter verfuegbare_marktplaetze." },
         nur_aktive: { type: "boolean", description: "Default true: archivierte Kampagnen ausblenden." },
       },
       additionalProperties: false,
@@ -249,6 +268,7 @@ const TOOLS: ToolDef[] = [
         von: { type: "string", description: "Startdatum 'YYYY-MM-DD' (inklusiv). Default: vor 30 Tagen." },
         bis: { type: "string", description: "Enddatum 'YYYY-MM-DD' (inklusiv). Default: heute." },
         campaign_id: { type: "string", description: "Nur Suchbegriffe dieser Kampagne." },
+        marktplatz: { type: "string", description: "Marktplatz-ID, z. B. A13V1IB3VIYZZH fuer Frankreich. Ohne Angabe der Marktplatz der SP-Verbindung. Ein Werbe-Profil gilt je Marktplatz — Zahlen verschiedener Laender werden nie gemischt. Welche freigeschaltet sind, steht in jeder Antwort unter verfuegbare_marktplaetze." },
         limit: { type: "number", description: "Max. Einträge (nach Spend), Default 500, höchstens 5000." },
         ad_product: { type: "string", enum: ["SP", "SB", "SD"], description: "Nur ein Anzeigentyp: SP (Sponsored Products, 7-Tage-Attribution), SB (Brands, 14 Tage) oder SD (Display, 14 Tage). Ohne Angabe alle." },
       },
@@ -271,6 +291,7 @@ const TOOLS: ToolDef[] = [
         von: { type: "string", description: "Startdatum 'YYYY-MM-DD' (inklusiv). Default: vor 30 Tagen." },
         bis: { type: "string", description: "Enddatum 'YYYY-MM-DD' (inklusiv). Default: heute." },
         ad_product: { type: "string", enum: ["SP", "SB", "SD"], description: "Nur ein Anzeigentyp: SP (Sponsored Products, 7-Tage-Attribution), SB (Brands, 14 Tage) oder SD (Display, 14 Tage). Ohne Angabe alle." },
+        marktplatz: { type: "string", description: "Marktplatz-ID, z. B. A13V1IB3VIYZZH fuer Frankreich. Ohne Angabe der Marktplatz der SP-Verbindung. Ein Werbe-Profil gilt je Marktplatz — Zahlen verschiedener Laender werden nie gemischt. Welche freigeschaltet sind, steht in jeder Antwort unter verfuegbare_marktplaetze." },
       },
       additionalProperties: false,
     },
@@ -293,6 +314,7 @@ const TOOLS: ToolDef[] = [
         von: { type: "string", description: "Startdatum 'YYYY-MM-DD' (inklusiv). Default: vor 30 Tagen." },
         bis: { type: "string", description: "Enddatum 'YYYY-MM-DD' (inklusiv). Default: heute." },
         campaign_id: { type: "string", description: "Nur Ziele dieser Kampagne." },
+        marktplatz: { type: "string", description: "Marktplatz-ID, z. B. A13V1IB3VIYZZH fuer Frankreich. Ohne Angabe der Marktplatz der SP-Verbindung. Ein Werbe-Profil gilt je Marktplatz — Zahlen verschiedener Laender werden nie gemischt. Welche freigeschaltet sind, steht in jeder Antwort unter verfuegbare_marktplaetze." },
         limit: { type: "number", description: "Max. Einträge (nach Spend), Default 500, höchstens 5000." },
         ad_product: { type: "string", enum: ["SP", "SB", "SD"], description: "Nur ein Anzeigentyp: SP (Sponsored Products, 7-Tage-Attribution), SB (Brands, 14 Tage) oder SD (Display, 14 Tage). Ohne Angabe alle." },
       },

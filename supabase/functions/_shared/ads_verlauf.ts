@@ -17,6 +17,7 @@ import {
   kennzahlenAusSummen,
   VOLATIL_TAGE,
 } from "./ads.ts";
+import { marktplatzKopf } from "./ads_marktplatz.ts";
 
 interface SummenRow {
   ebene: string;
@@ -115,15 +116,17 @@ export interface AdsVerlaufTag extends AdsKennzahlen {
 export async function adsVerlauf(
   supabase: any,
   tenant_id: string,
-  opts?: { tage?: unknown; von?: unknown; bis?: unknown },
+  opts?: { tage?: unknown; von?: unknown; bis?: unknown; marktplatz?: unknown },
   sicht: Sicht = TEILNEHMER,
 ): Promise<unknown> {
   const { von, bis, hinweis: sichtHinweis } = begrenzeZeitraum(zeitraumAus(opts), sicht);
+  const kopf = await marktplatzKopf(supabase, tenant_id, opts);
 
   const { data, error } = await supabase.rpc("ads_summen", {
     p_tenant: tenant_id,
     p_von: von,
     p_bis: bis,
+    p_marktplatz: kopf.marktplatz,
   });
   if (error) throw new Error(`ads_summen: ${error.message}`);
 
@@ -172,6 +175,7 @@ export async function adsVerlauf(
   }
 
   return {
+    ...kopf,
     zeitraum: { von, bis },
     tage_mit_daten: proTag.length,
     is_provisional: vorlaeufig,
