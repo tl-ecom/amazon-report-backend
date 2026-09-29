@@ -1,0 +1,253 @@
+<title>Gebotsregeln Vaneja FR</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<div id="app"></div>
+<script id="app-script">
+(function () {
+  const CSS = `
+  :root {
+    color-scheme: light;
+    --paper:#f6f7f5; --surface:#fefefe; --ink:#17201b; --ink-soft:#55615a;
+    --ink-faint:#8a948d; --line:#dde1dc; --line-soft:#e9ece8;
+    --accent:#1d6b4c; --accent-soft:#e4efe8; --warn:#9d3d26; --warn-soft:#f6e7e2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --paper:#121714; --surface:#1a211d; --ink:#e8ece9; --ink-soft:#a3ada7;
+      --ink-faint:#737d77; --line:#2b3531; --line-soft:#222b27;
+      --accent:#63b48d; --accent-soft:#1d2f27; --warn:#d98a71; --warn-soft:#2e201b;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --paper:#121714; --surface:#1a211d; --ink:#e8ece9; --ink-soft:#a3ada7;
+    --ink-faint:#737d77; --line:#2b3531; --line-soft:#222b27;
+    --accent:#63b48d; --accent-soft:#1d2f27; --warn:#d98a71; --warn-soft:#2e201b;
+  }
+  body { background:var(--paper); color:var(--ink); font-family:"IBM Plex Sans",system-ui,sans-serif; font-size:15px; line-height:1.55; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:44rem; margin:0 auto; padding-inline:20px; padding-block:40px 64px; display:flex; flex-direction:column; gap:32px; }
+  h1 { font-family:Newsreader,Georgia,serif; font-weight:600; font-size:clamp(1.7rem,4.5vw,2.3rem); line-height:1.15; letter-spacing:-0.012em; margin:0; text-wrap:balance; }
+  h2 { font-family:Newsreader,Georgia,serif; font-weight:600; font-size:1.15rem; margin:0; line-height:1.3; }
+  p { margin:0; }
+  .eyebrow { font-family:"IBM Plex Mono",monospace; font-size:0.68rem; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-faint); }
+  .mono { font-family:"IBM Plex Mono",monospace; font-size:0.85em; }
+  header .sub { color:var(--ink-soft); margin-top:10px; max-width:36rem; }
+
+  .bar { display:flex; flex-direction:column; gap:8px; }
+  .bar .row { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+  .bar .count { font-family:Newsreader,Georgia,serif; font-size:1.6rem; line-height:1; font-variant-numeric:tabular-nums; }
+  .bar .of { color:var(--ink-faint); font-size:0.8rem; font-family:"IBM Plex Mono",monospace; }
+  .track { height:6px; background:var(--line); border-radius:3px; overflow:hidden; }
+  .fill { height:100%; background:var(--accent); border-radius:3px; transition:width .25s ease; }
+  @media (prefers-reduced-motion: reduce) { .fill { transition:none; } }
+
+  .sec { display:flex; flex-direction:column; gap:12px; }
+  .sec > .hd { display:flex; flex-direction:column; gap:4px; border-top:2px solid var(--ink); padding-top:10px; }
+  .list { display:flex; flex-direction:column; gap:0; }
+
+  .item { display:grid; grid-template-columns:auto 1fr; gap:12px; align-items:start; padding:13px 0; border-bottom:1px solid var(--line-soft); }
+  .item:last-child { border-bottom:none; }
+  .item input[type=checkbox] { width:18px; height:18px; margin:2px 0 0; accent-color:var(--accent); cursor:pointer; flex:none; }
+  .item input[disabled] { cursor:not-allowed; opacity:.5; }
+  .item label { cursor:pointer; display:flex; flex-direction:column; gap:3px; }
+  .item input[disabled] + label { cursor:default; }
+  .item .t { font-weight:500; }
+  .item .d { font-size:0.85rem; color:var(--ink-soft); }
+  .item.done .t, .item.done .d { color:var(--ink-faint); }
+  .item.done .t { text-decoration:line-through; text-decoration-thickness:1px; }
+  .vals { font-family:"IBM Plex Mono",monospace; font-size:0.82rem; color:var(--accent); font-variant-numeric:tabular-nums; }
+
+  .note { background:var(--warn-soft); border-left:3px solid var(--warn); padding:12px 14px; font-size:0.87rem; color:var(--ink-soft); display:flex; flex-direction:column; gap:6px; }
+  .note strong { color:var(--ink); }
+  .status { font-family:"IBM Plex Mono",monospace; font-size:0.72rem; color:var(--ink-faint); min-height:1.2em; }
+  footer { border-top:1px solid var(--line); padding-top:14px; font-size:0.78rem; color:var(--ink-faint); display:flex; flex-direction:column; gap:5px; }
+  a { color:var(--accent); }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  @media (max-width:520px) { .item { gap:10px; } }
+  `;
+
+  const SECTIONS = [
+    { id: "sofort", title: "Sofort erledigen", items: [
+      { id: "a1", t: "Ziel-ACoS von 30 % auf 24 % senken", v: "alle acht Kampagnen", d: "Die Regeln sind bereits allen Kampagnen zugewiesen, nur die Automatik ist aus. Wenn jemand den Schalter umlegt — versehentlich oder absichtlich — steuert sie auf 30 % bei 26,8 % Break-even, also auf Verlust. Fünf Minuten Aufwand, entschärft eine Zeitbombe." },
+      { id: "a2", t: "Schreibrechte auf dem FR-Werbekonto klären", d: "Die Steuerung liegt bei TL. Behält Uwe Schreibrechte, ist das Änderungsprotokoll die einzige Kontrolle. Die Sitzung vom 16.09. zwischen 18:03 und 18:47 hat das vorige Messfenster zerstört: vier Kampagnen pausiert, fünf archiviert, 22 Gebote gesetzt." },
+    ]},
+    { id: "aus", title: "Bid Automation bleibt aus", items: [
+      { id: "b1", t: "Automatik auf allen Kampagnen ausgeschaltet lassen", v: "Entscheidung vom 25.09.", d: "Eine Ziel-ACoS-Regel senkt Gebote, wenn der ACoS über dem Ziel liegt. Bei 59,97 € gegen ein Marktband von 21 bis 42 € ist der ACoS strukturell hoch — die Ursache liegt im Preis, nicht in den Geboten. Die Regel würde alles nach unten drücken, bis nichts mehr ausgespielt wird, und die Verengung vom 25.09. binnen einer Woche zurückdrehen: Die Design-Terms haben null Orders, weil sie null Klicks hatten, und eine Regel unterscheidet nicht zwischen bewusster Wette und Verlierer. Dazu fehlt das Signal — bei 13 Orders im Monat erreichen nach der Verengung nur drei bis fünf Targets überhaupt 15 Klicks in 30 Tagen." },
+    ]},
+    { id: "leit", title: "Leitplanken für die manuelle Steuerung", items: [
+      { id: "c1", t: "FR |Etagere Schwarz  SP Exact Performance", v: "Min 0,35 €  ·  Max 0,90 €", d: "CVR 7,50 %, Break-even-CPC rechnerisch 1,21 €. Die 0,90 € lassen Raum für die Design-Terms bei 0,85 € und bleiben darunter. Budget 14 € am Tag." },
+      { id: "c2", t: "SP auto Etagere Kermaik", v: "Min 0,15 €  ·  Max 0,30 €", d: "CVR 5,08 %, rechnerisch 0,82 €. Bewusst gekappt: bei 0,20 € lag die CVR bei 7 %, bei 0,35 € nur noch bei 0,76 %. Höhere Gebote kaufen dort schlechtere Suchanfragen." },
+      { id: "c3", t: "SP asin Etagere Keramik", v: "Min 0,10 €  ·  Max 0,20 €", d: "CVR 1,20 %, Break-even-CPC 0,19 €. Diese Kampagne hat sich nie getragen. Budget 2 €." },
+      { id: "c4", t: "Phase 1 und Auto Research nicht anheben", v: "bei 0,25 € belassen", d: "Zusammen unter 50 Klicks und null Orders. Keine Datenbasis für irgendeine Anhebung." },
+    ]},
+    { id: "stand", title: "Ist-Stand seit dem 25.09. — einmal gegenprüfen", items: [
+      { id: "d1", t: "Design- und Material-Terms auf 0,65 bis 0,85 €", d: "corbeille à fruit design, corbeille fruits design und corbeille a fruit bois bei 0,85 €. corbeille a fruit noir et bois und présentoir a fruit bei 0,75 €. plateau a fruit 0,70 €. plateau a etage, etagere fruits und corbeille a fruit a etage bei 0,65 €. corbeille à fruits 3 étages bei 0,60 €." },
+      { id: "d2", t: "Generische Terms pausiert", d: "panier fruit und panier fruit etage in Exact Performance, Loose match in der Auto-Kampagne. Zusammen 34 Klicks ohne eine Order." },
+      { id: "d3", t: "Kontrollgröße unangetastet", v: "panier a fruits 3 etages bei 0,50 €", d: "Der einzige bewiesene Konverter des Kontos, 3 Orders auf 24 Klicks. Bei 0,75 € lieferte er zehn Tage lang nichts. Bleibt bei 0,50 €, um die Verengung daran messen zu können." },
+      { id: "d4", t: "Weiß läuft wieder", v: "0,50 € / 0,30 €  ·  Budget 6 €", d: "Am 16.09. pausiert, am 25.09. reaktiviert. 338 Einheiten im Lager, kein zweiter Verkäufer auf dem Listing." },
+    ]},
+    { id: "kontrolle", title: "Kontrolle nach sieben Tagen", items: [
+      { id: "e1", t: "Design-Cluster: Abbruchkriterium", v: "20 Klicks ohne Order → zurück auf 0,55 €", d: "Bei 0,85 € und 14 € Tagesbudget ist das nach zwei bis drei Tagen sichtbar. Kommt eine Order, war die Verengung richtig." },
+      { id: "e2", t: "Füllt Exact Performance ihre 14 €?", d: "Wenn nicht, reichen auch 0,85 € nicht, um in den relevanten Auktionen mitzubieten. Dann ist nicht das Gebot das Problem, sondern die Relevanz des Listings." },
+      { id: "e3", t: "Weiß: kommen Klicks bei 0,50 €?", d: "Zwanzig Klicks ohne Order heißt: zurück auf 0,30 € und das Hauptbild prüfen." },
+      { id: "e4", t: "Änderungsprotokoll durchsehen", d: "Alles ohne Quelle „Changed by MCP\" kam von außen. Erscheint dort etwas, ist das Messfenster wieder verunreinigt und die Bewertung verschiebt sich." },
+    ]},
+    { id: "spaeter", title: "Wiedervorlage", items: [
+      { id: "f1", t: "Automatik erneut prüfen, wenn die Preisfrage entschieden ist", d: "Sinnvoll wird sie, sobald es auf Target-Ebene genug Orders gibt, an denen eine Regel sich orientieren kann. Praktisch heißt das: nach der Entscheidung zur FR-Einlagerung. Bei 44,99 € mit lokalem Lager und 60 Einheiten im Monat gäbe es dieses Signal — heute gibt es das nicht." },
+    ]},
+  ];
+
+  const TOTAL = SECTIONS.reduce((n, s) => n + s.items.length, 0);
+
+  function readState() {
+    const el = document.getElementById("state");
+    if (!el) return { v: 1, done: {} };
+    try {
+      const s = JSON.parse(el.textContent || "{}");
+      return { v: 1, done: (s && s.done) || {} };
+    } catch (e) { return { v: 1, done: {} }; }
+  }
+
+  let state = readState();
+  let canWrite = false;
+  let artifact = null;
+  let saveTimer = null;
+  let pending = false;
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  function bodyHTML() {
+    const done = SECTIONS.reduce(function (n, s) {
+      return n + s.items.filter(function (i) { return state.done[i.id]; }).length;
+    }, 0);
+    const pct = TOTAL ? Math.round((done / TOTAL) * 100) : 0;
+
+    let html = '<div class="wrap">';
+    html += '<header>';
+    html += '<p class="eyebrow">Helium 10 Adtomic · Profil Vaneja [FR] 1012975072464757</p>';
+    html += '<h1>Leitplanken statt Automatik</h1>';
+    html += '<p class="sub">Grenzwerte für die manuelle Steuerung des FR-Werbekontos. Die Bid Automation bleibt bewusst aus — die Begründung steht unten im zweiten Block.</p>';
+    html += '<p class="sub">Stand 25.09.2026: sechs Kampagnen aktiv, zwei pausiert, sechs archiviert. Steuerung liegt bei TL.</p>';
+    html += '</header>';
+
+    html += '<div class="bar"><div class="row"><span class="count">' + done + ' <span class="of">von ' + TOTAL + '</span></span><span class="of">' + pct + ' %</span></div>';
+    html += '<div class="track"><div class="fill" style="width:' + pct + '%"></div></div>';
+    html += '<p class="status" id="status"></p></div>';
+
+    html += '<div class="note"><p><strong>Steuergröße ist der Break-even-CPC, nicht der ACoS.</strong></p>';
+    html += '<p class="mono">Break-even-CPC = DB vor Werbung × CVR = 16,07 € × CVR</p>';
+    html += '<p>Konto-CVR: 13 Orders auf 635 Klicks = 2,05 % → 0,33 €. Der tatsächliche CPC lag bei 0,49 €. Darin steckt der gesamte Verlust des Ads-Blocks.</p>';
+    html += '<p>Die 2,05 % sind keine Optimierungsgröße. Bei 59,97 € gegen ein Marktband von 21 bis 42 € sind sie die Antwort des Marktes auf den Preis. Deshalb Leitplanken statt Regel.</p></div>';
+
+    SECTIONS.forEach(function (sec) {
+      html += '<section class="sec"><div class="hd"><p class="eyebrow">' + esc(sec.title) + '</p></div><div class="list">';
+      sec.items.forEach(function (it) {
+        const isDone = !!state.done[it.id];
+        html += '<div class="item' + (isDone ? " done" : "") + '">';
+        html += '<input type="checkbox" id="' + esc(it.id) + '"' + (isDone ? " checked" : "") + (canWrite ? "" : " disabled") + '>';
+        html += '<label for="' + esc(it.id) + '">';
+        html += '<span class="t">' + esc(it.t) + '</span>';
+        if (it.v) html += '<span class="vals">' + esc(it.v) + '</span>';
+        html += '<span class="d">' + esc(it.d) + '</span>';
+        html += '</label></div>';
+      });
+      html += '</div></section>';
+    });
+
+    html += '<footer><p>Grundlage: Helium 10 Ads, Zeitraum 15.08.–13.09.2026 als Basis, Rollback vom 25.09.2026 berücksichtigt.</p>';
+    html += '<p>Die Deckungsbeitragsrechnung stützt sich auf 16,07 € vor Werbung bei EFN-Versand (FBA 14,36 €), Break-even-ACoS 26,8 %.</p></footer>';
+    html += '</div>';
+    return html;
+  }
+
+  function fullDoc() {
+    const script = document.getElementById("app-script");
+    const code = script ? script.textContent : "";
+    const openTag = "<scr" + "ipt";
+    const closeTag = "</scr" + "ipt>";
+    return "<!doctype html>\n<html lang=\"de\">\n<head>\n" +
+      "<meta charset=\"utf-8\">\n" +
+      "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">\n" +
+      "<title>Gebotsregeln Vaneja FR</title>\n" +
+      "<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap\">\n" +
+      "<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}" + CSS + "</style>\n" +
+      "</head>\n<body>\n" +
+      "<div id=\"app\">" + bodyHTML() + "</div>\n" +
+      openTag + " type=\"application/json\" id=\"state\">" + JSON.stringify(state) + closeTag + "\n" +
+      openTag + " id=\"app-script\">" + code + closeTag + "\n" +
+      "</body>\n</html>";
+  }
+
+  function setStatus(msg) {
+    const el = document.getElementById("status");
+    if (el) el.textContent = msg;
+  }
+
+  function render() {
+    document.getElementById("app").innerHTML = bodyHTML();
+    bind();
+    if (!canWrite) setStatus("Nur-Lese-Ansicht — zum Abhaken werden Schreibrechte auf diese Seite gebraucht.");
+  }
+
+  function bind() {
+    document.querySelectorAll('.item input[type=checkbox]').forEach(function (box) {
+      box.addEventListener("change", function () {
+        if (!canWrite) return;
+        if (box.checked) state.done[box.id] = true; else delete state.done[box.id];
+        const app = document.getElementById("app");
+        const y = window.scrollY;
+        app.innerHTML = bodyHTML();
+        bind();
+        window.scrollTo(0, y);
+        queueSave();
+      });
+    });
+  }
+
+  function queueSave() {
+    pending = true;
+    setStatus("Wird gespeichert …");
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(save, 700);
+  }
+
+  function save() {
+    if (!artifact || !pending) return;
+    pending = false;
+    artifact.publish(fullDoc()).then(function () {
+      setStatus("Gespeichert · " + new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }));
+    }).catch(function (err) {
+      const code = err && err.code;
+      if (code === "conflict") {
+        setStatus("Jemand anderes hat gerade gespeichert — die Seite lädt den neuen Stand.");
+      } else {
+        pending = true;
+        setStatus("Nicht gespeichert. Erneut anklicken zum Wiederholen.");
+      }
+    });
+  }
+
+  function boot() {
+    const style = document.createElement("style");
+    style.textContent = CSS;
+    document.head.appendChild(style);
+    render();
+    if (window.claude && window.claude.use) {
+      window.claude.use("artifact").then(function (a) {
+        artifact = a;
+        canWrite = !!a;
+        render();
+        if (!a) setStatus("Nur-Lese-Ansicht — zum Abhaken werden Schreibrechte auf diese Seite gebraucht.");
+        else setStatus("");
+      }).catch(function () { render(); });
+    }
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
+})();
+</script>

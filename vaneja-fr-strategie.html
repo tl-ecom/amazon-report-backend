@@ -1,0 +1,598 @@
+<title>VANEJA Étagère FR</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    color-scheme: light;
+    --paper: #f6f7f5;
+    --surface: #fefefe;
+    --ink: #17201b;
+    --ink-soft: #55615a;
+    --ink-faint: #8a948d;
+    --line: #dde1dc;
+    --line-soft: #e9ece8;
+    --accent: #1d6b4c;
+    --accent-soft: #e4efe8;
+    --loss: #9d3d26;
+    --loss-soft: #f6e7e2;
+    --gain: #1d6b4c;
+    --hold: #7a6a2f;
+    --hold-soft: #f2eddc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --paper: #121714;
+      --surface: #1a211d;
+      --ink: #e8ece9;
+      --ink-soft: #a3ada7;
+      --ink-faint: #737d77;
+      --line: #2b3531;
+      --line-soft: #222b27;
+      --accent: #63b48d;
+      --accent-soft: #1d2f27;
+      --loss: #d98a71;
+      --loss-soft: #2e201b;
+      --gain: #63b48d;
+      --hold: #c4ad63;
+      --hold-soft: #2a2519;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --paper: #121714;
+    --surface: #1a211d;
+    --ink: #e8ece9;
+    --ink-soft: #a3ada7;
+    --ink-faint: #737d77;
+    --line: #2b3531;
+    --line-soft: #222b27;
+    --accent: #63b48d;
+    --accent-soft: #1d2f27;
+    --loss: #d98a71;
+    --loss-soft: #2e201b;
+    --gain: #63b48d;
+    --hold: #c4ad63;
+    --hold-soft: #2a2519;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 50rem;
+    margin: 0 auto;
+    padding-inline: 20px;
+    padding-block: 48px 72px;
+    display: flex;
+    flex-direction: column;
+    gap: 44px;
+  }
+  h1, h2, h3 { font-family: Newsreader, Georgia, serif; font-weight: 600; text-wrap: balance; margin: 0; }
+  h1 { font-size: clamp(2rem, 5vw, 2.9rem); line-height: 1.1; letter-spacing: -0.015em; }
+  h2 { font-size: 1.45rem; line-height: 1.25; }
+  h3 { font-size: 1.05rem; line-height: 1.3; font-weight: 600; }
+  p { margin: 0; }
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .mono { font-family: "IBM Plex Mono", monospace; font-size: 0.86em; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  header .meta {
+    display: flex; flex-wrap: wrap; gap: 6px 18px;
+    font-family: "IBM Plex Mono", monospace; font-size: 0.75rem;
+    color: var(--ink-faint); margin-top: 14px;
+  }
+  header .lede {
+    font-family: Newsreader, Georgia, serif;
+    font-size: 1.2rem; line-height: 1.5; color: var(--ink-soft);
+    margin-top: 18px; max-width: 40rem;
+  }
+
+  .strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+  .strip > div { background: var(--surface); padding: 16px 18px; display: flex; flex-direction: column; gap: 4px; }
+  .strip .k { font-family: "IBM Plex Mono", monospace; font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); }
+  .strip .v { font-family: Newsreader, Georgia, serif; font-size: 1.7rem; line-height: 1; font-variant-numeric: tabular-nums; }
+  .strip .n { font-size: 0.78rem; color: var(--ink-soft); }
+  .v.loss { color: var(--loss); }
+
+  section { display: flex; flex-direction: column; gap: 18px; }
+  section > .head { display: flex; flex-direction: column; gap: 6px; border-top: 2px solid var(--ink); padding-top: 12px; }
+  .prose { display: flex; flex-direction: column; gap: 14px; max-width: 42rem; color: var(--ink-soft); }
+  .prose strong { color: var(--ink); font-weight: 600; }
+
+  .tbl { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.87rem; }
+  th, td { text-align: left; padding: 9px 12px 9px 0; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  th { font-family: "IBM Plex Mono", monospace; font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); font-weight: 500; border-bottom-color: var(--line); }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; padding-right: 0; }
+  tbody tr:last-child td { border-bottom: none; }
+  .neg { color: var(--loss); }
+  .pos { color: var(--gain); }
+
+  .timeline { display: flex; flex-direction: column; gap: 0; }
+  .ev { display: grid; grid-template-columns: 5.5rem 1fr; gap: 18px; padding: 16px 0; border-bottom: 1px solid var(--line-soft); }
+  .ev:last-child { border-bottom: none; }
+  .ev .when { font-family: "IBM Plex Mono", monospace; font-size: 0.78rem; color: var(--ink-faint); padding-top: 2px; }
+  .ev .what { display: flex; flex-direction: column; gap: 5px; }
+  .ev .what p { color: var(--ink-soft); font-size: 0.9rem; }
+
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .panel { background: var(--surface); border: 1px solid var(--line); padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .panel ul { margin: 0; padding-left: 1.1em; display: flex; flex-direction: column; gap: 8px; font-size: 0.89rem; color: var(--ink-soft); }
+  .panel li::marker { color: var(--ink-faint); }
+
+  .prio { display: flex; flex-direction: column; gap: 0; }
+  .p-row { display: grid; grid-template-columns: 2.2rem 1fr 7rem; gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--line-soft); align-items: start; }
+  .p-row:last-child { border-bottom: none; }
+  .p-num { font-family: Newsreader, Georgia, serif; font-size: 1.5rem; line-height: 1; color: var(--accent); }
+  .p-body { display: flex; flex-direction: column; gap: 6px; }
+  .p-body p { font-size: 0.89rem; color: var(--ink-soft); }
+  .p-when { font-family: "IBM Plex Mono", monospace; font-size: 0.72rem; color: var(--ink-faint); text-align: right; padding-top: 5px; }
+
+  .tag { display: inline-block; font-family: "IBM Plex Mono", monospace; font-size: 0.66rem; letter-spacing: 0.07em; text-transform: uppercase; padding: 2px 7px; border-radius: 2px; }
+  .tag.keep { background: var(--accent-soft); color: var(--accent); }
+  .tag.back { background: var(--loss-soft); color: var(--loss); }
+  .tag.watch { background: var(--hold-soft); color: var(--hold); }
+
+  .callout { border-left: 3px solid var(--accent); padding: 4px 0 4px 18px; display: flex; flex-direction: column; gap: 8px; max-width: 42rem; }
+  .callout p { color: var(--ink-soft); }
+
+  footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.78rem; color: var(--ink-faint); display: flex; flex-direction: column; gap: 6px; }
+
+  @media (max-width: 640px) {
+    .strip { grid-template-columns: 1fr; }
+    .cols { grid-template-columns: 1fr; }
+    .ev { grid-template-columns: 1fr; gap: 6px; }
+    .p-row { grid-template-columns: 1.8rem 1fr; }
+    .p-when { grid-column: 2; text-align: left; padding-top: 0; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">PPC-Mentoring · Uwe · Stand 25.09.2026</p>
+    <h1>VANEJA Étagère, Amazon.fr</h1>
+    <p class="lede">Nach elf Tagen Umbau, einem Rollback und einem Blick auf den Wettbewerb: warum das Werbekonto nicht mehr der Hebel ist, sondern der Preis — und warum der an der Erfüllungsart hängt.</p>
+    <div class="meta">
+      <span>Profil Vaneja [FR] 1012975072464757</span>
+      <span>Schwarz B0FKNKD93K · Weiß B0FKNHNW27</span>
+      <span>Dunkelgrün bis Nachschub außer Betracht</span>
+    </div>
+  </header>
+
+  <div class="strip">
+    <div>
+      <span class="k">Break-even-ACoS</span>
+      <span class="v">26,8 %</span>
+      <span class="n">EFN bestätigt · FBA 14,36 € · DB 16,07 €</span>
+    </div>
+    <div>
+      <span class="k">Ads-Bilanz 10 Tage</span>
+      <span class="v loss">−63,61 €</span>
+      <span class="n">15.–24.09. · 2 Orders auf 95,75 € Spend</span>
+    </div>
+    <div>
+      <span class="k">Preis gegen Markt</span>
+      <span class="v loss">+43 %</span>
+      <span class="n">59,97 € gegen 41,99 € — teuerstes Produkt der Vergleichsgruppe</span>
+    </div>
+  </div>
+
+  <section>
+    <div class="head">
+      <p class="eyebrow">Strategie</p>
+      <h2>Die Diagnose hat sich verschoben</h2>
+    </div>
+    <div class="prose">
+      <p>Der Plan vom 14.09. ging davon aus, dass ein Konto mit 39,9 % ACoS bei 26,8 % Break-even ein Steuerungsproblem hat: zu teure Targets drosseln, Gewinner finanzieren, Streuverluste sperren. Das war richtig beobachtet und hat an den Rändern funktioniert.</p>
+      <p>Die Daten nach dem Umbau sagen etwas anderes über die Mitte. <strong>Der Traffic bricht weg, nicht die Effizienz.</strong> Die Sessions auf Schwarz fielen von 103 auf 24 pro Woche, der Absatz von sechs Einheiten auf null und dann zwei. Das ist keine Gebotshöhe. Das ist Sichtbarkeit.</p>
+      <p>Damit gilt die Kette aus dem Nachtrag zum Audit weiter, nur schärfer: Rang folgt Verkaufsgeschwindigkeit, Geschwindigkeit folgt Relevanz. Im Juni standen zehn Keywords in den Top 20, am 14.09. keines. Werbung kann Geschwindigkeit kaufen — aber bei 26,8 % Break-even und 14,36 € FBA ist die Decke niedrig. Sie kann keine Relevanz herstellen, die im Listing fehlt.</p>
+      <div class="callout">
+        <p><strong>Schwarz und Weiß haben entgegengesetzte Probleme.</strong> Schwarz hat Aufmerksamkeit gehabt und verliert sie — dort hilft nur Relevanz. Weiß hat nie Aufmerksamkeit bekommen, verkauft aber trotzdem: 21 Sessions in zwei Wochen, drei Einheiten, null Werbekosten, kein zweiter Verkäufer auf dem Listing. Dort fehlt schlicht Sichtbarkeit, und die ist billig zu kaufen.</p>
+      </div>
+      <p>Der Wettbewerbsvergleich legt darunter noch eine Ebene frei, und die erklärt beides. <strong>Das Produkt ist das teuerste seiner Kategorie</strong> — 59,97 € gegen eine Vergleichsgruppe zwischen 21 und 42 €. Die CVR von 2,05 % ist damit kein Optimierungsproblem, sondern die Antwort des Marktes auf den Preis. Und der Preis ist keine Entscheidung, sondern eine Folge: Er trägt die EFN-Gebühr von 14,36 €.</p>
+      <div class="callout">
+        <p><strong>Daraus wird eine Schleife.</strong> EFN erzwingt 59,97 € · der Preis drückt CTR und CVR · wenig Geschwindigkeit lässt den Rang verfallen · wenig Absatz lässt die FR-Einlagerung unrentabel erscheinen · also bleibt EFN.</p>
+        <p>Die Schleife ist nicht über Gebote zu durchbrechen und auch nicht über den Preis allein. Der einzige Ansatzpunkt ist die Erfüllungsart.</p>
+      </div>
+      <p>Dunkelgrün bleibt bis zum Nachschub außer Betracht. Die Familie fährt strukturell mit zwei Dritteln Kapazität; das ist Planungsgröße, keine Maßnahme.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <p class="eyebrow">Wettbewerb</p>
+      <h2>Wo das Produkt wirklich steht</h2>
+    </div>
+    <div class="prose">
+      <p>Vergleichsgruppe: dreistöckige Obst-Etageren aus Keramik, Bambus oder Holz auf Amazon.fr, zwölf Produkte. <strong>Median 32,12 €, Spanne 21 bis 42 €.</strong></p>
+    </div>
+    <div class="tbl">
+      <table>
+        <thead>
+          <tr><th>Produkt</th><th>Material</th><th class="n">Preis</th><th class="n">Absatz/Mon.</th><th class="n">Rev</th><th class="n">Rating</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>G.a HOMEFAVOR 3 Niveaux</td><td>Bambus</td><td class="n num">40,99 €</td><td class="n num"><strong>239</strong></td><td class="n num">632</td><td class="n num">4,4</td></tr>
+          <tr><td>Calm Cozy 3 étages</td><td>Holz</td><td class="n num">41,99 €</td><td class="n num">133</td><td class="n num">256</td><td class="n num">4,3</td></tr>
+          <tr><td>Josmimic</td><td>Keramik</td><td class="n num">26,99 €</td><td class="n num">106</td><td class="n num">143</td><td class="n num">4,7</td></tr>
+          <tr><td>Zencantorous</td><td>Bambus</td><td class="n num">20,99 €</td><td class="n num">91</td><td class="n num">49</td><td class="n num">4,5</td></tr>
+          <tr><td>CALM COZY</td><td>Bambus</td><td class="n num">39,99 €</td><td class="n num">89</td><td class="n num">578</td><td class="n num">4,4</td></tr>
+          <tr><td>VINATO</td><td>Holz / Metall</td><td class="n num">31,34 €</td><td class="n num">60</td><td class="n num">97</td><td class="n num">4,6</td></tr>
+          <tr><td>Gaethra</td><td>Keramik</td><td class="n num">32,89 €</td><td class="n num">48</td><td class="n num">43</td><td class="n num">4,7</td></tr>
+          <tr><td>Dreamhigh 3 Etagen</td><td>Keramik</td><td class="n num">33,99 €</td><td class="n num">8</td><td class="n num">811</td><td class="n num">4,2</td></tr>
+          <tr><td><strong>VANEJA Schwarz</strong></td><td>Keramik + Bambus</td><td class="n num neg"><strong>59,97 €</strong></td><td class="n num neg"><strong>18</strong></td><td class="n num">203</td><td class="n num">4,5</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="prose">
+      <p>Zwei Dinge fallen auf. Erstens: <strong>Über 42 € verkauft in dieser Kategorie niemand nennenswert.</strong> VANEJA steht außerhalb der Verteilung, nicht an ihrem oberen Rand. Zweitens: Die Bestseller sind Bambus und Holz bei 40 bis 42 €, nicht die günstige Keramik bei 27 €. <strong>Die Preisklasse 40 bis 42 € ist da, wo Volumen entsteht</strong> — unabhängig vom Material. Das spricht gegen einen Kampf um die 27-€-Keramik und für eine Annäherung an 42 €.</p>
+      <p>Die Bewertung ist kein Problem: 4,5 bei 203 Rezensionen liegt im Feld. Der Abstand ist der Preis, nicht die Qualität.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <p class="eyebrow">Preis</p>
+      <h2>Was bei welchem Preis übrig bleibt</h2>
+    </div>
+    <div class="prose">
+      <p>Deckungsbeitrag je Stück und der daraus folgende Break-even-ACoS, gerechnet auf Nettopreis abzüglich Gebühren und 8,69 € Einkauf.</p>
+    </div>
+    <div class="tbl">
+      <table>
+        <thead>
+          <tr>
+            <th>VK brutto</th>
+            <th class="n">DB bei EFN</th>
+            <th class="n">BE-ACoS</th>
+            <th class="n">DB mit FR-Lager</th>
+            <th class="n">BE-ACoS</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>59,97 € heute</strong></td><td class="n num">16,09 €</td><td class="n num"><strong>26,8 %</strong></td><td class="n num">23,26 €</td><td class="n num">38,8 %</td></tr>
+          <tr><td>54,99 €</td><td class="n num">11,94 €</td><td class="n num">21,7 %</td><td class="n num">19,11 €</td><td class="n num">34,7 %</td></tr>
+          <tr><td>49,99 €</td><td class="n num neg">7,77 €</td><td class="n num neg">15,5 %</td><td class="n num">14,94 €</td><td class="n num">29,9 %</td></tr>
+          <tr><td>44,99 €</td><td class="n num neg">3,60 €</td><td class="n num neg">8,0 %</td><td class="n num pos">10,77 €</td><td class="n num pos">23,9 %</td></tr>
+          <tr><td>41,99 € Marktspitze</td><td class="n num neg">1,10 €</td><td class="n num neg">2,6 %</td><td class="n num pos">8,27 €</td><td class="n num">19,7 %</td></tr>
+          <tr><td>39,99 €</td><td class="n num neg">−0,57 €</td><td class="n num neg">negativ</td><td class="n num">6,61 €</td><td class="n num">16,5 %</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout">
+      <p><strong>Unter EFN darf der Preis nicht sinken.</strong> Der Schritt von 59,97 auf 49,99 € kostet 8,32 € Deckungsbeitrag je Stück und drückt den Break-even-ACoS von 26,8 auf 15,5 %. Das Konto läuft heute zwischen 40 und 80 % — bei 15,5 % wäre jede Anzeige defizitär. Man wäre weiterhin das teuerste Angebot der Kategorie und hätte zusätzlich die Werbung verloren, die den Rang zurückkaufen soll.</p>
+    </div>
+    <div class="prose">
+      <p>Mit lokalem Lager kehrt sich das um. Bei 44,99 € blieben 10,77 € Deckungsbeitrag und 23,9 % Break-even-ACoS — nur 7 % über der Marktspitze und mit fast so viel Werbespielraum wie heute. Bei 41,99 € wären es 8,27 € und 19,7 %, genau dort, wo G.a HOMEFAVOR 239 und Calm Cozy 133 Einheiten im Monat verkaufen.</p>
+      <p><strong>Das stellt den Schwellenrechner auf den Kopf.</strong> Er rechnete mit konstanten 30 Einheiten und fragte, ob 215 € Gebührenersparnis die 250 € Zusatzkosten decken — knapp nein. Aber er hielt den Preis fest. Der Zweck der Einlagerung ist nicht, 7,17 € Marge einzusammeln, sondern einen Preis zu ermöglichen, bei dem überhaupt Volumen entsteht. Bei 44,99 € und 60 Einheiten wären es 646 € Deckungsbeitrag im Monat gegen heute 289 € — und 60 Einheiten reißen die Schwelle von 34,9 mühelos.</p>
+      <p>Das ist eine Wette auf Preiselastizität, keine Arithmetik. Dass bei 42 bis 45 € mehr verkauft wird, ist plausibel, aber nicht garantiert. Und die Einlagerung kostet Zeit, Kapital und eine Registrierung.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <p class="eyebrow">Chronologie</p>
+      <h2>Was passiert ist</h2>
+    </div>
+    <div class="timeline">
+      <div class="ev">
+        <span class="when">14.09.</span>
+        <div class="what">
+          <h3>95 Änderungen ausgeführt</h3>
+          <p>Sechs Budgets, zwei Pausierungen, 21 Gebote, sechs neue Exact-Keywords, 58 Negatives. Dazu Top of Search in zwei Kampagnen auf 0 % und <span class="mono">FR |Etagere Schwarz  SP Exact Performance</span> auf SALES_DOWN_ONLY.</p>
+        </div>
+      </div>
+      <div class="ev">
+        <span class="when">16.–17.09.</span>
+        <div class="what">
+          <h3>Fremdeingriff</h3>
+          <p>22 Keywords in <span class="mono">SP kw exact Phase 1 Etagere FR</span> auf glatt 0,45 €, in der Nacht darauf drei Budgets verschoben. Quelle laut Protokoll: Seller Central oder Drittanbieter-Tool — nachweislich nicht Helium 10. Das Messfenster war damit nach zwei Tagen verschmutzt.</p>
+        </div>
+      </div>
+      <div class="ev">
+        <span class="when">25.09.</span>
+        <div class="what">
+          <h3>Analyse und Rollback</h3>
+          <p>27 Änderungen zurückgedreht: die Gebotserhöhungen, die den Spend getrieben haben, der Produktseiten-Modifikator und die 22 fremdgesetzten Keywords. Die Maßnahmen mit belegtem Nutzen blieben stehen.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <p class="eyebrow">Bilanz</p>
+      <h2>Was bleibt, was zurückging</h2>
+    </div>
+    <div class="cols">
+      <div class="panel">
+        <span class="tag keep">Bleibt</span>
+        <ul>
+          <li><strong>Top of Search auf 0 %</strong> in <span class="mono">SP asin</span> und <span class="mono">Exact Performance</span>. Der versteckte +35 %-Modifikator in <span class="mono">SP asin</span> war der teuerste Einzelposten: 60 Klicks, 43,40 €, null Orders.</li>
+          <li><strong>SALES_DOWN_ONLY</strong> in <span class="mono">Exact Performance</span>. Der ToS-CPC liegt jetzt exakt auf dem Basisgebot statt 66 % darüber.</li>
+          <li><strong>A1 und A2 pausiert</strong> — zusammen 61,10 € Monatsspend ohne eine Order.</li>
+          <li><strong>58 Negatives</strong> gegen Kategorie-Traffic, auf Kampagnenebene.</li>
+          <li><strong>C6</strong> <span class="mono">corbeille a fruit 3 etages</span> bei 0,60 € — 1 Order bei 2,67 % ACoS, das beste Target im Zeitraum. Die Kampagne wurde am 16.09. archiviert, der Term müsste neu angelegt werden.</li>
+          <li><strong>Verengung auf Premium-Intent, 25.09.</strong> In <span class="mono">Exact Performance</span> sind die generischen Terms <span class="mono">panier fruit</span> und <span class="mono">panier fruit etage</span> pausiert, ebenso <span class="mono">Loose match</span> in der Auto-Kampagne. Dafür stehen die Design- und Materialbegriffe jetzt auf 0,65 bis 0,85 €: <span class="mono">corbeille à fruit design</span>, <span class="mono">corbeille fruits design</span> und <span class="mono">corbeille a fruit bois</span> bei 0,85 €, <span class="mono">corbeille a fruit noir et bois</span> und <span class="mono">présentoir a fruit</span> bei 0,75 €.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <span class="tag back">Zurückgedreht</span>
+        <ul>
+          <li><strong>Auto-Target <span class="mono">Substitutes</span></strong> 0,35 → 0,20 €. Der Ausreißer: 45,20 € bei 75,4 % ACoS, 47 % des gesamten Kontospends.</li>
+          <li><strong>B1</strong> <span class="mono">panier a fruits 3 etages</span> 0,75 → 0,50 €. Bei 0,50 lieferte es 3 Orders, bei 0,75 keine.</li>
+          <li><strong>Produktseiten-Modifikator</strong> +40 → 0 %. Er hob den CPC von 0,61 auf 0,76 € und die Orders von 3 auf 0.</li>
+          <li><strong>22 Keywords</strong> in <span class="mono">Phase 1</span> zurück auf 0,25 €, Budget 7 → 2 €.</li>
+          <li><strong>Auto-Budget</strong> 12 → 6 €. Eine Discovery-Kampagne war zum Hauptausgabenkanal geworden.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <p class="eyebrow">Zahlen</p>
+      <h2>Vorher und nachher</h2>
+    </div>
+    <div class="tbl">
+      <table>
+        <thead>
+          <tr>
+            <th>Kennzahl</th>
+            <th class="n">15.08.–13.09.<br>auf 10 Tage</th>
+            <th class="n">15.–24.09.<br>10 Tage</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Spend</td><td class="n num">103,76 €</td><td class="n num">95,75 €</td></tr>
+          <tr><td>Ads-Umsatz</td><td class="n num">259,87 €</td><td class="n num">119,94 €</td></tr>
+          <tr><td>Orders</td><td class="n num">4,3</td><td class="n num">2</td></tr>
+          <tr><td>ACoS</td><td class="n num">39,9 %</td><td class="n num neg">79,8 %</td></tr>
+          <tr><td>DB nach Werbung</td><td class="n num neg">−34,16 €</td><td class="n num neg">−63,61 €</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="prose">
+      <p>Spend fast gleich, Umsatz halbiert. Zwei Einschränkungen: zehn Tage sind das untere Ende eines belastbaren Fensters, und der Fremdeingriff vom 16./17.09. hat die Messung verunreinigt. Die Richtung ist trotzdem eindeutig — ein einzelnes Auto-Target mit 47 % Spendanteil bei 75 % ACoS ist kein Rauschen.</p>
+    </div>
+    <div class="tbl">
+      <table>
+        <thead>
+          <tr>
+            <th>Woche ab</th>
+            <th class="n">Einheiten Schwarz</th>
+            <th class="n">Sessions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>24.08.</td><td class="n num">6</td><td class="n num">123</td></tr>
+          <tr><td>31.08.</td><td class="n num">4</td><td class="n num">58</td></tr>
+          <tr><td>07.09.</td><td class="n num">6</td><td class="n num">103</td></tr>
+          <tr><td>14.09.</td><td class="n num neg">0</td><td class="n num neg">0</td></tr>
+          <tr><td>21.09.</td><td class="n num">2</td><td class="n num">24</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="prose">
+      <p><strong>Die Gegenüberstellung der beiden Varianten</strong> über die letzten zwei Wochen ist der eigentliche Befund dieser Auswertung.</p>
+    </div>
+    <div class="tbl">
+      <table>
+        <thead>
+          <tr><th></th><th class="n">Schwarz B0FKNKD93K</th><th class="n">Weiß B0FKNHNW27</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Sessions</td><td class="n num">24</td><td class="n num">21</td></tr>
+          <tr><td>Einheiten</td><td class="n num">2</td><td class="n num pos">3</td></tr>
+          <tr><td>Ads-Spend</td><td class="n num neg">~96 €</td><td class="n num pos">0 €</td></tr>
+          <tr><td>Verkäufer auf dem Listing</td><td class="n num">2</td><td class="n num">1</td></tr>
+          <tr><td>Bestand</td><td class="n num">973</td><td class="n num">338</td></tr>
+          <tr><td>Reichweite</td><td class="n num">17 / 63 Tage</td><td class="n num">113 Tage</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="prose">
+      <p>Weiß verkauft bei einem Fünftel der Aufmerksamkeit mehr Einheiten als Schwarz, ohne einen einzigen bezahlten Klick. Die Zahlen sind klein und tragen keine Prozentrechnung, aber die Richtung ist deutlich genug, um sie zu testen.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <p class="eyebrow">Plan</p>
+      <h2>Was als Nächstes zu tun ist</h2>
+    </div>
+    <div class="prio">
+      <div class="p-row">
+        <span class="p-num">1</span>
+        <div class="p-body">
+          <h3>Kampagnensteuerung übernehmen</h3>
+          <p>Die Steuerung des FR-Werbekontos liegt ab sofort bei TL, nicht mehr bei Uwe. Damit entfällt das Problem, das die letzten zwei Wochen unbrauchbar gemacht hat: Am 16.09. zwischen 18:03 und 18:47 wurden vier Kampagnen pausiert, fünf archiviert und 22 Gebote gesetzt — zwei Tage nach dem Umbau und mitten im Messfenster.</p>
+          <p>Zu klären bleibt nur, ob Uwe Schreibrechte auf dem Werbekonto behält. Wenn ja, bleibt das Änderungsprotokoll die Kontrolle: Alles, was nicht als „Changed by MCP\" oder mit Regel-ID auftaucht, kam von außen.</p>
+        </div>
+        <span class="p-when">erledigt</span>
+      </div>
+      <div class="p-row">
+        <span class="p-num">2</span>
+        <div class="p-body">
+          <h3>Schwarz: Listing-Relevanz</h3>
+          <p>Titel und Backend um <span class="mono">design</span>, <span class="mono">bois</span>, <span class="mono">noir et bois</span>, <span class="mono">plateau</span>, <span class="mono">présentoir</span> ergänzen, dazu <span class="mono">panier fruits et légumes</span> und <span class="mono">plateau a etage</span>. Cerebro zeigt für mehrere dieser Terms eine Title Density von 0 — unbesetztes Feld. Listing ist aktiv, Buy Box ist unsere, der Preis steht bei 59,97 €: es fehlt nichts außer Relevanz. Im Werbekonto ist für Schwarz nichts mehr zu holen.</p>
+        </div>
+        <span class="p-when">diese Woche</span>
+      </div>
+      <div class="p-row">
+        <span class="p-num">3</span>
+        <div class="p-body">
+          <h3>Weiß: Sichtbarkeit kaufen <span class="tag keep">gesetzt 25.09.</span></h3>
+          <p>Die Auto-Kampagne <span class="mono">FR  Etagere Weiß SP Auto Test</span> lief mit Geboten von 0,18 bis 0,30 € gegen einen Konto-CPC von 0,45 bis 0,55 € — 108 Impressions und null Klicks in zehn Tagen. Das Budget war nie die Bremse, das Gebot war es. <span class="mono">Close match</span> und <span class="mono">Substitutes</span> stehen jetzt auf 0,50 €, <span class="mono">Loose match</span> und <span class="mono">Complements</span> auf 0,30 €, Budget unverändert 6 €.</p>
+          <p>338 Einheiten im Lager, 113 Tage Reichweite, kein zweiter Verkäufer. Der billigste Geschwindigkeitstest im Konto. Kommen bei 0,50 € immer noch keine Klicks, liegt es am Hauptbild oder am Preis — auch das wäre ein Ergebnis.</p>
+        </div>
+        <span class="p-when">läuft</span>
+      </div>
+      <div class="p-row">
+        <span class="p-num">4</span>
+        <div class="p-body">
+          <h3>FR-Einlagerung entscheiden <span class="tag watch">neu bewertet</span></h3>
+          <p>Bis heute stand das als vertagt drin, weil der Schwellenrechner bei konstantem Preis und 30 Einheiten knapp negativ herauskam. Mit dem Wettbewerbsvergleich ist das die falsche Frage. Die Einlagerung ist der einzige Punkt, an dem sich die Schleife aus Gebühr, Preis und Rang aufbrechen lässt — sie erlaubt 44,99 € bei 10,77 € Deckungsbeitrag statt 59,97 € bei 16,09 €, und erst dort beginnt der Markt.</p>
+          <p>Zu klären: Registrierungsaufwand und Kosten beim Dienstleister, Kapitalbindung durch geteilten Bestand, EPR-Pflichten in Frankreich. Die Entscheidung gehört dem Steuerberater und Uwe, nicht dieser Auswertung — aber sie steht jetzt vor allem anderen.</p>
+        </div>
+        <span class="p-when">entscheiden</span>
+      </div>
+      <div class="p-row">
+        <span class="p-num">5</span>
+        <div class="p-body">
+          <h3>Preis unter EFN nicht anfassen</h3>
+          <p>Solange aus DE-Bestand geliefert wird, sind 59,97 € nicht zu hoch gegriffen, sondern die Folge der 14,36 € FBA-Gebühr. Jede Senkung frisst Werbespielraum, ohne Wettbewerbsfähigkeit zu erreichen. Der Preis wird erst zum Thema, wenn Punkt 4 entschieden ist.</p>
+        </div>
+        <span class="p-when">laufend</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <p class="eyebrow">Gebotsautomatik</p>
+      <h2>Grenzwerte für die H10-Regeln</h2>
+    </div>
+    <div class="prose">
+      <p>Noch nicht eingerichtet — die Werte sind die Vorgabe zum Anlegen der Regeln in Helium 10. Die Steuergröße ist nicht der ACoS, sondern der Break-even-CPC:</p>
+    </div>
+    <div class="callout">
+      <p class="mono" style="font-size:0.95rem;color:var(--ink);">Break-even-CPC = DB vor Werbung × CVR = 16,07 € × CVR</p>
+      <p>Konto-CVR im Basiszeitraum: 13 Orders auf 635 Klicks = 2,05 %. Das ergibt 0,33 € Break-even-CPC gegen einen tatsächlichen CPC von 0,49 €. Darin steckt der gesamte Verlust des Ads-Blocks.</p>
+    </div>
+    <div class="tbl">
+      <table>
+        <thead>
+          <tr>
+            <th>Kampagne</th>
+            <th class="n">CVR</th>
+            <th class="n">BE-CPC</th>
+            <th class="n">Min</th>
+            <th class="n">Max</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><span class="mono">FR |Etagere Schwarz  SP Exact Performance</span></td><td class="n num">7,50 %</td><td class="n num">1,21 €</td><td class="n num">0,35 €</td><td class="n num"><strong>0,70 €</strong></td></tr>
+          <tr><td><span class="mono">SP auto Etagere Kermaik</span></td><td class="n num">5,08 %</td><td class="n num">0,82 €</td><td class="n num">0,15 €</td><td class="n num"><strong>0,30 €</strong></td></tr>
+          <tr><td><span class="mono">SP kw exact Etagere Keramik</span></td><td class="n num">dünn</td><td class="n num">—</td><td class="n num">0,30 €</td><td class="n num"><strong>0,60 €</strong></td></tr>
+          <tr><td><span class="mono">SP kw phrase Etagere Keramik</span></td><td class="n num">1,75 %</td><td class="n num">0,28 €</td><td class="n num">0,15 €</td><td class="n num"><strong>0,28 €</strong></td></tr>
+          <tr><td><span class="mono">SP asin Etagere Keramik</span></td><td class="n num">1,20 %</td><td class="n num">0,19 €</td><td class="n num">0,10 €</td><td class="n num"><strong>0,20 €</strong></td></tr>
+          <tr><td><span class="mono">SP Kategorie Etagere Keramik</span></td><td class="n num">0,81 %</td><td class="n num">0,13 €</td><td class="n num">0,08 €</td><td class="n num"><strong>0,14 €</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="cols">
+      <div class="panel">
+        <span class="tag watch">Zwei Maxima unter dem Break-even</span>
+        <ul>
+          <li><strong>Exact Performance:</strong> Die 7,5 % stammen aus 40 Klicks und drei Orders — zu dünn für 1,21 €. Bei 0,75 € hat dieselbe Kampagne gerade 22 Klicks ohne Order geliefert.</li>
+          <li><strong>Auto Kermaik:</strong> Bei Gebot 0,20 € lag die CVR bei 7 %, bei 0,35 € fiel sie auf 0,76 %. Höhere Gebote kaufen dort schlechtere Suchanfragen. Der rechnerische Spielraum von 0,82 € existiert in der Praxis nicht.</li>
+          <li><strong>Target-Ausnahme:</strong> <span class="mono">corbeille à fruits</span> (226974887407164) konvertiert mit 3,6 % über dem Kampagnenschnitt. Dort Max <strong>0,58 €</strong> statt 0,28 €, sonst drosselt die Regel das einzige funktionierende Target der Phrase-Kampagne weg.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <span class="tag back">Aus der Automatik raushalten</span>
+        <ul>
+          <li><span class="mono">SP kw exact Phase 1 Etagere FR</span></li>
+          <li><span class="mono">FR Etagere Schwarz SP Auto Research</span></li>
+          <li><span class="mono">FR  Etagere Weiß SP Auto Test</span></li>
+          <li>Zusammen unter 50 Klicks und null Orders. Eine Regel hätte dort nichts zu optimieren, nur Rauschen zu verstärken. Weiß läuft gerade als manueller Test bei 0,50 € — den würde eine Regel sofort kaputtmachen.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="tbl">
+      <table>
+        <thead>
+          <tr><th>Regelparameter</th><th>Vorgabe</th><th>Grund</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Lookback</td><td class="mono">30 Tage</td><td>Bei 13 Orders im Monat liefern 7 oder 14 Tage keine belastbare CVR.</td></tr>
+          <tr><td>Mindestklicks je Target</td><td class="mono">15</td><td>Darunter keine Aktion. Hält die Regel dort still, wo nichts messbar ist.</td></tr>
+          <tr><td>Schrittweite</td><td class="mono">max. 15 %</td><td>Am 14.09. hat eine Erhöhung um 75 % den Spend eines Targets verzwanzigfacht.</td></tr>
+          <tr><td>Frequenz</td><td class="mono">wöchentlich</td><td>Amazon braucht 7 bis 14 Tage pro Änderung. Tägliche Läufe erzeugen Rauschen.</td></tr>
+          <tr><td>Richtung</td><td class="mono">erst nur senken</td><td>Nach vier Wochen bewerten, ob die Regel sinnvoll entscheidet. Erst dann Erhöhungen freischalten.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="prose">
+      <p><strong>Nebeneffekt:</strong> Änderungen der Automatik tragen im Protokoll die Quelle <span class="mono">auto</span> samt Regel-ID — anders als die Eingriffe vom 16./17.09., die ohne Urheber als „Seller Central oder Drittanbieter" auftauchen. Damit lässt sich künftig trennen, wer was gemacht hat.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <p class="eyebrow">Kontrolle</p>
+      <h2>Messfenster ab 25.09.</h2>
+    </div>
+    <div class="prose">
+      <p>Das Konto steht jetzt ungefähr auf dem Stand vom 13.09., plus die Maßnahmen mit belegtem Nutzen. Sieben Tage ohne Eingriff, dann bewerten.</p>
+    </div>
+    <div class="tbl">
+      <table>
+        <thead>
+          <tr><th>Prüfpunkt</th><th>Kriterium</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="mono">SP auto Etagere Kermaik</span></td>
+            <td>Fällt der Spend mit <span class="mono">Substitutes</span> bei 0,20 € zurück Richtung 6 €/Tag? Wenn der ACoS unter 20 % geht, war die Gebotserhöhung das Problem.</td>
+          </tr>
+          <tr>
+            <td><span class="mono">FR |Etagere Schwarz  SP Exact Performance</span></td>
+            <td>Kommen bei B1 auf 0,50 € und ohne Produktseiten-Modifikator wieder Orders? Das ist die Gegenprobe zur Umkehr.</td>
+          </tr>
+          <tr>
+            <td>Top of Search</td>
+            <td>Bleibt der ToS-Spend in beiden Kampagnen bei nahe null? Bisher ja.</td>
+          </tr>
+          <tr>
+            <td><span class="mono">FR  Etagere Weiß SP Auto Test</span></td>
+            <td>Kommen bei 0,50 € endlich Klicks? Ein Klick kostet dann rund 0,50 €, die Kampagne darf 6 € am Tag ausgeben. Bei zwei Orders in sieben Tagen trägt sie sich; bei zwanzig Klicks ohne Order zurück auf 0,30 € und das Hauptbild prüfen.</td>
+          </tr>
+          <tr>
+            <td>Sessions Schwarz</td>
+            <td>Erholen sie sich von 24 in Richtung 60+? Wenn nicht, bestätigt das die Relevanz-These und Priorität 2 wird dringend.</td>
+          </tr>
+          <tr>
+            <td>Änderungsprotokoll</td>
+            <td>Taucht eine Quelle „Seller Central oder Drittanbieter" auf, ist das Fenster erneut verunreinigt und die Bewertung verschiebt sich.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <p class="eyebrow">Offen</p>
+      <h2>Nicht abgeschlossen</h2>
+    </div>
+    <div class="prose">
+      <ul style="margin:0;padding-left:1.1em;display:flex;flex-direction:column;gap:9px;">
+        <li>Platzierungs-Modifikatoren der übrigen sieben FR-Kampagnen sind unbekannt — Helium 10 gibt sie nicht heraus. Sichtbar werden sie erst beim Überschreiben.</li>
+        <li><span class="mono">Exact Performance</span> läuft mit 14 € Tagesbudget und <span class="mono">SP asin</span> mit 2 € — beides Werte aus dem Fremdeingriff, bewusst nicht mit zurückgedreht.</li>
+        <li>Schwarz läuft auf zwei SKUs (<span class="mono">RH-PLUM-4ER4</span>, <span class="mono">8I-4QHO-FU55</span>), was Nachschubplanung und Reichweitenrechnung erschwert. Ein zweiter Verkäufer sitzt auf dem Listing; die Buy Box ist unsere.</li>
+        <li>Dunkelgrün B0FKNN9CCJ ist bis zum Nachschub außer Betracht. Wenn die Ware ankommt, gehört die Variante wieder in die Rangbetrachtung — bis dahin keine Maßnahme.</li>
+        <li>SQP FR September nachziehen, sobald der Monat abgeschlossen ist.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    <p>Datengrundlage: Helium 10 Ads (Profil 1012975072464757), SQP FR August 2026, Cerebro FR vom 14.09., FBA-Bestand und Listing-Status vom 14.09., P&amp;L-Serie bis 24.09.</p>
+    <p>Gewinnkennzahlen aus der P&amp;L wurden nicht verwendet: Helium 10 meldet cost_of_goods durchgehend als 0. Die Deckungsbeitragsrechnung stützt sich auf den Audit-Wert von 16,07 € vor Werbung.</p>
+  </footer>
+
+</div>
