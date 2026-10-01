@@ -39,7 +39,8 @@ Ablauf:
         python tools/ads_gebote.py sb-budget-setzen --firma Vaneja --kampagne 12345 --budget 17.5 --grund "..."
         python tools/ads_gebote.py negative-anlegen --firma Vaneja --kampagne 12345 --text "a" --text "b" --grund "..."
         python tools/ads_gebote.py produkte --firma Vaneja --kampagne 12345
-        python tools/ads_gebote.py produkt-anlegen --firma Vaneja --kampagne 12345 --asin B0XXXXXXXX
+        python tools/ads_gebote.py produkt-anlegen --firma Vaneja --kampagne 12345 --asin B0XXXXXXXX --sku AB-CDEF-1234
+        python tools/ads_gebote.py kampagne-anlegen --firma Vaneja --name "SP_Auto_X" --typ AUTO --budget 10 --gebot 0.50 --asin B0XXXXXXXX --sku AB-CDEF-1234
 
   Anderes Werbeprofil (z. B. Frankreich) — gilt fuer JEDEN Befehl:
         python tools/ads_gebote.py profile --firma Vaneja
@@ -527,15 +528,43 @@ def cmd_produkt_anlegen(args):
     tenant, name = firma_id(args.firma)
     cid, kname = _eine_kampagne(tenant, args.kampagne)
     asins = [a.strip().upper() for a in args.asin if a and a.strip()]
+    skus = [k.strip() for k in (args.sku or []) if k and k.strip()]
+    if skus and len(skus) != len(asins):
+        sys.exit(f"--sku {len(skus)}x, --asin {len(asins)}x: je ASIN genau eine SKU, gleiche Reihenfolge.")
+    sku_je_asin = dict(zip(asins, skus))
     print(f"Firma: {name}   Kampagne: {kname} ({cid})")
     print(f"Neue Produktanzeigen: {len(asins)}")
     for a in asins:
-        print(f"  - {a}")
+        print(f"  - {a}" + (f"  (SKU {sku_je_asin[a]})" if a in sku_je_asin else ""))
     _ja(args, "Produktanzeigen bei Amazon anlegen?")
-    d = ruf({"action": "produkt_anlegen", "company_id": tenant, "campaignId": cid,
-             "adGroupId": args.adgroup, "asins": asins, "bestaetigung": True, "grund": args.grund})
+    d = ruf({"action": "produkt_anlegen", "company_id": tenant, "campaignId": cid, "adGroupId": args.adgroup,
+             "asins": asins, "skus": sku_je_asin, "bestaetigung": True, "grund": args.grund})
     print(f"\nAngelegt: {d['angelegt']}   uebersprungen: {d['uebersprungen']}   Fehler: {d['fehler']}")
-    tabelle(d["ergebnisse"], ["asin", "ergebnis", "adId", "detail"])
+    tabelle(d["ergebnisse"], ["asin", "sku", "ergebnis", "adId", "detail"])
+
+
+def cmd_kampagne_anlegen(args):
+    tenant, name = firma_id(args.firma)
+    asins = [a.strip().upper() for a in args.asin if a and a.strip()]
+    skus = [k.strip() for k in (args.sku or []) if k and k.strip()]
+    if skus and len(skus) != len(asins):
+        sys.exit(f"--sku {len(skus)}x, --asin {len(asins)}x: je ASIN genau eine SKU, gleiche Reihenfolge.")
+    sku_je_asin = dict(zip(asins, skus))
+    print(f"Firma: {name}")
+    print(f"Neue SP-Kampagne: {args.name}   Typ: {args.typ}   Budget/Tag: {args.budget}   Standardgebot: {args.gebot}")
+    print(f"Strategie: {args.strategie}   Start: {args.start or 'heute'}   Zustand: {args.state}")
+    for a in asins:
+        print(f"  - {a}" + (f"  (SKU {sku_je_asin[a]})" if a in sku_je_asin else ""))
+    _ja(args, "Kampagne bei Amazon anlegen?")
+    d = ruf({"action": "kampagne_anlegen", "company_id": tenant, "name": args.name, "targetingType": args.typ,
+             "budget": args.budget, "defaultBid": args.gebot, "strategie": args.strategie, "startDate": args.start,
+             "state": args.state, "adGroupName": args.adgroup_name, "asins": asins, "skus": sku_je_asin,
+             "bestaetigung": True, "grund": args.grund})
+    print(f"\nErgebnis: {d['ergebnis']}   campaignId: {d.get('campaignId')}   adGroupId: {d.get('adGroupId')}")
+    if d.get("detail"):
+        print(f"Detail: {json.dumps(d['detail'], ensure_ascii=False)[:600]}")
+    if d.get("produkte"):
+        tabelle(d["produkte"], ["asin", "sku", "ergebnis", "adId", "detail"])
 
 
 def cmd_negative_anlegen(args):
@@ -786,7 +815,22 @@ def main():
     s.add_argument("--kampagne", required=True)
     s.add_argument("--adgroup", default=None, help="adGroupId, noetig wenn die Kampagne mehrere hat")
     s.add_argument("--asin", required=True, action="append")
+    s.add_argument("--sku", action="append", help="Seller-SKU je --asin (gleiche Reihenfolge); Pflicht bei Seller-Konten")
     s.set_defaults(fn=cmd_produkt_anlegen)
+
+    s = sub.add_parser("kampagne-anlegen", help="Neue SP-Kampagne mit Anzeigengruppe und Produktanzeigen", parents=[gemeinsam])
+    schreib(s)
+    s.add_argument("--name", required=True)
+    s.add_argument("--typ", required=True, choices=["AUTO", "MANUAL"])
+    s.add_argument("--budget", type=float, required=True, help="Tagesbudget")
+    s.add_argument("--gebot", type=float, required=True, help="Standardgebot der Anzeigengruppe")
+    s.add_argument("--strategie", default="LEGACY_FOR_SALES", choices=["LEGACY_FOR_SALES", "AUTO_FOR_SALES", "MANUAL"])
+    s.add_argument("--start", default=None, help="JJJJ-MM-TT, Standard heute")
+    s.add_argument("--state", default="PAUSED", choices=["PAUSED", "ENABLED"], help="Standard PAUSED, live danach per zustand-setzen")
+    s.add_argument("--adgroup-name", default=None)
+    s.add_argument("--asin", required=True, action="append")
+    s.add_argument("--sku", action="append", help="Seller-SKU je --asin (gleiche Reihenfolge); Pflicht bei Seller-Konten")
+    s.set_defaults(fn=cmd_kampagne_anlegen)
 
     s = sub.add_parser("negative-anlegen", help="SP-Negatives (Anzeigengruppe) anlegen, --text mehrfach moeglich", parents=[gemeinsam])
     schreib(s)

@@ -30,7 +30,11 @@
 //                            Duplikat-Schutz, Spur in ads_aenderungen_log.
 //   produkte                 Produktanzeigen (beworbene ASINs) einer Kampagne lesen
 //   produkt_anlegen          ASINs als Produktanzeige in eine Anzeigengruppe legen
-//                            {campaignId, adGroupId?, asins[]}. Nur mit bestaetigung=true.
+//                            {campaignId, adGroupId?, asins[], skus?{asin:sku}}. Nur mit bestaetigung=true.
+//   kampagne_anlegen         Neue SP-Kampagne samt Anzeigengruppe und Produktanzeigen
+//                            {name, targetingType AUTO|MANUAL, budget, defaultBid, asins[],
+//                             skus?{asin:sku}, strategie?, startDate?, state?, adGroupName?}.
+//                            Nur mit bestaetigung=true. Keywords danach per keyword_anlegen.
 //   profile                  Werbeprofile des Ads-Kontos auflisten (DE, FR, ...)
 //
 // Werbeprofil: standardmäßig das im auth_context hinterlegte. Optional kann JEDE
@@ -418,12 +422,12 @@ Deno.serve(async (req) => {
       })) });
     }
 
-    // Produktanzeigen anlegen: {campaignId, adGroupId?, asins: [..]}
+    // Produktanzeigen anlegen: {campaignId, adGroupId?, asins: [..], skus?: {ASIN: SKU}}
     //
     // Das ist der Schritt, der eine frisch gebaute Anzeigengruppe erst
-    // ausliefern laesst: ohne Produktanzeige ist sie leer. Amazon nimmt
-    // alternativ eine SKU; hier bewusst nur ASIN, weil das der Fall ist,
-    // den wir brauchen (Varianten eines bestehenden Parents bewerben).
+    // ausliefern laesst: ohne Produktanzeige ist sie leer. Seller-Konten
+    // MUESSEN die SKU schicken (nur ASIN -> missingValueError), reine ASIN
+    // geht nur bei Vendoren. Mit SKU wird daher nur sku gesendet, sonst asin.
     if (action === "produkt_anlegen") {
       if (!bestaetigt()) return json({ error: "bestaetigung=true fehlt. Es wurde NICHTS geschrieben." }, 400);
       const cid = str(body.campaignId);
@@ -431,29 +435,105 @@ Deno.serve(async (req) => {
       const ungueltig = asins.filter((a) => !/^[A-Z0-9]{10}$/.test(a));
       if (!cid || !asins.length) return json({ error: "campaignId und asins nötig." }, 400);
       if (ungueltig.length) return json({ error: `Ungültige ASIN(s): ${ungueltig.join(", ")}` }, 400);
+      const skuRoh = body.skus && typeof body.skus === "object" ? body.skus : {};
+      const skus: Record<string, string> = {};
+      for (const [a, k] of Object.entries(skuRoh)) if (str(k)) skus[a.toUpperCase()] = str(k)!;
+      const fremd = Object.keys(skus).filter((a) => !asins.includes(a));
+      if (fremd.length) return json({ error: `SKU für ASIN ohne Eintrag in asins: ${fremd.join(", ")}` }, 400);
       const agId = await ads.anzeigengruppe(cid, str(body.adGroupId));
       if (!agId.ok) return json({ error: agId.detail }, 400);
       const vorhanden = await ads.alle("/sp/productAds/list", CT.productAd, { campaignIdFilter: { include: [cid] } }, "productAds");
       if (!vorhanden.ok) return json({ error: "Produktanzeigen prüfen fehlgeschlagen", detail: vorhanden.detail }, 502);
-      const alt = new Set(vorhanden.daten
-        .filter((p: any) => String(p.adGroupId) === agId.id && p.state !== "ARCHIVED")
-        .map((p: any) => String(p.asin ?? "").toUpperCase()));
-      const neu = asins.filter((a) => !alt.has(a));
-      const dup = asins.filter((a) => alt.has(a));
-      const ergebnisse: any[] = dup.map((a) => ({ asin: a, ergebnis: "uebersprungen", detail: "läuft schon in dieser Anzeigengruppe", adId: null }));
+      const aktiv = vorhanden.daten.filter((p: any) => String(p.adGroupId) === agId.id && p.state !== "ARCHIVED");
+      const alt = new Set(aktiv.map((p: any) => String(p.asin ?? "").toUpperCase()));
+      const altSku = new Set(aktiv.map((p: any) => String(p.sku ?? "")).filter(Boolean));
+      const laeuft = (a: string) => alt.has(a) || (!!skus[a] && altSku.has(skus[a]));
+      const neu = asins.filter((a) => !laeuft(a));
+      const dup = asins.filter(laeuft);
+      const ergebnisse: any[] = dup.map((a) => ({ asin: a, sku: skus[a] ?? null, ergebnis: "uebersprungen", detail: "läuft schon in dieser Anzeigengruppe", adId: null }));
       if (neu.length) {
         const r = await ads.post("/sp/productAds", CT.productAd, "productAds",
-          neu.map((a) => ({ campaignId: cid, adGroupId: agId.id, asin: a, state: "ENABLED" })));
+          neu.map((a) => ({ campaignId: cid, adGroupId: agId.id, ...(skus[a] ? { sku: skus[a] } : { asin: a }), state: "ENABLED" })));
         neu.forEach((a, i) => {
           const e = r[i] ?? { ok: false, detail: "keine Antwort" };
-          ergebnisse.push({ asin: a, ergebnis: e.ok ? "ok" : "fehler", adId: e.ok ? (e.id ?? null) : null, detail: e.ok ? null : e.detail });
+          ergebnisse.push({ asin: a, sku: skus[a] ?? null, ergebnis: e.ok ? "ok" : "fehler", adId: e.ok ? (e.id ?? null) : null, detail: e.ok ? null : e.detail });
         });
       }
       const logErr = await spur(ergebnisse.map((e) => ({ aktion: "produkt_anlegen", objekt_art: "produktanzeige", objekt_id: e.adId ?? null, campaign_id: cid,
-        nachher: { adGroupId: agId.id, asin: e.asin }, ergebnis: e.ergebnis,
+        nachher: { adGroupId: agId.id, asin: e.asin, sku: e.sku }, ergebnis: e.ergebnis,
         detail: e.detail ? String(typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail)).slice(0, 1000) : null })));
       return json({ campaignId: cid, adGroupId: agId.id, angelegt: ergebnisse.filter((e) => e.ergebnis === "ok").length, uebersprungen: dup.length,
         fehler: ergebnisse.filter((e) => e.ergebnis === "fehler").length, ergebnisse, ...(logErr ? { log_fehler: logErr } : {}) });
+    }
+
+    // Neue SP-Kampagne: Kampagne -> Anzeigengruppe -> Produktanzeigen, in dieser Reihenfolge.
+    // Scheitert ein spaeterer Schritt, bleibt das bereits Angelegte stehen (nichts wird
+    // automatisch geloescht); die Antwort nennt die IDs, damit man per produkt_anlegen
+    // nachlegen oder per kampagne_zustand pausieren kann. Standard-state ist PAUSED:
+    // live schaltet man bewusst danach.
+    if (action === "kampagne_anlegen") {
+      if (!bestaetigt()) return json({ error: "bestaetigung=true fehlt. Es wurde NICHTS geschrieben." }, 400);
+      const name = str(body.name); const tt = str(body.targetingType)?.toUpperCase() ?? null;
+      const budget = Number(body.budget); const defaultBid = Number(body.defaultBid);
+      const strategie = str(body.strategie) ?? "LEGACY_FOR_SALES";
+      const state = str(body.state) ?? "PAUSED";
+      const startDate = str(body.startDate) ?? new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
+      const adGroupName = str(body.adGroupName) ?? name;
+      const asins = liste(body.asins, []).map((a) => a.toUpperCase()).filter((a, i, arr) => arr.indexOf(a) === i);
+      const skuRoh = body.skus && typeof body.skus === "object" ? body.skus : {};
+      const skus: Record<string, string> = {};
+      for (const [a, k] of Object.entries(skuRoh)) if (str(k)) skus[a.toUpperCase()] = str(k)!;
+      if (!name || !(tt === "AUTO" || tt === "MANUAL")) return json({ error: "name und targetingType (AUTO|MANUAL) nötig." }, 400);
+      if (!Number.isFinite(budget) || budget < MIN_BUDGET) return json({ error: `budget (>= ${MIN_BUDGET}) nötig.` }, 400);
+      if (!Number.isFinite(defaultBid) || defaultBid < MIN_GEBOT) return json({ error: `defaultBid (>= ${MIN_GEBOT}) nötig.` }, 400);
+      if (!(state === "ENABLED" || state === "PAUSED")) return json({ error: "state muss ENABLED oder PAUSED sein." }, 400);
+      if (!["LEGACY_FOR_SALES", "AUTO_FOR_SALES", "MANUAL"].includes(strategie)) return json({ error: "strategie: LEGACY_FOR_SALES | AUTO_FOR_SALES | MANUAL" }, 400);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return json({ error: "startDate im Format JJJJ-MM-TT." }, 400);
+      if (!asins.length) return json({ error: "asins nötig: ohne Produktanzeige liefert die Kampagne nichts aus." }, 400);
+      const ungueltig = asins.filter((a) => !/^[A-Z0-9]{10}$/.test(a));
+      if (ungueltig.length) return json({ error: `Ungültige ASIN(s): ${ungueltig.join(", ")}` }, 400);
+      const fremd = Object.keys(skus).filter((a) => !asins.includes(a));
+      if (fremd.length) return json({ error: `SKU für ASIN ohne Eintrag in asins: ${fremd.join(", ")}` }, 400);
+
+      // Duplikat-Schutz: gleicher Name (auch archiviert) -> nichts anlegen
+      const alle = await ads.kampagnen(["ENABLED", "PAUSED", "ARCHIVED"]);
+      if (!alle.ok) return json({ error: "Kampagnen prüfen fehlgeschlagen", detail: alle.detail }, 502);
+      const dup = alle.daten.find((c: any) => String(c.name).toLowerCase() === name.toLowerCase());
+      if (dup) {
+        await spur([{ aktion: "kampagne_anlegen", objekt_art: "campaign", objekt_id: dup.campaignId, campaign_id: dup.campaignId, nachher: { name }, ergebnis: "uebersprungen", detail: `Name existiert schon (state ${dup.state})` }]);
+        return json({ ergebnis: "uebersprungen", detail: "Kampagne mit diesem Namen existiert schon", kampagne: dup });
+      }
+
+      const kampagne = { name, targetingType: tt, state, startDate, budget: { budget, budgetType: "DAILY" }, dynamicBidding: { strategy: strategie } };
+      const k = (await ads.post("/sp/campaigns", CT.campaign, "campaigns", [kampagne]))[0] ?? { ok: false, detail: "keine Antwort" };
+      const log: any[] = [{ aktion: "kampagne_anlegen", objekt_art: "campaign", objekt_id: k.id ?? null, campaign_id: k.id ?? null, nachher: kampagne,
+        ergebnis: k.ok ? "ok" : "fehler", detail: k.ok ? null : JSON.stringify(k.detail).slice(0, 1000) }];
+      const antwort: any = { campaignId: k.ok ? k.id : null, adGroupId: null, kampagne: k.ok ? "ok" : "fehler", anzeigengruppe: null, produkte: [] };
+      if (!k.ok) antwort.detail = k.detail;
+
+      if (k.ok) {
+        const cid = k.id!;
+        const gruppe = { campaignId: cid, name: adGroupName, state: "ENABLED", defaultBid };
+        const g = (await ads.post("/sp/adGroups", CT.adGroup, "adGroups", [gruppe]))[0] ?? { ok: false, detail: "keine Antwort" };
+        log.push({ aktion: "kampagne_anlegen", objekt_art: "adgroup", objekt_id: g.id ?? null, campaign_id: cid, nachher: gruppe,
+          ergebnis: g.ok ? "ok" : "fehler", detail: g.ok ? null : JSON.stringify(g.detail).slice(0, 1000) });
+        antwort.anzeigengruppe = g.ok ? "ok" : "fehler";
+        if (!g.ok) antwort.detail = g.detail;
+        if (g.ok) {
+          antwort.adGroupId = g.id;
+          const r = await ads.post("/sp/productAds", CT.productAd, "productAds",
+            asins.map((a) => ({ campaignId: cid, adGroupId: g.id, ...(skus[a] ? { sku: skus[a] } : { asin: a }), state: "ENABLED" })));
+          asins.forEach((a, i) => {
+            const e = r[i] ?? { ok: false, detail: "keine Antwort" };
+            antwort.produkte.push({ asin: a, sku: skus[a] ?? null, ergebnis: e.ok ? "ok" : "fehler", adId: e.ok ? (e.id ?? null) : null, detail: e.ok ? null : e.detail });
+            log.push({ aktion: "kampagne_anlegen", objekt_art: "produktanzeige", objekt_id: e.ok ? (e.id ?? null) : null, campaign_id: cid,
+              nachher: { adGroupId: g.id, asin: a, sku: skus[a] ?? null }, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : JSON.stringify(e.detail).slice(0, 1000) });
+          });
+        }
+      }
+      const logErr = await spur(log);
+      const fertig = antwort.kampagne === "ok" && antwort.anzeigengruppe === "ok" && antwort.produkte.some((p: any) => p.ergebnis === "ok");
+      return json({ ergebnis: fertig ? "ok" : "fehler", name, state, ...antwort, ...(logErr ? { log_fehler: logErr } : {}) });
     }
 
     // SP-Negativ-Produkt-Targets (Anzeigengruppenebene) lesen
@@ -631,7 +711,7 @@ Deno.serve(async (req) => {
       return json({ campaignId: cid, name: c.name, vorher: c.state, nachher: state, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : e.detail, ...(logErr ? { log_fehler: logErr } : {}) });
     }
 
-    return json({ error: "Unbekannte action. Erlaubt: firmen, profile, produkte, produkt_anlegen, kampagnen, gebote, vorschau, pruefen, setzen, platzierung, platzierung_setzen, budget_setzen, kampagne_zustand, negatives, keyword_anlegen, negative_anlegen, negative_targets, negative_target_anlegen, sb_kampagnen, sb_kampagne_zustand, sb_budget_setzen, sb_negatives, sb_negatives_anlegen" }, 400);
+    return json({ error: "Unbekannte action. Erlaubt: firmen, profile, produkte, produkt_anlegen, kampagne_anlegen, kampagnen, gebote, vorschau, pruefen, setzen, platzierung, platzierung_setzen, budget_setzen, kampagne_zustand, negatives, keyword_anlegen, negative_anlegen, negative_targets, negative_target_anlegen, sb_kampagnen, sb_kampagne_zustand, sb_budget_setzen, sb_negatives, sb_negatives_anlegen" }, 400);
   } catch (e) {
     return json({ error: "Ausnahme", detail: String(e) }, 500);
   }
@@ -703,7 +783,7 @@ class AdsClient {
     if (!r.ok) return items.map(() => ({ ok: false, detail: r.detail }));
     const erg = r.data?.[feld] ?? {};
     const out: { ok: boolean; id?: string; detail?: unknown }[] = items.map(() => ({ ok: false, detail: "keine Antwort" }));
-    for (const s of erg.success ?? []) out[s.index] = { ok: true, id: String(s.keywordId ?? s.targetId ?? s.campaignId ?? "") };
+    for (const s of erg.success ?? []) out[s.index] = { ok: true, id: String(s.keywordId ?? s.targetId ?? s.adId ?? s.adGroupId ?? s.campaignId ?? "") };
     for (const e of erg.error ?? []) out[e.index] = { ok: false, detail: e.errors ?? e };
     return out;
   }
