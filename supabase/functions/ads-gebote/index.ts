@@ -28,6 +28,9 @@
 //   negative_target_anlegen  Negativ-ASINs auf Anzeigengruppenebene anlegen
 //                            {campaignId, adGroupId?, asins[]}. Nur mit bestaetigung=true.
 //                            Duplikat-Schutz, Spur in ads_aenderungen_log.
+//   produkte                 Produktanzeigen (beworbene ASINs) einer Kampagne lesen
+//   produkt_anlegen          ASINs als Produktanzeige in eine Anzeigengruppe legen
+//                            {campaignId, adGroupId?, asins[]}. Nur mit bestaetigung=true.
 //   profile                  Werbeprofile des Ads-Kontos auflisten (DE, FR, ...)
 //
 // Werbeprofil: standardmäßig das im auth_context hinterlegte. Optional kann JEDE
@@ -66,6 +69,7 @@ const CT = {
   negKeyword: "application/vnd.spNegativeKeyword.v3+json",
   campNegKeyword: "application/vnd.spCampaignNegativeKeyword.v3+json",
   negTarget: "application/vnd.spNegativeTargetingClause.v3+json",
+  productAd: "application/vnd.spProductAd.v3+json",
   sbCampaign: "application/vnd.sbcampaignresource.v4+json",
   sbAdGroup: "application/vnd.sbadgroupresource.v4+json",
   sbNegKeyword: "application/vnd.sbnegativekeyword.v3+json",     // GET /sb/negativeKeywords (Accept)
@@ -402,6 +406,56 @@ Deno.serve(async (req) => {
       return json({ ergebnis: e.ok ? "ok" : "fehler", keywordId: e.id ?? null, adGroupId: agId.id, detail: e.ok ? null : e.detail, ...(logErr ? { log_fehler: logErr } : {}) });
     }
 
+    // Produktanzeigen einer Kampagne lesen: welche ASINs werden beworben?
+    if (action === "produkte") {
+      const ids = liste(body.kampagnen, []);
+      if (!ids.length) return json({ error: "kampagnen fehlt." }, 400);
+      const r = await ads.alle("/sp/productAds/list", CT.productAd, { campaignIdFilter: { include: ids } }, "productAds");
+      if (!r.ok) return json({ error: "Produktanzeigen laden fehlgeschlagen", detail: r.detail }, 502);
+      return json({ tenant_id: tenantId, produkte: r.daten.map((p: any) => ({
+        adId: String(p.adId), campaignId: String(p.campaignId), adGroupId: String(p.adGroupId),
+        asin: p.asin ?? null, sku: p.sku ?? null, state: p.state,
+      })) });
+    }
+
+    // Produktanzeigen anlegen: {campaignId, adGroupId?, asins: [..]}
+    //
+    // Das ist der Schritt, der eine frisch gebaute Anzeigengruppe erst
+    // ausliefern laesst: ohne Produktanzeige ist sie leer. Amazon nimmt
+    // alternativ eine SKU; hier bewusst nur ASIN, weil das der Fall ist,
+    // den wir brauchen (Varianten eines bestehenden Parents bewerben).
+    if (action === "produkt_anlegen") {
+      if (!bestaetigt()) return json({ error: "bestaetigung=true fehlt. Es wurde NICHTS geschrieben." }, 400);
+      const cid = str(body.campaignId);
+      const asins = liste(body.asins, []).map((a) => a.toUpperCase()).filter((a, i, arr) => arr.indexOf(a) === i);
+      const ungueltig = asins.filter((a) => !/^[A-Z0-9]{10}$/.test(a));
+      if (!cid || !asins.length) return json({ error: "campaignId und asins nötig." }, 400);
+      if (ungueltig.length) return json({ error: `Ungültige ASIN(s): ${ungueltig.join(", ")}` }, 400);
+      const agId = await ads.anzeigengruppe(cid, str(body.adGroupId));
+      if (!agId.ok) return json({ error: agId.detail }, 400);
+      const vorhanden = await ads.alle("/sp/productAds/list", CT.productAd, { campaignIdFilter: { include: [cid] } }, "productAds");
+      if (!vorhanden.ok) return json({ error: "Produktanzeigen prüfen fehlgeschlagen", detail: vorhanden.detail }, 502);
+      const alt = new Set(vorhanden.daten
+        .filter((p: any) => String(p.adGroupId) === agId.id && p.state !== "ARCHIVED")
+        .map((p: any) => String(p.asin ?? "").toUpperCase()));
+      const neu = asins.filter((a) => !alt.has(a));
+      const dup = asins.filter((a) => alt.has(a));
+      const ergebnisse: any[] = dup.map((a) => ({ asin: a, ergebnis: "uebersprungen", detail: "läuft schon in dieser Anzeigengruppe", adId: null }));
+      if (neu.length) {
+        const r = await ads.post("/sp/productAds", CT.productAd, "productAds",
+          neu.map((a) => ({ campaignId: cid, adGroupId: agId.id, asin: a, state: "ENABLED" })));
+        neu.forEach((a, i) => {
+          const e = r[i] ?? { ok: false, detail: "keine Antwort" };
+          ergebnisse.push({ asin: a, ergebnis: e.ok ? "ok" : "fehler", adId: e.ok ? (e.id ?? null) : null, detail: e.ok ? null : e.detail });
+        });
+      }
+      const logErr = await spur(ergebnisse.map((e) => ({ aktion: "produkt_anlegen", objekt_art: "produktanzeige", objekt_id: e.adId ?? null, campaign_id: cid,
+        nachher: { adGroupId: agId.id, asin: e.asin }, ergebnis: e.ergebnis,
+        detail: e.detail ? String(typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail)).slice(0, 1000) : null })));
+      return json({ campaignId: cid, adGroupId: agId.id, angelegt: ergebnisse.filter((e) => e.ergebnis === "ok").length, uebersprungen: dup.length,
+        fehler: ergebnisse.filter((e) => e.ergebnis === "fehler").length, ergebnisse, ...(logErr ? { log_fehler: logErr } : {}) });
+    }
+
     // SP-Negativ-Produkt-Targets (Anzeigengruppenebene) lesen
     if (action === "negative_targets") {
       const ids = liste(body.kampagnen, []);
@@ -577,7 +631,7 @@ Deno.serve(async (req) => {
       return json({ campaignId: cid, name: c.name, vorher: c.state, nachher: state, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : e.detail, ...(logErr ? { log_fehler: logErr } : {}) });
     }
 
-    return json({ error: "Unbekannte action. Erlaubt: firmen, profile, kampagnen, gebote, vorschau, pruefen, setzen, platzierung, platzierung_setzen, budget_setzen, kampagne_zustand, negatives, keyword_anlegen, negative_anlegen, negative_targets, negative_target_anlegen, sb_kampagnen, sb_kampagne_zustand, sb_budget_setzen, sb_negatives, sb_negatives_anlegen" }, 400);
+    return json({ error: "Unbekannte action. Erlaubt: firmen, profile, produkte, produkt_anlegen, kampagnen, gebote, vorschau, pruefen, setzen, platzierung, platzierung_setzen, budget_setzen, kampagne_zustand, negatives, keyword_anlegen, negative_anlegen, negative_targets, negative_target_anlegen, sb_kampagnen, sb_kampagne_zustand, sb_budget_setzen, sb_negatives, sb_negatives_anlegen" }, 400);
   } catch (e) {
     return json({ error: "Ausnahme", detail: String(e) }, 500);
   }

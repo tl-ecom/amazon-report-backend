@@ -38,6 +38,9 @@ Ablauf:
         python tools/ads_gebote.py zustand-setzen --firma Vaneja --kampagne 12345 --state PAUSED --grund "..."
         python tools/ads_gebote.py sb-budget-setzen --firma Vaneja --kampagne 12345 --budget 17.5 --grund "..."
         python tools/ads_gebote.py negative-anlegen --firma Vaneja --kampagne 12345 --text "a" --text "b" --grund "..."
+        python tools/ads_gebote.py produkte --firma Vaneja --kampagne 12345
+        python tools/ads_gebote.py produkt-anlegen --firma Vaneja --kampagne 12345 --asin B0XXXXXXXX
+
   Anderes Werbeprofil (z. B. Frankreich) — gilt fuer JEDEN Befehl:
         python tools/ads_gebote.py profile --firma Vaneja
         python tools/ads_gebote.py kampagnen --firma Vaneja --profil 1012975072464757
@@ -510,6 +513,31 @@ def cmd_keyword_anlegen(args):
     print(f"Ergebnis: {r['ergebnis']}   keywordId: {r.get('keywordId')}   " + (f"Detail: {json.dumps(r.get('detail') or r.get('keyword'), ensure_ascii=False)[:600]}" if r['ergebnis'] != 'ok' else ""))
 
 
+def cmd_produkte(args):
+    tenant, name = firma_id(args.firma)
+    ids, namen, kname = kampagnen_ids(tenant, args.kampagne, ["ENABLED", "PAUSED"])
+    d = ruf({"action": "produkte", "company_id": tenant, "kampagnen": ids})
+    for p in d["produkte"]:
+        p["kampagne"] = kname.get(p["campaignId"], p["campaignId"])
+    print(f"Firma: {name}   Kampagnen: {', '.join(namen)}   Produktanzeigen: {len(d['produkte'])}")
+    tabelle(d["produkte"], ["kampagne", "adGroupId", "asin", "sku", "state", "adId"])
+
+
+def cmd_produkt_anlegen(args):
+    tenant, name = firma_id(args.firma)
+    cid, kname = _eine_kampagne(tenant, args.kampagne)
+    asins = [a.strip().upper() for a in args.asin if a and a.strip()]
+    print(f"Firma: {name}   Kampagne: {kname} ({cid})")
+    print(f"Neue Produktanzeigen: {len(asins)}")
+    for a in asins:
+        print(f"  - {a}")
+    _ja(args, "Produktanzeigen bei Amazon anlegen?")
+    d = ruf({"action": "produkt_anlegen", "company_id": tenant, "campaignId": cid,
+             "adGroupId": args.adgroup, "asins": asins, "bestaetigung": True, "grund": args.grund})
+    print(f"\nAngelegt: {d['angelegt']}   uebersprungen: {d['uebersprungen']}   Fehler: {d['fehler']}")
+    tabelle(d["ergebnisse"], ["asin", "ergebnis", "adId", "detail"])
+
+
 def cmd_negative_anlegen(args):
     tenant, name = firma_id(args.firma)
     cid, kname = _eine_kampagne(tenant, args.kampagne)
@@ -747,6 +775,18 @@ def main():
     s.add_argument("--match", default="EXACT", choices=["EXACT", "PHRASE", "BROAD"])
     s.add_argument("--gebot", type=float, required=True)
     s.set_defaults(fn=cmd_keyword_anlegen)
+
+    s = sub.add_parser("produkte", help="Produktanzeigen (beworbene ASINs) ansehen", parents=[gemeinsam])
+    s.add_argument("--firma", required=True)
+    s.add_argument("--kampagne", required=True, action="append")
+    s.set_defaults(fn=cmd_produkte)
+
+    s = sub.add_parser("produkt-anlegen", help="ASINs als Produktanzeige anlegen, --asin mehrfach moeglich", parents=[gemeinsam])
+    schreib(s)
+    s.add_argument("--kampagne", required=True)
+    s.add_argument("--adgroup", default=None, help="adGroupId, noetig wenn die Kampagne mehrere hat")
+    s.add_argument("--asin", required=True, action="append")
+    s.set_defaults(fn=cmd_produkt_anlegen)
 
     s = sub.add_parser("negative-anlegen", help="SP-Negatives (Anzeigengruppe) anlegen, --text mehrfach moeglich", parents=[gemeinsam])
     schreib(s)
