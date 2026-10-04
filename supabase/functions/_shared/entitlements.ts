@@ -163,8 +163,9 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   // Struktur-Historie und Account Health: eigene Schalter, in KEINEM Tarif
   // gesetzt — damit nur in der Coach-Ansicht sichtbar, bis sie jemand bewusst
   // in der Matrix freigibt.
-  get_ads_struktur_aenderungen: "ads_struktur_aenderungen",
-  ads_struktur_aenderungen: "ads_struktur_aenderungen",
+  // Derselbe Schalter wie der Changelog: im Web sind beide EIN Tab (ads_changelog).
+  get_ads_struktur_aenderungen: "ads_changelog",
+  ads_struktur_aenderungen: "ads_changelog",
   // Web und MCP rufen dasselbe Werkzeug unter demselben Namen.
   get_account_health: "account_health",
   get_review_themes: "reviews",
