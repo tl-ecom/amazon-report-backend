@@ -721,6 +721,39 @@ def cmd_zustand_setzen(args):
 
 # ----------------------------------------------------------------- main
 
+def cmd_lesen(args):
+    """Eine Pulse-Ressource LESEN, so wie die Weboberflaeche sie fuer den Coach sieht.
+
+    Geht an /functions/v1/api (nicht an ads-gebote) und schreibt nichts — weder
+    bei Amazon noch in der Datenbank. Gedacht zum Gegenpruefen neuer
+    Auswertungen an echten Daten, ohne den Browser zu oeffnen.
+    """
+    tenant, name = firma_id(args.firma)
+    argumente = {}
+    for kv in args.arg or []:
+        if "=" not in kv:
+            sys.exit(f"--arg erwartet schluessel=wert, bekam: {kv}")
+        k, v = kv.split("=", 1)
+        # Zahlen und Wahrheitswerte als solche schicken, alles andere als Text.
+        argumente[k] = True if v == "true" else False if v == "false" else (
+            int(v) if v.lstrip("-").isdigit() else v)
+    r = requests.post(
+        f"{SUPABASE_URL}/functions/v1/api",
+        headers={"Authorization": f"Bearer {token()}", "apikey": ANON_KEY, "Content-Type": "application/json"},
+        json={"resource": args.ressource, "arguments": argumente, "company_id": tenant,
+              **({"kundensicht": True} if args.kundensicht else {})},
+        timeout=120,
+    )
+    try:
+        d = r.json()
+    except ValueError:
+        sys.exit(f"Unerwartete Antwort ({r.status_code}): {r.text[:300]}")
+    if r.status_code >= 400 or d.get("error"):
+        sys.exit(f"Fehler {r.status_code} ({name}): {json.dumps(d, ensure_ascii=False)[:800]}")
+    json.dump(d.get("data", d), sys.stdout, ensure_ascii=False, indent=1)
+    print()
+
+
 def main():
     p = argparse.ArgumentParser(description="Gebote fuer Sponsored Products lesen/setzen (nur Coach, nur lokal).")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -899,6 +932,13 @@ def main():
     s.add_argument("--grund", default=None, help="kurze Begruendung fuers Log")
     s.add_argument("--ja", action="store_true", help="ohne Rueckfrage")
     s.set_defaults(fn=cmd_setzen)
+
+    s = sub.add_parser("lesen", help="eine Pulse-Ressource lesen (schreibt nichts)", parents=[gemeinsam])
+    s.add_argument("--firma", required=True)
+    s.add_argument("--ressource", required=True, help="z. B. ads_kandidaten, ads_keyword_wirkung, get_account_health")
+    s.add_argument("--arg", action="append", help="schluessel=wert, mehrfach moeglich (z. B. --arg von=2026-08-01)")
+    s.add_argument("--kundensicht", action="store_true", help="so lesen, wie ein Teilnehmer des Tarifs es saehe")
+    s.set_defaults(fn=cmd_lesen)
 
     args = p.parse_args()
     global PROFIL

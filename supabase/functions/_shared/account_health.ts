@@ -67,7 +67,11 @@ function kennzahl(name: string, m: any): Kennzahl {
     ziel,
     ziel_bedingung: bedingung,
     ziel_verfehlt: zielVerfehlt(rate ?? anzahl, ziel, bedingung),
-    menge: zahl(m?.orderCount) ?? zahl(m?.shipmentCount) ?? zahl(m?.totalUnitCount),
+    // Amazon nennt die Menge je Kennzahl anders. Bei der pünktlichen Lieferung
+    // heißt sie shipmentCountWithValidTracking — ohne sie stand genau bei der
+    // Kennzahl keine Menge, bei der sie die 43 % erst einordnet.
+    menge: zahl(m?.orderCount) ?? zahl(m?.shipmentCount) ?? zahl(m?.totalUnitCount)
+      ?? zahl(m?.shipmentCountWithValidTracking),
     von: m?.reportingDateRange?.reportingDateFrom?.slice(0, 10) ?? null,
     bis: m?.reportingDateRange?.reportingDateTo?.slice(0, 10) ?? null,
   };

@@ -353,9 +353,12 @@ export async function adsKandidaten(
       + "Werbekosten. Der Break-even ist hier der Deckungsbeitrag vor Werbung je Euro "
       + "BRUTTO-Umsatz (90 Tage), weil Amazons ACoS am Bruttoumsatz hängt — er liegt deshalb "
       + "unter dem Break-even der Produktübersicht, der auf Netto steht.",
-      "`zielgebot` = Umsatz je Bestellung x Ziel-ACoS x geschätzte CVR, wie in der Gebotsautomatik. "
-      + "`zielgebot_basis: break_even` heißt: kein Ziel-ACoS gesetzt, bei diesem Gebot bleibt nichts "
-      + "übrig — es ist die Obergrenze, kein Vorschlag. Ohne Platzierungs-Aufschlag gerechnet.",
+      "`zielgebot` = Umsatz je Bestellung x Ziel-ACoS x geschätzte CVR, wie in der Gebotsautomatik, "
+      + "ohne Platzierungs-Aufschlag. NUR bei `zielgebot_basis: ziel_acos` ist es ein Vorschlag. Bei "
+      + "`break_even` ist es die rechnerische Obergrenze, bei der nichts übrig bleibt — bei Begriffen "
+      + "mit sehr niedrigem ACoS liegt sie weit über jedem sinnvollen Gebot (Vaneja: 8,45 € für "
+      + "einen Begriff, der bisher 0,77 € je Klick kostete). Dann mit `cpc`, dem bisherigen "
+      + "Klickpreis, starten und einen Ziel-ACoS für das Produkt setzen.",
       "`asin_eindeutig: false`: der Begriff lief über Gruppen mit mehreren ASINs. Gerechnet wird "
       + "dann mit der schwächsten Marge. `marge_unbekannt`: Einkaufspreis oder Gebühren fehlen.",
       "ASIN-Suchbegriffe stehen nicht in der Ernte — dafür gibt es kein Keyword.",

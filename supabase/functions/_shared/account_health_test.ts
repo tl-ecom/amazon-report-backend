@@ -41,7 +41,7 @@ Deno.test("Account Health: Rating, Kontostatus und Kennzahlen aus der echten Ant
 
 Deno.test("Account Health: 43 % pünktlich bei Ziel 97 % — Amazon sagt GOOD, die Zahl steht trotzdem da", () => {
   const m = (baueAccountHealth(ECHT, null) as any).marktplaetze[0];
-  assertEquals(m.ziel_verfehlt_trotz_gutem_status.map((k: any) => k.kennzahl), ["onTimeDeliveryRate"]);
+  assertEquals(m.ziel_verfehlt_trotz_gutem_status.map((k: any) => [k.kennzahl, k.menge]), [["onTimeDeliveryRate", 7]]);
   // Kein Handlungsbedarf: über das Konto entscheidet Amazons Status, nicht unsere Rechnung.
   assertEquals(m.handlungsbedarf.length, 0);
 });
