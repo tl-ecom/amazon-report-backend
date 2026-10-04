@@ -17,6 +17,13 @@ export function steuerung(rows: { campaign_id: string | number; modus: string }[
   return (campaignId) => m.size === 0 ? "pulse" : (m.get(String(campaignId)) ?? "nur_analyse");
 }
 
+/** Einstufung eines Mandanten laden — fuer die Leser, die ihre Zeilen kennzeichnen. */
+export async function ladeSteuerung(supabase: any, tenant_id: string): Promise<(campaignId: string | number) => Modus> {
+  const { data, error } = await supabase.from("ads_steuerung").select("campaign_id, modus").eq("tenant_id", tenant_id);
+  if (error) throw new Error(`ads_steuerung: ${error.message}`);
+  return steuerung(data ?? []);
+}
+
 /** Grund, warum Pulse hier nicht schreiben darf — oder null, wenn es darf. */
 export function sperre(modus: Modus, was: "gebot" | "struktur"): string | null {
   if (modus === "nur_analyse") return "Kampagne wird nur ausgewertet, nicht gesteuert (ads_steuerung).";

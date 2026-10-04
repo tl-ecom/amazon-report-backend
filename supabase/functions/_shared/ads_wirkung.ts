@@ -24,6 +24,7 @@
 // steht als Zahl da.
 
 import { type Fenster, fenster } from "./ads_changelog.ts";
+import { ladeSteuerung } from "./ads_steuerung.ts";
 import { marktplatzKopf } from "./ads_marktplatz.ts";
 
 function r2(n: number): number { return Math.round(n * 100) / 100; }
@@ -156,7 +157,9 @@ export async function adsKeywordWirkung(
   });
   if (error) throw new Error(`ads_keyword_wirkung: ${error.message}`);
 
-  const ziele = ((data?.zeilen ?? []) as WirkungZeile[]).map(baueWirkung);
+  const modusVon = await ladeSteuerung(supabase, tenant_id);
+  const ziele = ((data?.zeilen ?? []) as WirkungZeile[])
+    .map((z) => ({ ...baueWirkung(z), steuerung: z.campaign_id ? modusVon(z.campaign_id) : null }));
   const zaehle = (s: Status) => ziele.filter((z) => z.status === s).length;
   const mitTraffic = ziele.filter((z) => z.eigen.klicks > 0);
   const kosten = r2(mitTraffic.reduce((n, z) => n + z.eigen.kosten, 0));

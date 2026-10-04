@@ -28,6 +28,7 @@
 // auf Gruppen-CVR, wenn die Liste dort sichtbar danebenliegt.
 
 import { marktplatzKopf } from "./ads_marktplatz.ts";
+import { ladeSteuerung } from "./ads_steuerung.ts";
 import { geschaetzteCvr, MIN_GEBOT_AMAZON } from "./gebotsautomatik.ts";
 import { produktUebersicht } from "./produkte.ts";
 
@@ -84,7 +85,7 @@ export interface ErnteKandidat {
   cpc: number | null;
   /** Es gibt das Exact-Keyword schon, aber pausiert. */
   exact_pausiert: boolean;
-  quellen: Array<{ campaignName: string | null; adGroupName: string | null; matchTypes: string[]; bestellungen: number }>;
+  quellen: Array<{ campaignId: string; campaignName: string | null; adGroupName: string | null; matchTypes: string[]; bestellungen: number }>;
   /** ASINs der Anzeigengruppen, über die der Begriff Bestellungen brachte. */
   asins: string[];
 }
@@ -238,7 +239,7 @@ export function baueErnteKandidaten(zeilen: KandidatZeile[], minBestellungen = M
       cpc: klicks > 0 ? r2(kosten / klicks) : null,
       exact_pausiert: liste.some((z) => z.exact_im_konto === "pausiert"),
       quellen: liste
-        .map((z) => ({ campaignName: z.campaign_name, adGroupName: z.ad_group_name, matchTypes: z.match_types ?? [], bestellungen: Number(z.orders) }))
+        .map((z) => ({ campaignId: z.campaign_id, campaignName: z.campaign_name, adGroupName: z.ad_group_name, matchTypes: z.match_types ?? [], bestellungen: Number(z.orders) }))
         .sort((a, b) => b.bestellungen - a.bestellungen),
       asins: [...new Set(liste.flatMap((z) => z.asins ?? []))].sort(),
     });
@@ -297,7 +298,8 @@ export async function adsKandidaten(
   const bestellungen = Number(k.orders) || 0;
   const cvr = klicks > 0 ? bestellungen / klicks : null;
 
-  const negativ = baueNegativKandidaten(zeilen, cvr, minKlicks);
+  const modusVon = await ladeSteuerung(supabase, tenant_id);
+  const negativ = baueNegativKandidaten(zeilen, cvr, minKlicks).map((n) => ({ ...n, steuerung: modusVon(n.campaignId) }));
   const ernteRoh = baueErnteKandidaten(zeilen, minBestellungen);
   // Margen nur holen, wenn es etwas zu bewerten gibt. 90 Tage: lang genug, dass
   // Amazons verzögerte Gebührenabrechnung die Marge nicht verzerrt.
@@ -312,7 +314,10 @@ export async function adsKandidaten(
       margenFehler = String((e as Error)?.message ?? e);
     }
   }
-  const ernte = schaerfeErnte(ernteRoh, margen, { klicks, bestellungen });
+  // Ein Begriff zaehlt als gesteuert, sobald eine seiner Quell-Kampagnen es ist.
+  const ernte = schaerfeErnte(ernteRoh, margen, { klicks, bestellungen }).map((e) => ({
+    ...e, steuerung: e.quellen.map((q) => modusVon(q.campaignId)).find((m) => m !== "nur_analyse") ?? "nur_analyse",
+  }));
   const anlegen = negativ.filter((n) => n.aktion === "negativ_anlegen");
 
   return {
@@ -342,6 +347,8 @@ export async function adsKandidaten(
     ernte_kandidaten: ernte,
     ...(asin ? { asin: { asin, begriffe: begriffeFuerAsin(zeilen, asin) } } : {}),
     hinweise: [
+      "`steuerung` je Zeile: `pulse` = Pulse steuert die Kampagne, `h10` = die Gebote setzt Helium 10 "
+      + "(Negatives und neue Keywords bleiben möglich), `nur_analyse` = kein verwaltetes Produkt, nichts anfassen.",
       "Nur Sponsored Products: für Sponsored Brands kennt der Struktur-Snapshot die Ziele nicht — "
       + "ob ein Begriff dort schon ausgeschlossen ist, ließe sich nicht sagen.",
       "`zufall_prozent` sagt, wie oft null Bestellungen bei dieser Klickzahl reiner Zufall wären, "

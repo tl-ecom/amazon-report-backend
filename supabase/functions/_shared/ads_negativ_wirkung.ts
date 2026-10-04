@@ -19,6 +19,7 @@
 // Wie überall: nebeneinander, kein Beweis. Saison und Wettbewerb laufen mit.
 
 import { type Fenster, fenster } from "./ads_changelog.ts";
+import { ladeSteuerung } from "./ads_steuerung.ts";
 import { marktplatzKopf } from "./ads_marktplatz.ts";
 
 function r2(n: number): number { return Math.round(n * 100) / 100; }
@@ -113,7 +114,9 @@ export async function adsNegativWirkung(
   });
   if (error) throw new Error("ads_negativ_wirkung: " + error.message);
 
-  const negatives = ((data?.zeilen ?? []) as NegativZeile[]).map(baueNegativWirkung);
+  const modusVon = await ladeSteuerung(supabase, tenant_id);
+  const negatives = ((data?.zeilen ?? []) as NegativZeile[])
+    .map((z) => ({ ...baueNegativWirkung(z), steuerung: modusVon(z.campaign_id) }));
   const von_art = (e: Einordnung) => negatives.filter((n) => n.einordnung === e);
   const gespart = von_art("kosten_gespart");
   const abgeschnitten = von_art("bestellungen_abgeschnitten");
