@@ -199,7 +199,7 @@ export function bilanzAus(aenderungen: Aenderung[]): Record<string, Bilanz> {
   return out;
 }
 
-function fenster(klicks: number, kostenCents: number, umsatzCents: number, bestellungen: number): Fenster {
+export function fenster(klicks: number, kostenCents: number, umsatzCents: number, bestellungen: number): Fenster {
   const kosten = r2(kostenCents / 100);
   const umsatz = r2(umsatzCents / 100);
   return {

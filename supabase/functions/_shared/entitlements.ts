@@ -171,6 +171,9 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   // Suchbegriff-Kandidaten: eigener Schalter, in keinem Tarif gesetzt — nur Coach.
   get_ads_kandidaten: "ads_kandidaten",
   ads_kandidaten: "ads_kandidaten",
+  // Wirkung neuer Keywords: im Web Teil desselben Bereichs, deshalb derselbe Schalter.
+  get_ads_keyword_wirkung: "ads_kandidaten",
+  ads_keyword_wirkung: "ads_kandidaten",
   get_review_themes: "reviews",
   reviews: "reviews",
   get_strategy_overview: "strategie",

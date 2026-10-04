@@ -591,6 +591,23 @@ const TOOLS: ToolDef[] = [
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_kandidaten", args) : pulseNichtVerfuegbar()),
   },
   {
+    name: "get_ads_keyword_wirkung",
+    description:
+      "Was haben NEU ANGELEGTE Keywords und Targets gebracht (Sponsored Products). Je Ziel: " +
+      "`eigen` = Klicks, Kosten, Umsatz, Bestellungen, ACoS seit dem Anlegen; `vorher` = derselbe " +
+      "Suchbegriff ueber ANDERE Ziele im gleich langen Fenster davor; `anderswo` = derselbe " +
+      "Suchbegriff ueber andere Ziele seither; `gesamt_danach` = eigen + anderswo. Die Differenzen " +
+      "(umsatz_differenz, kosten_differenz, bestellungen_differenz) vergleichen gesamt_danach mit " +
+      "vorher — so zeigt sich, ob ein Exact-Keyword etwas gewonnen oder nur aus einer anderen " +
+      "Kampagne herueberverlagert hat. `status`: auswertbar / wenig_traffic / kein_traffic / " +
+      "zu_frueh, mit `grund`. Vorher-Vergleich nur bei Exact-Keywords und ASIN-Targets. " +
+      "Anlagedatum aus dem Pulse-Protokoll (sekundengenau) oder dem Struktur-Snapshot (taggenau, " +
+      "erst seit 04.10.2026). Bewusst ohne Urteil: es zaehlen der eigene ACoS und die Differenzen. " +
+      "Nebeneinander, kein Beweis. Zeitraum (Anlagedatum) via von/bis, Default letzte 90 Tage.",
+    inputSchema: ADS_ZEITRAUM_SCHEMA,
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_keyword_wirkung", args) : pulseNichtVerfuegbar()),
+  },
+  {
     name: "get_account_health",
     description:
       "Amazons Kontozustand (Account Health) je Marktplatz: Kontostatus, Account-Health-Rating " +
