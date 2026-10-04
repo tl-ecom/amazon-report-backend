@@ -87,6 +87,116 @@ export interface Aenderung {
   /** Nur gesetzt, wenn vergleichbar: die Veränderung in Prozentpunkten bzw. Prozent. */
   acos_differenz: number | null;
   cpc_veraenderung_prozent: number | null;
+  /** Nur gesetzt, wenn vergleichbar: Umsatz und ROAS danach gegen davor. */
+  urteil: Urteil | null;
+  /** Umsatz danach minus davor, in Euro. Nur gesetzt, wenn vergleichbar. */
+  umsatz_differenz: number | null;
+  /** Woraus sich die Umsatzdifferenz zusammensetzt. null, wenn nicht zerlegbar. */
+  treiber: Treiber | null;
+}
+
+/**
+ * Vier Felder statt einer Note. Bewusst beschreibend benannt: "beides besser"
+ * sagt, was gemessen wurde — "sehr gut" würde behaupten, die Änderung sei der
+ * Grund gewesen.
+ */
+export type Urteil =
+  | "beides_besser"
+  | "umsatz_besser_roas_schlechter"
+  | "roas_besser_umsatz_schlechter"
+  | "beides_schlechter"
+  | "unveraendert";
+
+export interface Treiber {
+  /** Anteile der Umsatzdifferenz in Euro. Die vier Werte summieren sich zu ihr. */
+  kosten: number;
+  cpc: number;
+  cvr: number;
+  warenkorb: number;
+  /** Der Faktor mit dem größten Betrag. */
+  haupttreiber: "kosten" | "cpc" | "cvr" | "warenkorb";
+}
+
+/** Umsatz und ROAS danach gegen davor. null, wenn in einem Fenster keine Kosten liefen. */
+export function urteilAus(davor: Fenster, danach: Fenster): Urteil | null {
+  if (davor.kosten <= 0 || danach.kosten <= 0) return null;
+  const u = Math.sign(danach.umsatz - davor.umsatz);
+  const r = Math.sign(danach.umsatz / danach.kosten - davor.umsatz / davor.kosten);
+  if (u === 0 && r === 0) return "unveraendert";
+  if (u >= 0 && r >= 0) return "beides_besser";
+  if (u <= 0 && r <= 0) return "beides_schlechter";
+  return u > 0 ? "umsatz_besser_roas_schlechter" : "roas_besser_umsatz_schlechter";
+}
+
+/**
+ * Zerlegt die Umsatzdifferenz in vier Faktoren.
+ *
+ *     Umsatz = Kosten x (1 / CPC) x CVR x Warenkorb
+ *
+ * Das ist eine Identität, keine Schätzung. Im Logarithmus wird aus dem Produkt
+ * eine Summe, und jeder Faktor bekommt den Teil der Differenz, der seinem
+ * Anteil an der Gesamtveränderung entspricht — die vier Teile ergeben zusammen
+ * die Differenz. Ein gestiegener CPC zählt negativ: für dasselbe Geld gibt es
+ * weniger Klicks.
+ *
+ * Geht nur, wenn beide Fenster Bestellungen haben; sonst sind CVR oder
+ * Warenkorb null und der Logarithmus nicht definiert. Dann null statt einer
+ * Näherung.
+ */
+export function treiberAus(davor: Fenster, danach: Fenster): Treiber | null {
+  const ok = (f: Fenster) => f.klicks > 0 && f.kosten > 0 && f.umsatz > 0 && f.bestellungen > 0;
+  if (!ok(davor) || !ok(danach)) return null;
+  const diff = danach.umsatz - davor.umsatz;
+  const gesamt = Math.log(danach.umsatz / davor.umsatz);
+  if (gesamt === 0) return null;
+  const cpc = (f: Fenster) => f.kosten / f.klicks;
+  const cvr = (f: Fenster) => f.bestellungen / f.klicks;
+  const korb = (f: Fenster) => f.umsatz / f.bestellungen;
+  const teil = (l: number) => r2((l / gesamt) * diff);
+  const t = {
+    kosten: teil(Math.log(danach.kosten / davor.kosten)),
+    cpc: teil(-Math.log(cpc(danach) / cpc(davor))),
+    cvr: teil(Math.log(cvr(danach) / cvr(davor))),
+    warenkorb: teil(Math.log(korb(danach) / korb(davor))),
+  };
+  const haupttreiber = (Object.keys(t) as Array<keyof typeof t>)
+    .reduce((a, b) => (Math.abs(t[b]) > Math.abs(t[a]) ? b : a));
+  return { ...t, haupttreiber };
+}
+
+export interface Bilanz {
+  anzahl: number;
+  urteile: Record<Urteil, number>;
+  /** Summe der Umsatzdifferenzen aller Änderungen mit Zuwachs bzw. Rückgang, in Euro. */
+  umsatz_zuwachs: number;
+  umsatz_rueckgang: number;
+}
+
+/**
+ * Bilanz der vergleichbaren Änderungen je Richtung (hoch / runter).
+ *
+ * Die Summen zählen dasselbe Ziel mehrfach, wenn es mehrfach geändert wurde,
+ * und sie sind kein Gewinn und kein Verlust DURCH die Änderungen — nur das,
+ * was in den sieben Tagen danach anders war.
+ */
+export function bilanzAus(aenderungen: Aenderung[]): Record<string, Bilanz> {
+  const out: Record<string, Bilanz> = {};
+  for (const a of aenderungen) {
+    if (!a.vergleichbar || a.urteil === null || a.umsatz_differenz === null) continue;
+    const b = out[a.richtung ?? "unbekannt"] ??= {
+      anzahl: 0,
+      urteile: {
+        beides_besser: 0, umsatz_besser_roas_schlechter: 0,
+        roas_besser_umsatz_schlechter: 0, beides_schlechter: 0, unveraendert: 0,
+      },
+      umsatz_zuwachs: 0, umsatz_rueckgang: 0,
+    };
+    b.anzahl++;
+    b.urteile[a.urteil]++;
+    if (a.umsatz_differenz > 0) b.umsatz_zuwachs = r2(b.umsatz_zuwachs + a.umsatz_differenz);
+    else b.umsatz_rueckgang = r2(b.umsatz_rueckgang + a.umsatz_differenz);
+  }
+  return out;
 }
 
 function fenster(klicks: number, kostenCents: number, umsatzCents: number, bestellungen: number): Fenster {
@@ -153,6 +263,9 @@ export function baueAenderung(z: ChangelogZeile, minKlicks = KLICKS_FUER_VERGLEI
     cpc_veraenderung_prozent: vergleichbar && davor.cpc !== null && danach.cpc !== null && davor.cpc > 0
       ? Math.round(((danach.cpc - davor.cpc) / davor.cpc) * 1000) / 10
       : null,
+    urteil: vergleichbar ? urteilAus(davor, danach) : null,
+    umsatz_differenz: vergleichbar ? r2(danach.umsatz - davor.umsatz) : null,
+    treiber: vergleichbar ? treiberAus(davor, danach) : null,
   };
 }
 
@@ -198,6 +311,14 @@ export async function adsChangelog(
     + "Auktion mit.",
   ];
 
+  if (auswertbar.length > 0) {
+    hinweise.push(
+      "`urteil`, `treiber` und `bilanz` beschreiben, was nach der Änderung anders "
+      + "war — nicht, was die Änderung bewirkt hat. Die Summen in `bilanz` zählen "
+      + "ein Ziel mehrfach, wenn es mehrfach geändert wurde.",
+    );
+  }
+
   const ungenau = zeilen.filter((z) => z.luecke_tage > 0).length;
   if (ungenau > 0) {
     hinweise.push(
@@ -224,6 +345,8 @@ export async function adsChangelog(
     anzahl: zeilen.length,
     davon_auswertbar: auswertbar.length,
     klick_schwelle: KLICKS_FUER_VERGLEICH,
+    // Je Richtung (hoch / runter): wie oft welches Urteil, und die Summen.
+    bilanz: bilanzAus(zeilen),
     aenderungen: zeilen,
     hinweise,
   };

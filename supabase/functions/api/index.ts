@@ -30,7 +30,7 @@ import { coachZugriff, ladeFeatures, zugriffErlaubt } from "../_shared/entitleme
 import { erstelleNote, listeNotes, loescheNote, setzeNoteSichtbarkeit } from "../_shared/notes.ts";
 import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
 import { adsVerlauf } from "../_shared/ads_verlauf.ts";
-import { adsStruktur } from "../_shared/ads_struktur.ts";
+import { adsStruktur, adsStrukturAenderungen } from "../_shared/ads_struktur.ts";
 import { salesFenster, salesFensterLaden } from "../_shared/sales_fenster.ts";
 import { adsPlatzierungen, adsSuchbegriffe, adsZiele } from "../_shared/ads_berichte.ts";
 import { betriebskosten } from "../_shared/betriebskosten.ts";
@@ -656,6 +656,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "reviews") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await reviewThemen(service, tenantId, (args ?? {}) as any) });
+    }
+    if (resource === "ads_struktur_aenderungen") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsStrukturAenderungen(service, tenantId, (args ?? {}) as any) });
     }
     if (resource === "ads_changelog") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await adsChangelog(service, tenantId, (args ?? {}) as any) });

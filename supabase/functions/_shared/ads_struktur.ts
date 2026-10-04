@@ -342,3 +342,103 @@ export async function adsStruktur(
     ],
   };
 }
+
+// --- Struktur-Historie -------------------------------------------------------
+//
+// Der Snapshot überschreibt den alten Stand. Ein Datenbank-Trigger hält vorher
+// fest, was sich an Budget, Zustand, Gebotsstrategie, Platzierungs-Modifiern
+// und Geboten geändert hat (Tabelle ads_struktur_aenderungen), und ads_ziele
+// merkt sich, wann ein Ziel zum ersten Mal auftauchte (erstmals_gesehen).
+
+/** Geldfelder liegen in Cent — nach außen in Euro, alles andere unverändert. */
+export function lesbarerWert(feld: string, wert: string | null): string | number | null {
+  if (wert === null || wert === undefined) return null;
+  return feld.endsWith("_cents") ? euro(wert) : wert;
+}
+
+/**
+ * Was wurde am Aufbau des Werbekontos geändert, und was kam neu dazu.
+ * Default: die letzten 30 Tage. Die Spur beginnt mit dem Tag, an dem der
+ * Trigger eingerichtet wurde — davor gibt es nichts, und das steht in den
+ * Hinweisen statt als leere Liste dazustehen.
+ */
+export async function adsStrukturAenderungen(
+  supabase: any,
+  tenant_id: string,
+  opts?: { von?: unknown; bis?: unknown; campaign_id?: unknown; limit?: unknown; marktplatz?: unknown },
+): Promise<unknown> {
+  const kopf = await marktplatzKopf(supabase, tenant_id, opts);
+  const tag = (x: unknown) => (typeof x === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x) ? x : null);
+  const von = tag(opts?.von) ?? new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+  const bis = tag(opts?.bis) ?? new Date().toISOString().slice(0, 10);
+  const bisEnde = `${bis}T23:59:59.999Z`;
+  const limit = Math.max(1, Math.min(Number(opts?.limit) || 500, 2000));
+  const campaignId = typeof opts?.campaign_id === "string" && opts.campaign_id.trim() ? opts.campaign_id.trim() : null;
+
+  let aq = supabase.from("ads_struktur_aenderungen")
+    .select("erkannt_am, stand_vorher, ebene, art, objekt_id, campaign_id, bezeichnung, feld, vorher, nachher")
+    .eq("tenant_id", tenant_id).eq("marktplatz", kopf.marktplatz)
+    .gte("erkannt_am", von).lte("erkannt_am", bisEnde)
+    .order("erkannt_am", { ascending: false }).limit(limit);
+  if (campaignId) aq = aq.eq("campaign_id", campaignId);
+  const { data: aend, error: aErr } = await aq;
+  if (aErr) throw new Error(`ads_struktur_aenderungen: ${aErr.message}`);
+
+  let nq = supabase.from("ads_ziele")
+    .select("erstmals_gesehen, art, ziel_id, campaign_id, ad_group_id, text, match_type, state, gebot_cents")
+    .eq("tenant_id", tenant_id).eq("marktplatz", kopf.marktplatz)
+    .gte("erstmals_gesehen", von).lte("erstmals_gesehen", bisEnde)
+    .order("erstmals_gesehen", { ascending: false }).limit(limit);
+  if (campaignId) nq = nq.eq("campaign_id", campaignId);
+  const { data: neu, error: nErr } = await nq;
+  if (nErr) throw new Error(`ads_ziele: ${nErr.message}`);
+
+  // Seit wann überhaupt mitgeschrieben wird: ohne das sähe "keine Änderung"
+  // genauso aus wie "noch nicht hingesehen".
+  const { data: erste } = await supabase.from("ads_ziele")
+    .select("erstmals_gesehen").eq("tenant_id", tenant_id).eq("marktplatz", kopf.marktplatz)
+    .not("erstmals_gesehen", "is", null).order("erstmals_gesehen").limit(1).maybeSingle();
+
+  return {
+    ...kopf,
+    zeitraum: { von, bis },
+    anzahl_aenderungen: (aend ?? []).length,
+    anzahl_neu: (neu ?? []).length,
+    aenderungen: (aend ?? []).map((a: any) => ({
+      erkannt_am: a.erkannt_am,
+      // Die Änderung liegt irgendwo zwischen diesen beiden Snapshots.
+      fenster_ab: a.stand_vorher,
+      ebene: a.ebene,
+      art: a.art,
+      id: a.objekt_id,
+      campaignId: a.campaign_id,
+      bezeichnung: a.bezeichnung,
+      feld: a.feld.replace(/_cents$/, ""),
+      vorher: lesbarerWert(a.feld, a.vorher),
+      nachher: lesbarerWert(a.feld, a.nachher),
+    })),
+    neu_angelegt: (neu ?? []).map((z: any) => ({
+      erstmals_gesehen: z.erstmals_gesehen,
+      art: z.art,
+      id: z.ziel_id,
+      campaignId: z.campaign_id,
+      adGroupId: z.ad_group_id || null,
+      text: z.text,
+      matchType: z.match_type,
+      state: z.state,
+      gebot: euro(z.gebot_cents),
+    })),
+    hinweise: [
+      "Abgeleitet aus dem täglichen Struktur-Snapshot, nicht aus Amazons Protokoll: "
+      + "jede Änderung ist nur auf das Fenster zwischen zwei Snapshots genau "
+      + "(`fenster_ab` bis `erkannt_am`), und mehrere Änderungen im selben Fenster "
+      + "erscheinen als eine. Wer geändert hat, steht hier nicht.",
+      "Entfernte oder archivierte Ziele erscheinen nicht — sie fallen nur aus dem Snapshot.",
+      erste?.erstmals_gesehen
+        ? `Neue Ziele werden seit ${String(erste.erstmals_gesehen).slice(0, 10)} erkannt. `
+          + "Was davor schon da war, hat kein Anlagedatum."
+        : "Seit Einrichtung der Spur ist noch kein neues Ziel dazugekommen — oder der "
+          + "Struktur-Snapshot ist seither nicht gelaufen.",
+    ],
+  };
+}

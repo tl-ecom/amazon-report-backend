@@ -25,7 +25,7 @@ import { kpiVerlauf } from "../_shared/kpiverlauf.ts";
 import { adsVerlauf } from "../_shared/ads_verlauf.ts";
 import { istPlattformAdmin } from "../_shared/admin.ts";
 import { ladeFeatures } from "../_shared/entitlements.ts";
-import { adsStruktur } from "../_shared/ads_struktur.ts";
+import { adsStruktur, adsStrukturAenderungen } from "../_shared/ads_struktur.ts";
 import { adsPlatzierungen, adsSuchbegriffe, adsZiele } from "../_shared/ads_berichte.ts";
 import { ertragVerlauf } from "../_shared/ertrag.ts";
 import { listeSqp, sqpAsins } from "../_shared/sqp.ts";
@@ -177,6 +177,7 @@ Deno.serve(async (req) => {
         case "ads_suchbegriffe": return await adsSuchbegriffe(supabase, tenant_id, pulseArgs, sicht);
         case "ads_platzierungen": return await adsPlatzierungen(supabase, tenant_id, pulseArgs, sicht);
         case "ads_ziele": return await adsZiele(supabase, tenant_id, pulseArgs, sicht);
+        case "ads_struktur_aenderungen": return await adsStrukturAenderungen(supabase, tenant_id, pulseArgs);
         case "ads_changelog": return await adsChangelog(supabase, tenant_id, pulseArgs);
         case "reviews": return await reviewThemen(supabase, tenant_id, pulseArgs);
         case "ertrag": return await ertragVerlauf(supabase, tenant_id);

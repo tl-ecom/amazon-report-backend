@@ -6,7 +6,7 @@
 // auszugeben.
 
 import { assertEquals } from "jsr:@std/assert@1";
-import { baueAenderung, KLICKS_FUER_VERGLEICH, type ChangelogZeile } from "./ads_changelog.ts";
+import { baueAenderung, bilanzAus, KLICKS_FUER_VERGLEICH, type ChangelogZeile } from "./ads_changelog.ts";
 
 function zeile(ueber: Partial<ChangelogZeile> = {}): ChangelogZeile {
   return {
@@ -98,4 +98,48 @@ Deno.test("Schwelle ist eine Konstante, keine verstreute Zahl", () => {
   assertEquals(knapp.vergleichbar, true);
   const drunter = baueAenderung(zeile({ vorher_clicks: 4, nachher_clicks: 9 }));
   assertEquals(drunter.vergleichbar, false);
+});
+
+Deno.test("Urteil: mehr Umsatz bei schlechterem ROAS ist kein 'besser'", () => {
+  // 100 € aus 20 € (ROAS 5) → 120 € aus 40 € (ROAS 3).
+  const a = baueAenderung(zeile());
+  assertEquals(a.urteil, "umsatz_besser_roas_schlechter");
+  assertEquals(a.umsatz_differenz, 20);
+});
+
+Deno.test("Urteil: beide Richtungen und der Fall ohne Kosten", () => {
+  assertEquals(baueAenderung(zeile({ nachher_spend_cents: 2000 })).urteil, "beides_besser");
+  assertEquals(baueAenderung(zeile({ nachher_sales_cents: 5000 })).urteil, "beides_schlechter");
+  // Ohne Kosten in einem Fenster gibt es keinen ROAS — dann auch kein Urteil.
+  assertEquals(baueAenderung(zeile({ nachher_spend_cents: 0 })).urteil, null);
+});
+
+Deno.test("Treiber: die vier Teile ergeben zusammen die Umsatzdifferenz", () => {
+  const a = baueAenderung(zeile());
+  const t = a.treiber!;
+  // Kosten verdoppelt (+), CPC 0,50 → 0,80 (−), CVR bleibt 10 %, Warenkorb 25 € → 24 € (−).
+  assertEquals(t.cvr, 0);
+  assertEquals(t.kosten > 0 && t.cpc < 0 && t.warenkorb < 0, true);
+  // Jeder Teil ist auf Cent gerundet, die Summe darf deshalb um Cents abweichen.
+  assertEquals(Math.abs(t.kosten + t.cpc + t.cvr + t.warenkorb - a.umsatz_differenz!) < 0.03, true);
+  assertEquals(t.haupttreiber, "kosten");
+});
+
+Deno.test("Treiber: ohne Bestellungen in einem Fenster keine Zerlegung", () => {
+  assertEquals(baueAenderung(zeile({ nachher_sales_cents: 0, nachher_orders: 0 })).treiber, null);
+});
+
+Deno.test("Bilanz: zählt nur Vergleichbares, getrennt nach Richtung", () => {
+  const b = bilanzAus([
+    baueAenderung(zeile()), // hoch, +20
+    baueAenderung(zeile({ nachher_sales_cents: 5000 })), // hoch, −50
+    baueAenderung(zeile({ richtung: "runter", nachher_spend_cents: 2000 })), // runter, +20
+    baueAenderung(zeile({ vorher_clicks: 1 })), // nicht vergleichbar
+  ]);
+  assertEquals(b.hoch.anzahl, 2);
+  assertEquals(b.hoch.umsatz_zuwachs, 20);
+  assertEquals(b.hoch.umsatz_rueckgang, -50);
+  assertEquals(b.hoch.urteile.beides_schlechter, 1);
+  assertEquals(b.runter.anzahl, 1);
+  assertEquals(b.runter.urteile.beides_besser, 1);
 });

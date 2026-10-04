@@ -160,6 +160,11 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   // Feature ueber die Weboberflaeche erreichbar, obwohl es im Tarif aus ist.
   get_ads_changelog: "ads_changelog",
   ads_changelog: "ads_changelog",
+  // Struktur-Historie und Account Health: eigene Schalter, in KEINEM Tarif
+  // gesetzt — damit nur in der Coach-Ansicht sichtbar, bis sie jemand bewusst
+  // in der Matrix freigibt.
+  get_ads_struktur_aenderungen: "ads_struktur_aenderungen",
+  ads_struktur_aenderungen: "ads_struktur_aenderungen",
   get_review_themes: "reviews",
   reviews: "reviews",
   get_strategy_overview: "strategie",

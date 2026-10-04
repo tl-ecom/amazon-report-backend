@@ -6,6 +6,7 @@
 
 import { assertEquals } from "jsr:@std/assert@1";
 import {
+  lesbarerWert,
   baueAnzeigengruppenRows,
   baueKampagnenRows,
   baueZieleRows,
@@ -126,4 +127,11 @@ Deno.test("effektivesGebot: eigenes vor geerbtem, beides fehlend ergibt null", (
   assertEquals(effektivesGebot(null, 75), { gebot: 0.75, geerbt: true });
   assertEquals(effektivesGebot("42", "75"), { gebot: 0.42, geerbt: false });
   assertEquals(effektivesGebot(null, null), { gebot: null, geerbt: false });
+});
+
+Deno.test("Struktur-Historie: Geldfelder in Euro, alles andere unverändert", () => {
+  assertEquals(lesbarerWert("budget_cents", "1500"), 15);
+  assertEquals(lesbarerWert("gebot_cents", null), null);
+  assertEquals(lesbarerWert("state", "PAUSED"), "PAUSED");
+  assertEquals(lesbarerWert("mod_top_prozent", "70"), "70");
 });

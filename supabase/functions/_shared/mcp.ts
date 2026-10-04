@@ -498,7 +498,11 @@ const TOOLS: ToolDef[] = [
     description:
       "Gebots- und Statusaenderungen je Ziel (Keyword/Target), mit den Kennzahlen der " +
       "7 Tage davor und danach. Beantwortet: lag der ACoS-Sprung an einer Aenderung oder " +
-      "an Amazon? " +
+      "an Amazon? Je vergleichbarer Aenderung zusaetzlich `urteil` (Umsatz und ROAS danach " +
+      "gegen davor: beides_besser / umsatz_besser_roas_schlechter / " +
+      "roas_besser_umsatz_schlechter / beides_schlechter), `umsatz_differenz` und `treiber` " +
+      "(Zerlegung der Umsatzdifferenz in Kosten, CPC, CVR, Warenkorb). `bilanz` zaehlt die " +
+      "Urteile je Richtung (hoch/runter) und summiert Zuwachs und Rueckgang. " +
       "WICHTIG zur Einordnung: die Liste ist aus den TAGESSTAENDEN abgeleitet, nicht aus " +
       "Amazons Protokoll — sie sieht deshalb auch Aenderungen, die jemand direkt in der " +
       "Amazon-Konsole gemacht hat, aber KEINE, die am selben Tag zurueckgenommen wurde. " +
@@ -528,6 +532,32 @@ const TOOLS: ToolDef[] = [
       additionalProperties: false,
     },
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_changelog", args) : pulseNichtVerfuegbar()),
+  },
+  {
+    name: "get_ads_struktur_aenderungen",
+    description:
+      "Was am AUFBAU des Werbekontos geaendert wurde: Tagesbudget, Zustand, Gebotsstrategie " +
+      "und Platzierungs-Modifier je Kampagne, Standardgebot je Anzeigengruppe, Gebot und " +
+      "Zustand je Keyword/Target/Negative — jeweils mit Wert vorher und nachher. Dazu " +
+      "`neu_angelegt`: Keywords, Targets und Negatives, die im Zeitraum zum ersten Mal " +
+      "auftauchten (Keyword-Ernte, neue Negatives). " +
+      "EINORDNUNG: abgeleitet aus dem taeglichen Struktur-Snapshot, nicht aus Amazons " +
+      "Protokoll. Eine Aenderung ist nur auf das Fenster zwischen zwei Snapshots genau " +
+      "(`fenster_ab` bis `erkannt_am`); wer geaendert hat, steht hier nicht. Die Spur " +
+      "beginnt erst mit ihrer Einrichtung (04.10.2026) — davor gibt es nichts. " +
+      "UNTERSCHIED zu get_ads_changelog: jenes zeigt Gebotsaenderungen MIT Kennzahlen " +
+      "davor/danach aus den Tagesreihen; dieses zeigt auch Budget, Modifier und Negatives, " +
+      "aber ohne Kennzahlen. Zeitraum via von/bis, Default letzte 30 Tage.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...ADS_ZEITRAUM_SCHEMA.properties,
+        campaign_id: { type: "string", description: "Nur diese Kampagne." },
+        limit: { type: "number", description: "Hoechstzahl je Liste (Standard 500, max 2000)." },
+      },
+      additionalProperties: false,
+    },
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_struktur_aenderungen", args) : pulseNichtVerfuegbar()),
   },
   {
     name: "get_review_themes",
