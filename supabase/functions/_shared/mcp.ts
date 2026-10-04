@@ -600,7 +600,10 @@ const TOOLS: ToolDef[] = [
       "(umsatz_differenz, kosten_differenz, bestellungen_differenz) vergleichen gesamt_danach mit " +
       "vorher — so zeigt sich, ob ein Exact-Keyword etwas gewonnen oder nur aus einer anderen " +
       "Kampagne herueberverlagert hat. `status`: auswertbar / wenig_traffic / kein_traffic / " +
-      "zu_frueh, mit `grund`. Vorher-Vergleich nur bei Exact-Keywords und ASIN-Targets. " +
+      "zu_frueh, mit `grund`. `begriff_eingebrochen: true` = der Suchbegriff hatte davor Traffic und " +
+      "ist seit dem Anlegen ueber alle Ziele zusammen auf unter ein Viertel gefallen (beim Umzug " +
+      "ins Exact verloren gegangen: Gebot zu niedrig oder in der Quelle negiert). " +
+      "Vorher-Vergleich nur bei Exact-Keywords und ASIN-Targets. " +
       "Anlagedatum aus dem Pulse-Protokoll (sekundengenau) oder dem Struktur-Snapshot (taggenau, " +
       "erst seit 04.10.2026). Bewusst ohne Urteil: es zaehlen der eigene ACoS und die Differenzen. " +
       "Nebeneinander, kein Beweis. Zeitraum (Anlagedatum) via von/bis, Default letzte 90 Tage.",

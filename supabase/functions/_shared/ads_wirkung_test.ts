@@ -30,6 +30,7 @@ Deno.test("Wirkung: obstschale — eine Bestellung für 92 €, und der Begriff 
   assertEquals("urteil" in w, false);
   assertEquals(w.gebot, 0.6);
   assertEquals(w.grund, null);
+  assertEquals(w.begriff_eingebrochen, false);
 });
 
 Deno.test("Wirkung: zu früh, kein Traffic, wenig Traffic — benannt statt bewertet", () => {
@@ -56,6 +57,22 @@ Deno.test("Wirkung: hatte der Begriff davor kaum Traffic, wird er nicht verglich
   const w = baueWirkung(zeile({ vorher: { clicks: 2, spend_cents: 90, sales_cents: 0, orders: 0 } }));
   assertEquals([w.umsatz_differenz, w.kosten_differenz], [null, null]);
   assertEquals(w.grund?.includes("erst erschlossen"), true);
+});
+
+Deno.test("Wirkung: kratzbrett l form — beim Umzug ins Exact ging der Begriff verloren", () => {
+  // Vaneja, angelegt am 25.09.2026: davor 12 Klicks und 4 Bestellungen über
+  // andere Ziele, seither 2 Klicks über das neue Keyword und sonst nichts.
+  const w = baueWirkung(zeile({
+    text: "kratzbrett l form", tage: 7,
+    vorher: { clicks: 12, spend_cents: 1450, sales_cents: 6208, orders: 4 },
+    eigen: { clicks: 2, spend_cents: 223, sales_cents: 0, orders: 0 },
+    anderswo: { clicks: 0, spend_cents: 0, sales_cents: 0, orders: 0 },
+  }));
+  // Das Ziel selbst hat zu wenig Klicks für einen ACoS ...
+  assertEquals(w.status, "wenig_traffic");
+  // ... aber der Vergleich des Begriffs steht trotzdem da, und er ist der Befund.
+  assertEquals([w.bestellungen_differenz, w.umsatz_differenz, w.kosten_differenz], [-4, -62.08, -12.27]);
+  assertEquals(w.begriff_eingebrochen, true);
 });
 
 Deno.test("Wirkung: verlagert statt gewonnen — gleiche Bestellungen, nur anderes Ziel", () => {

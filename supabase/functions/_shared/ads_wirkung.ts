@@ -71,9 +71,14 @@ export function baueWirkung(z: WirkungZeile) {
   const anderswo = z.anderswo ? f(z.anderswo) : null;
   const gesamt = z.anderswo ? f(summe(z.eigen, z.anderswo)) : null;
 
-  // Vergleich nur, wenn der Begriff eindeutig ist, das Ziel auswertbar und es
-  // davor überhaupt nennenswerten Traffic auf dem Begriff gab.
-  const vergleichbar = status === "auswertbar" && vorher !== null && gesamt !== null && vorher.klicks >= MIN_KLICKS;
+  // Vergleich, sobald der Begriff eindeutig ist, eine Woche Daten vorliegt und
+  // es DAVOR nennenswerten Traffic auf dem Begriff gab. Bewusst unabhängig
+  // davon, ob das neue Ziel selbst Klicks hat: Vanejas "kratzbrett l form"
+  // brachte über andere Ziele 4 Bestellungen in sieben Tagen; nach dem Anlegen
+  // des Exact-Keywords kamen 2 Klicks und keine Bestellung mehr. Genau dieser
+  // Fall — der Begriff ist beim Umzug verloren gegangen — wäre unsichtbar,
+  // wenn "wenig Traffic" den Vergleich abschaltete.
+  const vergleichbar = tage >= MIN_TAGE && vorher !== null && gesamt !== null && vorher.klicks >= MIN_KLICKS;
 
   let grund: string | null = null;
   if (status === "zu_frueh") {
@@ -85,7 +90,7 @@ export function baueWirkung(z: WirkungZeile) {
       ? "Das Ziel ist pausiert und hatte keinen Klick."
       : "Kein einziger Klick seit dem Anlegen — Gebot zu niedrig oder kein Suchvolumen.";
   } else if (status === "wenig_traffic") {
-    grund = `Nur ${eigen.klicks} Klicks seit dem Anlegen (nötig sind ${MIN_KLICKS}).`;
+    grund = `Nur ${eigen.klicks} Klicks seit dem Anlegen (nötig sind ${MIN_KLICKS}) — der eigene ACoS ist noch kein Messwert.`;
   } else if (vorher === null) {
     grund = "Kein Vorher-Vergleich: ein Phrase- oder Broad-Keyword fängt viele Suchbegriffe, nicht einen.";
   } else if (!vergleichbar) {
@@ -105,6 +110,9 @@ export function baueWirkung(z: WirkungZeile) {
     tage,
     status,
     grund,
+    // Der Suchbegriff lief davor und ist seit dem Anlegen fast verschwunden:
+    // weniger als ein Viertel der Klicks, über alle Ziele zusammen.
+    begriff_eingebrochen: vergleichbar && gesamt!.klicks * 4 < vorher!.klicks,
     eigen,
     vorher,
     anderswo,
