@@ -30,6 +30,7 @@ import { adsPlatzierungen, adsSuchbegriffe, adsZiele } from "../_shared/ads_beri
 import { ertragVerlauf } from "../_shared/ertrag.ts";
 import { listeSqp, sqpAsins } from "../_shared/sqp.ts";
 import { adsChangelog } from "../_shared/ads_changelog.ts";
+import { adsKandidaten } from "../_shared/ads_kandidaten.ts";
 import { reviewThemen } from "../_shared/reviews.ts";
 import { listeDiagnosen } from "../_shared/diagnostics.ts";
 import { changeEvents } from "../_shared/flightrecorder.ts";
@@ -178,6 +179,7 @@ Deno.serve(async (req) => {
         case "ads_platzierungen": return await adsPlatzierungen(supabase, tenant_id, pulseArgs, sicht);
         case "ads_ziele": return await adsZiele(supabase, tenant_id, pulseArgs, sicht);
         case "ads_struktur_aenderungen": return await adsStrukturAenderungen(supabase, tenant_id, pulseArgs);
+        case "ads_kandidaten": return await adsKandidaten(supabase, tenant_id, pulseArgs);
         case "ads_changelog": return await adsChangelog(supabase, tenant_id, pulseArgs);
         case "reviews": return await reviewThemen(supabase, tenant_id, pulseArgs);
         case "ertrag": return await ertragVerlauf(supabase, tenant_id);

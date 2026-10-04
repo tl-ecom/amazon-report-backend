@@ -51,6 +51,7 @@ import {
   from "../_shared/einstellungen.ts";
 import { cashflowUebersicht } from "../_shared/cashflow.ts";
 import { adsChangelog } from "../_shared/ads_changelog.ts";
+import { adsKandidaten } from "../_shared/ads_kandidaten.ts";
 import { reviewThemen } from "../_shared/reviews.ts";
 import { importiereEkCsv, importiereEkVonUrl, speichereEkUrl } from "../_shared/sellerboard_import.ts";
 import {
@@ -659,6 +660,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "ads_struktur_aenderungen") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await adsStrukturAenderungen(service, tenantId, (args ?? {}) as any) });
+    }
+    if (resource === "ads_kandidaten") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsKandidaten(service, tenantId, (args ?? {}) as any) });
     }
     if (resource === "ads_changelog") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await adsChangelog(service, tenantId, (args ?? {}) as any) });

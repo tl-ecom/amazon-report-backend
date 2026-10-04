@@ -168,6 +168,9 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   ads_struktur_aenderungen: "ads_changelog",
   // Web und MCP rufen dasselbe Werkzeug unter demselben Namen.
   get_account_health: "account_health",
+  // Suchbegriff-Kandidaten: eigener Schalter, in keinem Tarif gesetzt — nur Coach.
+  get_ads_kandidaten: "ads_kandidaten",
+  ads_kandidaten: "ads_kandidaten",
   get_review_themes: "reviews",
   reviews: "reviews",
   get_strategy_overview: "strategie",

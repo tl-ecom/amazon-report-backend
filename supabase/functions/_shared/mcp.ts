@@ -561,6 +561,36 @@ const TOOLS: ToolDef[] = [
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_struktur_aenderungen", args) : pulseNichtVerfuegbar()),
   },
   {
+    name: "get_ads_kandidaten",
+    description:
+      "Handlungskandidaten aus den Suchbegriffen (Sponsored Products): " +
+      "`negativ_kandidaten` = Suchbegriffe mit Klicks und Kosten, aber ohne Bestellung, die in " +
+      "ihrer Anzeigengruppe noch NICHT ausgeschlossen sind — mit Kosten, `zufall_prozent` (wie oft " +
+      "null Bestellungen bei dieser Klickzahl reiner Zufall waeren, gemessen an der Konto-CVR) und " +
+      "`bestellungen_anderswo` (verkauft der Begriff in einer anderen Gruppe?). `aktion` " +
+      "unterscheidet `negativ_anlegen` von `ziel_pruefen` (der Begriff ist selbst das Exact-Keyword " +
+      "oder ASIN-Target der Gruppe — dann hilft kein Negative). " +
+      "`ernte_kandidaten` = Suchbegriffe mit Bestellungen, fuer die es im Konto kein aktives " +
+      "Exact-Keyword gibt, je Begriff ueber alle Gruppen summiert, mit ACoS, CVR und bisherigem " +
+      "Klickpreis als Startgebot. " +
+      "Mit `asin`: zusaetzlich alle Suchbegriffe der Anzeigengruppen, die diese ASIN bewerben " +
+      "(`eindeutig` = die Gruppe bewirbt nur diese ASIN). " +
+      "Zeitraum via von/bis, Default letzte 60 Tage. Schwellen: min_klicks (Default 10), " +
+      "min_bestellungen (Default 2). Vorhandene Negatives und Keywords stammen aus dem letzten " +
+      "Struktur-Snapshot.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...ADS_ZEITRAUM_SCHEMA.properties,
+        min_klicks: { type: "number", description: "Negativ-Kandidaten ab so vielen Klicks ohne Bestellung. Default 10." },
+        min_bestellungen: { type: "number", description: "Ernte-Kandidaten ab so vielen Bestellungen. Default 2." },
+        asin: { type: "string", description: "Zusaetzlich die Suchbegriffe zu dieser beworbenen ASIN." },
+      },
+      additionalProperties: false,
+    },
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_kandidaten", args) : pulseNichtVerfuegbar()),
+  },
+  {
     name: "get_account_health",
     description:
       "Amazons Kontozustand (Account Health) je Marktplatz: Kontostatus, Account-Health-Rating " +
