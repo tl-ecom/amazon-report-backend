@@ -18,6 +18,7 @@ import { baueListingsOverview } from "./listings.ts";
 import { baueProductPerformance, Quelle } from "./product.ts";
 import { baueReturnsOverview } from "./returns.ts";
 import { baueAdsOverview } from "./ads.ts";
+import { baueAccountHealth } from "./account_health.ts";
 
 // Vom Server nach außen gemeldete Protokollversionen (neueste zuerst).
 // Beim initialize wird die vom Client angeforderte zurückgespiegelt, wenn wir
@@ -558,6 +559,26 @@ const TOOLS: ToolDef[] = [
       additionalProperties: false,
     },
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_struktur_aenderungen", args) : pulseNichtVerfuegbar()),
+  },
+  {
+    name: "get_account_health",
+    description:
+      "Amazons Kontozustand (Account Health) je Marktplatz: Kontostatus, Account-Health-Rating " +
+      "(Punkte und Status), Verwarnungen, und alle Leistungs- und Richtlinienkennzahlen — " +
+      "Maengelquote je Versandart, verspaetete Sendungen, Stornoquote, puenktliche Lieferung, " +
+      "gueltige Sendungsverfolgung, Rechnungsmaengel sowie Verstoesse (Listing-Richtlinien, " +
+      "geistiges Eigentum, Produktsicherheit, Echtheit, Zustand, Rezensionen). " +
+      "`handlungsbedarf` nennt, wo Amazon etwas anderes als 'in Ordnung' meldet. " +
+      "`ziel_verfehlt_trotz_gutem_status` nennt Kennzahlen, deren Wert jenseits von Amazons " +
+      "eigenem Ziel liegt, obwohl Amazon GOOD meldet — meist wegen kleiner Mengen (`menge`). " +
+      "Amazons `status` entscheidet ueber das Konto, nicht dieser Vergleich. Taeglich gezogen; " +
+      "`stand` sagt wann.",
+    inputSchema: LEERES_SCHEMA,
+    handle: async (_args, ctx) => {
+      const row = await ctx.ladeReport("GET_V2_SELLER_PERFORMANCE_REPORT");
+      if (!row) return keineDaten("GET_V2_SELLER_PERFORMANCE_REPORT");
+      return baueAccountHealth(row.payload as Record<string, any>, row.data_timestamp);
+    },
   },
   {
     name: "get_review_themes",

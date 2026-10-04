@@ -165,6 +165,8 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   // in der Matrix freigibt.
   get_ads_struktur_aenderungen: "ads_struktur_aenderungen",
   ads_struktur_aenderungen: "ads_struktur_aenderungen",
+  // Web und MCP rufen dasselbe Werkzeug unter demselben Namen.
+  get_account_health: "account_health",
   get_review_themes: "reviews",
   reviews: "reviews",
   get_strategy_overview: "strategie",

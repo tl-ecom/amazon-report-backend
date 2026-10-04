@@ -236,10 +236,9 @@ const REPORT_KONFIG: Record<string, ReportKonfig> = {
   GET_V2_SELLER_PERFORMANCE_REPORT: {
     // Account Health: Rating, Mängelquoten, Richtlinienverstöße. Momentaufnahme,
     // deshalb ohne Zeitfenster (mit Fenster melden Momentaufnahmen FATAL).
-    // NOCH NICHT im Zeitplan und ohne Leser: erst einmal von Hand ziehen und
-    // den Leser an der ECHTEN Antwort bauen, nicht an der Dokumentation.
-    // pflichtSchluessel fehlt aus demselben Grund.
+    // Leser: _shared/account_health.ts, gebaut an Vanejas Antwort vom 04.10.2026.
     format: "json",
+    pflichtSchluessel: ["performanceMetrics"],
     snapshot: true,
     stableLagDays: 0,
     maxDays: 0,
