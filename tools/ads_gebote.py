@@ -217,6 +217,19 @@ def cmd_firmen(args):
     tabelle(ruf({"action": "firmen"})["firmen"], ["name", "tenant_id", "profile_id", "marketplace_id", "status"])
 
 
+def cmd_steuerung(args):
+    """Wer steuert welche Kampagne: Helium 10, Pulse oder nur Analyse (liest nur)."""
+    tenant, name = firma_id(args.firma)
+    namen = {str(k["campaignId"]): k["name"] for k in
+             ruf({"action": "kampagnen", "company_id": tenant, "status": ["ENABLED", "PAUSED"]})["kampagnen"]}
+    zeilen = ruf({"action": "steuerung", "company_id": tenant})["kampagnen"]
+    for z in zeilen:
+        z["name"] = namen.get(str(z["campaign_id"]), "(anderes Profil oder archiviert)")
+    zeilen.sort(key=lambda z: (z["produkt"] or "", z["modus"], z["name"]))
+    print(f"Firma: {name}   Nicht gelistete Kampagnen: nur Analyse.")
+    tabelle(zeilen, ["produkt", "modus", "name", "campaign_id", "geprueft_am"])
+
+
 def cmd_kampagnen(args):
     tenant, name = firma_id(args.firma)
     d = ruf({"action": "kampagnen", "company_id": tenant, "status": args.status.split(",")})
@@ -945,6 +958,10 @@ def main():
     s.add_argument("--grund", default=None, help="kurze Begruendung fuers Log")
     s.add_argument("--ja", action="store_true", help="ohne Rueckfrage")
     s.set_defaults(fn=cmd_setzen)
+
+    s = sub.add_parser("steuerung", help="wer steuert welche Kampagne: Helium 10, Pulse, nur Analyse (liest nur)", parents=[gemeinsam])
+    s.add_argument("--firma", required=True)
+    s.set_defaults(fn=cmd_steuerung)
 
     s = sub.add_parser("historie", help="Amazons Aenderungshistorie abfragen (liest nur)", parents=[gemeinsam])
     s.add_argument("--firma", required=True)

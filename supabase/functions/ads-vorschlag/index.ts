@@ -18,6 +18,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { rechneKampagne, speichere } from "../_shared/gebotsautomatik_lauf.ts";
+import { sperre, steuerung } from "../_shared/ads_steuerung.ts";
 
 function json(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -51,9 +52,16 @@ Deno.serve(async (req) => {
       });
     }
 
+    const { data: stRows, error: stErr } = await supabase.from("ads_steuerung").select("campaign_id, modus").eq("tenant_id", tenant_id);
+    if (stErr) return json({ error: "Steuerung nicht lesbar", detail: stErr.message }, 500);
+    const modusVon = steuerung(stRows ?? []);
+
     const laufAm = new Date().toISOString();
     const laeufe = [];
     for (const regel of regeln) {
+      // Wo Helium 10 die Gebote setzt, rechnet Pulse keinen Vorschlag.
+      const gesperrt = sperre(modusVon(regel.campaign_id), "gebot");
+      if (gesperrt) { laeufe.push({ campaign_id: String(regel.campaign_id), uebersprungen: gesperrt }); continue; }
       try {
         const e = await rechneKampagne(supabase, tenant_id, regel);
         if (!trocken) await speichere(supabase, tenant_id, laufAm, e.vorschlaege);

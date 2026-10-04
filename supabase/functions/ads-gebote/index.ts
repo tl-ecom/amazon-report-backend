@@ -57,6 +57,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { istPlattformAdmin } from "../_shared/admin.ts";
+import { sperre, steuerung } from "../_shared/ads_steuerung.ts";
 import { baueAenderungen, fasseZusammen, type GebotsRegel, type GebotsZeile, MIN_GEBOT, pruefeRegel, targetText } from "../_shared/gebote.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -186,6 +187,20 @@ Deno.serve(async (req) => {
 
     const ads = new AdsClient(clientId, profileId, accessToken);
 
+    // --- Steuerung: Helium 10, Pulse oder nur Analyse (siehe _shared/ads_steuerung.ts).
+    const { data: stRows, error: stErr } = await service.from("ads_steuerung")
+      .select("campaign_id, produkt, modus, grund, geprueft_am").eq("tenant_id", tenantId);
+    if (stErr) return json({ error: "Steuerung nicht lesbar. Es wurde NICHTS geschrieben.", detail: stErr.message }, 500);
+    const modusVon = steuerung(stRows ?? []);
+    if (action === "steuerung") return json({ tenant_id: tenantId, kampagnen: stRows ?? [] });
+    // Schreibaktionen an genau einer Kampagne: hier einmal pruefen statt in jeder Aktion.
+    const STRUKTUR = ["platzierung_setzen", "keyword_anlegen", "negative_anlegen", "produkt_anlegen", "negative_target_anlegen",
+      "sb_kampagne_zustand", "sb_budget_setzen", "sb_negatives_anlegen", "budget_setzen", "kampagne_zustand"];
+    if (STRUKTUR.includes(action) && str(body.campaignId)) {
+      const s = sperre(modusVon(str(body.campaignId)!), "struktur");
+      if (s) return json({ error: `${s} Es wurde NICHTS geschrieben.` }, 403);
+    }
+
     // Amazons eigene Aenderungshistorie (wer hat wann was geaendert). REINES
     // LESEN, fester Pfad. Die Anfrage wird durchgereicht, weil die Form des
     // Endpunkts erst am echten Konto geklaert wird — so laesst sie sich vom
@@ -219,6 +234,9 @@ Deno.serve(async (req) => {
       if (action === "gebote") {
         return json({ tenant_id: tenantId, anzahl: z.zeilen.length, erben_standard: z.erben, zeilen: z.zeilen, adgroups: z.adGroups });
       }
+
+      const gesperrt = kampagnenIds.map((id) => ({ campaignId: id, grund: sperre(modusVon(id), "gebot") })).filter((x) => x.grund);
+      if (gesperrt.length) return json({ error: "Gebotsvorschau nur für Kampagnen, die Pulse steuert.", gesperrt }, 403);
 
       const regel = leseRegel(body.regel);
       const fehler = pruefeRegel(regel);
@@ -277,6 +295,8 @@ Deno.serve(async (req) => {
       for (const g of gewollt) {
         const z = byId.get(`${g.art}:${g.id}`);
         if (!z) { ergebnisse.push({ ...g, ergebnis: "uebersprungen", detail: "bei Amazon nicht gefunden" }); continue; }
+        const gesperrt = sperre(modusVon(z.campaignId), g.neu !== null ? "gebot" : "struktur");
+        if (gesperrt) { ergebnisse.push({ ...g, ergebnis: "uebersprungen", detail: gesperrt, text: z.text, campaignId: z.campaignId, adGroupId: z.adGroupId }); continue; }
         if (g.neu !== null && Number.isFinite(g.alt) && Math.abs(z.gebot - g.alt) > 0.005) {
           ergebnisse.push({ ...g, ergebnis: "uebersprungen", detail: `Gebot ist inzwischen ${z.gebot}, erwartet ${g.alt}`, text: z.text, campaignId: z.campaignId, adGroupId: z.adGroupId });
           continue;
@@ -527,6 +547,8 @@ Deno.serve(async (req) => {
 
       if (k.ok) {
         const cid = k.id!;
+        // Ueber Pulse angelegt = von Pulse gesteuert (sonst waere sie als ungelistet gesperrt).
+        if (stRows?.length) await service.from("ads_steuerung").insert({ tenant_id: tenantId, campaign_id: cid, modus: "pulse", grund: "über Pulse angelegt" });
         const gruppe = { campaignId: cid, name: adGroupName, state: "ENABLED", defaultBid };
         const g = (await ads.post("/sp/adGroups", CT.adGroup, "adGroups", [gruppe]))[0] ?? { ok: false, detail: "keine Antwort" };
         log.push({ aktion: "kampagne_anlegen", objekt_art: "adgroup", objekt_id: g.id ?? null, campaign_id: cid, nachher: gruppe,
@@ -725,7 +747,7 @@ Deno.serve(async (req) => {
       return json({ campaignId: cid, name: c.name, vorher: c.state, nachher: state, ergebnis: e.ok ? "ok" : "fehler", detail: e.ok ? null : e.detail, ...(logErr ? { log_fehler: logErr } : {}) });
     }
 
-    return json({ error: "Unbekannte action. Erlaubt: firmen, profile, produkte, produkt_anlegen, kampagne_anlegen, kampagnen, gebote, vorschau, pruefen, setzen, platzierung, platzierung_setzen, budget_setzen, kampagne_zustand, negatives, keyword_anlegen, negative_anlegen, negative_targets, negative_target_anlegen, sb_kampagnen, sb_kampagne_zustand, sb_budget_setzen, sb_negatives, sb_negatives_anlegen" }, 400);
+    return json({ error: "Unbekannte action. Erlaubt: firmen, profile, steuerung, produkte, produkt_anlegen, kampagne_anlegen, kampagnen, gebote, vorschau, pruefen, setzen, platzierung, platzierung_setzen, budget_setzen, kampagne_zustand, negatives, keyword_anlegen, negative_anlegen, negative_targets, negative_target_anlegen, sb_kampagnen, sb_kampagne_zustand, sb_budget_setzen, sb_negatives, sb_negatives_anlegen" }, 400);
   } catch (e) {
     return json({ error: "Ausnahme", detail: String(e) }, 500);
   }
