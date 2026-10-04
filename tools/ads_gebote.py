@@ -224,7 +224,7 @@ def cmd_steuerung(args):
              ruf({"action": "kampagnen", "company_id": tenant, "status": ["ENABLED", "PAUSED"]})["kampagnen"]}
     zeilen = ruf({"action": "steuerung", "company_id": tenant})["kampagnen"]
     for z in zeilen:
-        z["name"] = namen.get(str(z["campaign_id"]), "(anderes Profil oder archiviert)")
+        z["name"] = namen.get(str(z["campaign_id"]), "(SB, SD oder anderes Profil)")
     zeilen.sort(key=lambda z: (z["produkt"] or "", z["modus"], z["name"]))
     print(f"Firma: {name}   Nicht gelistete Kampagnen: nur Analyse.")
     tabelle(zeilen, ["produkt", "modus", "name", "campaign_id", "geprueft_am"])
