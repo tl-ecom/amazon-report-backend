@@ -28,6 +28,8 @@
 // auf Gruppen-CVR, wenn die Liste dort sichtbar danebenliegt.
 
 import { marktplatzKopf } from "./ads_marktplatz.ts";
+import { geschaetzteCvr, MIN_GEBOT_AMAZON } from "./gebotsautomatik.ts";
+import { produktUebersicht } from "./produkte.ts";
 
 function r2(n: number): number { return Math.round(n * 100) / 100; }
 
@@ -83,6 +85,105 @@ export interface ErnteKandidat {
   /** Es gibt das Exact-Keyword schon, aber pausiert. */
   exact_pausiert: boolean;
   quellen: Array<{ campaignName: string | null; adGroupName: string | null; matchTypes: string[]; bestellungen: number }>;
+  /** ASINs der Anzeigengruppen, über die der Begriff Bestellungen brachte. */
+  asins: string[];
+}
+
+/** Was die Produktübersicht je ASIN an Marge und Ziel hergibt. */
+export interface ProduktMarge {
+  produktname: string | null;
+  /**
+   * Deckungsbeitrag vor Werbung je Euro BRUTTO-Umsatz (Anteil, nicht Prozent).
+   * Brutto, weil Amazons ACoS am Bruttoumsatz gemessen wird — der Break-even
+   * der Produktübersicht steht auf Netto und wäre hier um den Steuersatz zu hoch.
+   */
+  break_even: number | null;
+  /** Vom Coach gesetztes Ziel je ASIN (Anteil). null = keins gesetzt. */
+  ziel_acos: number | null;
+}
+
+export interface GeschaerfterKandidat extends ErnteKandidat {
+  produkt: string | null;
+  /** false = der Begriff lief über Gruppen mit mehreren ASINs; gerechnet wird dann mit der schwächsten Marge. */
+  asin_eindeutig: boolean;
+  break_even_acos: number | null;
+  ziel_acos: number | null;
+  /** Deckungsbeitrag nach Werbung im Zeitraum: Umsatz x Break-even minus Kosten. null ohne Marge. */
+  gewinn_nach_werbung: number | null;
+  einordnung: "traegt_sich" | "ueber_break_even" | "marge_unbekannt";
+  /** Umsatz je Bestellung x Ziel-ACoS x geschätzte CVR. null ohne Ziel und ohne Marge. */
+  zielgebot: number | null;
+  /** Worauf das Zielgebot zielt. break_even heißt: bei diesem Gebot bleibt nichts übrig. */
+  zielgebot_basis: "ziel_acos" | "break_even" | null;
+  cvr_geschaetzt: number | null;
+}
+
+/**
+ * Macht aus der Ernte-Liste eine Rangfolge nach dem, was übrig bleibt.
+ *
+ * Vorher stand sie nach Bestellungen sortiert, und "warnweste kinder 6-12
+ * jahre" mit 10 Bestellungen bei 76 % ACoS stand weit oben. Bestellungen sind
+ * kein Grund zu ernten; Deckungsbeitrag ist einer.
+ *
+ * Das Zielgebot folgt der Gebotsautomatik (Umsatz je Bestellung x Ziel-ACoS x
+ * CVR), mit derselben CVR-Schätzung: der Prior sitzt hier auf der Konto-CVR,
+ * weil das neue Keyword noch keine Anzeigengruppe hat.
+ *
+ * ponytail: ohne Platzierungs-Aufschlag — der hängt an der Kampagne, in der das
+ * Keyword landet, und die steht noch nicht fest. Liegt dort ein Aufschlag auf
+ * Top of Search, ist das Zielgebot um diesen Faktor zu hoch.
+ */
+export function schaerfeErnte(
+  ernte: ErnteKandidat[],
+  produkte: Map<string, ProduktMarge>,
+  konto: { klicks: number; bestellungen: number },
+): GeschaerfterKandidat[] {
+  return ernte.map((e): GeschaerfterKandidat => {
+    const bekannt = e.asins.map((a) => produkte.get(a.toUpperCase())).filter((p): p is ProduktMarge => !!p);
+    const mitMarge = bekannt.filter((p) => p.break_even !== null);
+    // Mehrere ASINs: die schwächste Marge. Lieber einen guten Kandidaten zu
+    // streng bewerten als einen schlechten durchwinken.
+    const be = mitMarge.length ? Math.min(...mitMarge.map((p) => p.break_even!)) : null;
+    const ziele = bekannt.map((p) => p.ziel_acos).filter((z): z is number => z !== null);
+    const ziel = ziele.length ? Math.min(...ziele) : null;
+    const eindeutig = e.asins.length === 1;
+
+    const cvr = geschaetzteCvr({ klicks: e.klicks, bestellungen: e.bestellungen }, konto).genutzt;
+    const basisWert = ziel ?? be;
+    const jeBestellung = e.bestellungen > 0 ? e.umsatz / e.bestellungen : null;
+    const roh = basisWert !== null && basisWert > 0 && cvr !== null && jeBestellung !== null
+      ? jeBestellung * basisWert * cvr : null;
+
+    return {
+      ...e,
+      produkt: eindeutig ? (bekannt[0]?.produktname ?? null) : null,
+      asin_eindeutig: eindeutig,
+      break_even_acos: be === null ? null : Math.round(be * 10000) / 10000,
+      ziel_acos: ziel,
+      gewinn_nach_werbung: be === null ? null : r2(e.umsatz * be - e.kosten),
+      einordnung: be === null || e.acos === null ? "marge_unbekannt" : e.acos < be ? "traegt_sich" : "ueber_break_even",
+      zielgebot: roh === null ? null : Math.max(MIN_GEBOT_AMAZON, r2(roh)),
+      zielgebot_basis: roh === null ? null : ziel !== null ? "ziel_acos" : "break_even",
+      cvr_geschaetzt: cvr,
+    };
+  }).sort((a, b) =>
+    (b.gewinn_nach_werbung ?? -Infinity) - (a.gewinn_nach_werbung ?? -Infinity) || b.bestellungen - a.bestellungen
+  );
+}
+
+/** Aus der Produktübersicht wird die Margen-Tabelle je ASIN. */
+export function margenAus(produkte: any[]): Map<string, ProduktMarge> {
+  const m = new Map<string, ProduktMarge>();
+  for (const p of produkte ?? []) {
+    const brutto = Number(p?.umsatz_brutto);
+    const vor = p?.nettogewinn_vor_werbung;
+    m.set(String(p.asin).toUpperCase(), {
+      produktname: p.produktname ?? null,
+      break_even: vor !== null && vor !== undefined && brutto > 0 ? Number(vor) / brutto : null,
+      ziel_acos: p?.ziel_acos_prozent === null || p?.ziel_acos_prozent === undefined ? null : Number(p.ziel_acos_prozent) / 100,
+    });
+  }
+  return m;
 }
 
 export function baueNegativKandidaten(
@@ -139,6 +240,7 @@ export function baueErnteKandidaten(zeilen: KandidatZeile[], minBestellungen = M
       quellen: liste
         .map((z) => ({ campaignName: z.campaign_name, adGroupName: z.ad_group_name, matchTypes: z.match_types ?? [], bestellungen: Number(z.orders) }))
         .sort((a, b) => b.bestellungen - a.bestellungen),
+      asins: [...new Set(liste.flatMap((z) => z.asins ?? []))].sort(),
     });
   }
   return out.sort((a, b) => b.bestellungen - a.bestellungen || b.umsatz - a.umsatz);
@@ -196,7 +298,21 @@ export async function adsKandidaten(
   const cvr = klicks > 0 ? bestellungen / klicks : null;
 
   const negativ = baueNegativKandidaten(zeilen, cvr, minKlicks);
-  const ernte = baueErnteKandidaten(zeilen, minBestellungen);
+  const ernteRoh = baueErnteKandidaten(zeilen, minBestellungen);
+  // Margen nur holen, wenn es etwas zu bewerten gibt. 90 Tage: lang genug, dass
+  // Amazons verzögerte Gebührenabrechnung die Marge nicht verzerrt.
+  let margen = new Map<string, ProduktMarge>();
+  let margenFehler: string | null = null;
+  if (ernteRoh.length > 0) {
+    try {
+      const pu = await produktUebersicht(supabase, tenant_id, { tage: 90 }) as { produkte?: any[] };
+      margen = margenAus(pu?.produkte ?? []);
+    } catch (e) {
+      // Die Liste bleibt brauchbar, nur eben ohne Rangfolge nach Deckungsbeitrag.
+      margenFehler = String((e as Error)?.message ?? e);
+    }
+  }
+  const ernte = schaerfeErnte(ernteRoh, margen, { klicks, bestellungen });
   const anlegen = negativ.filter((n) => n.aktion === "negativ_anlegen");
 
   return {
@@ -215,7 +331,12 @@ export async function adsKandidaten(
         anzahl: negativ.length - anlegen.length,
         kosten: r2(negativ.filter((n) => n.aktion === "ziel_pruefen").reduce((n, x) => n + x.kosten, 0)),
       },
-      ernte: { anzahl: ernte.length, bestellungen: ernte.reduce((n, x) => n + x.bestellungen, 0) },
+      ernte: {
+        anzahl: ernte.length, bestellungen: ernte.reduce((n, x) => n + x.bestellungen, 0),
+        traegt_sich: ernte.filter((x) => x.einordnung === "traegt_sich").length,
+        ueber_break_even: ernte.filter((x) => x.einordnung === "ueber_break_even").length,
+        marge_unbekannt: ernte.filter((x) => x.einordnung === "marge_unbekannt").length,
+      },
     },
     negativ_kandidaten: negativ,
     ernte_kandidaten: ernte,
@@ -228,8 +349,17 @@ export async function adsKandidaten(
       + "belastbar; darüber ist Abwarten oft die bessere Entscheidung.",
       "`bestellungen_anderswo` > 0: der Begriff verkauft in einer anderen Anzeigengruppe. "
       + "Ein Negative gilt nur für die genannte Gruppe.",
-      "Ernte: `cpc` ist der bisherige Klickpreis und taugt als Startgebot, nicht als Zielgebot. "
-      + "ASIN-Suchbegriffe stehen nicht in der Ernte — dafür gibt es kein Keyword.",
+      "Ernte, sortiert nach `gewinn_nach_werbung`: Umsatz des Begriffs mal Break-even minus "
+      + "Werbekosten. Der Break-even ist hier der Deckungsbeitrag vor Werbung je Euro "
+      + "BRUTTO-Umsatz (90 Tage), weil Amazons ACoS am Bruttoumsatz hängt — er liegt deshalb "
+      + "unter dem Break-even der Produktübersicht, der auf Netto steht.",
+      "`zielgebot` = Umsatz je Bestellung x Ziel-ACoS x geschätzte CVR, wie in der Gebotsautomatik. "
+      + "`zielgebot_basis: break_even` heißt: kein Ziel-ACoS gesetzt, bei diesem Gebot bleibt nichts "
+      + "übrig — es ist die Obergrenze, kein Vorschlag. Ohne Platzierungs-Aufschlag gerechnet.",
+      "`asin_eindeutig: false`: der Begriff lief über Gruppen mit mehreren ASINs. Gerechnet wird "
+      + "dann mit der schwächsten Marge. `marge_unbekannt`: Einkaufspreis oder Gebühren fehlen.",
+      "ASIN-Suchbegriffe stehen nicht in der Ernte — dafür gibt es kein Keyword.",
+      ...(margenFehler ? [`Margen konnten nicht gelesen werden (${margenFehler}) — die Ernte ist unbewertet.`] : []),
       "Vorhandene Negatives und Keywords stammen aus dem Struktur-Snapshot (`stand_struktur`). "
       + "Was danach angelegt wurde, kennt die Liste noch nicht.",
       ...(asin

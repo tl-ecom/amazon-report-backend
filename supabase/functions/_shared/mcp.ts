@@ -571,8 +571,11 @@ const TOOLS: ToolDef[] = [
       "unterscheidet `negativ_anlegen` von `ziel_pruefen` (der Begriff ist selbst das Exact-Keyword " +
       "oder ASIN-Target der Gruppe — dann hilft kein Negative). " +
       "`ernte_kandidaten` = Suchbegriffe mit Bestellungen, fuer die es im Konto kein aktives " +
-      "Exact-Keyword gibt, je Begriff ueber alle Gruppen summiert, mit ACoS, CVR und bisherigem " +
-      "Klickpreis als Startgebot. " +
+      "Exact-Keyword gibt, je Begriff ueber alle Gruppen summiert und SORTIERT NACH " +
+      "`gewinn_nach_werbung` (Umsatz x Break-even minus Werbekosten). `einordnung`: traegt_sich / " +
+      "ueber_break_even / marge_unbekannt. `break_even_acos` steht auf BRUTTO-Umsatz und ist " +
+      "deshalb mit dem ACoS vergleichbar. `zielgebot` = Umsatz je Bestellung x Ziel-ACoS x " +
+      "geschaetzte CVR; bei `zielgebot_basis: break_even` ist es die Obergrenze, kein Vorschlag. " +
       "Mit `asin`: zusaetzlich alle Suchbegriffe der Anzeigengruppen, die diese ASIN bewerben " +
       "(`eindeutig` = die Gruppe bewirbt nur diese ASIN). " +
       "Zeitraum via von/bis, Default letzte 60 Tage. Schwellen: min_klicks (Default 10), " +

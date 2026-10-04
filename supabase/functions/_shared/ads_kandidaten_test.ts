@@ -6,7 +6,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
   baueErnteKandidaten, baueNegativKandidaten, begriffeFuerAsin, istAsin,
-  type KandidatZeile, zufallProzent,
+  type KandidatZeile, margenAus, schaerfeErnte, zufallProzent,
 } from "./ads_kandidaten.ts";
 
 function zeile(ueber: Partial<KandidatZeile> = {}): KandidatZeile {
@@ -86,4 +86,55 @@ Deno.test("Je ASIN: mehrere ASINs in der Gruppe heißt nicht eindeutig", () => {
     ["geteilt", false, ["B0BBBBBBBB"]],
     ["allein", true, []],
   ]);
+});
+
+Deno.test("Margen: Break-even auf Bruttoumsatz, nicht auf Netto", () => {
+  // 30 € Deckungsbeitrag vor Werbung auf 100 € netto / 119 € brutto:
+  // 30 % auf Netto, aber 25,2 % gemessen an dem, was Amazons ACoS als Umsatz zählt.
+  const m = margenAus([{ asin: "b0aaaaaaaa", produktname: "Etagere", umsatz: 100, umsatz_brutto: 119, nettogewinn_vor_werbung: 30, ziel_acos_prozent: 20 }]);
+  const p = m.get("B0AAAAAAAA")!;
+  assertEquals(Math.round(p.break_even! * 1000) / 1000, 0.252);
+  assertEquals(p.ziel_acos, 0.2);
+  // Ohne Einkaufspreis gibt es keinen Deckungsbeitrag — dann auch keinen Break-even.
+  assertEquals(margenAus([{ asin: "X", umsatz_brutto: 119, nettogewinn_vor_werbung: null }]).get("X")!.break_even, null);
+});
+
+Deno.test("Ernte geschärft: Rangfolge nach Deckungsbeitrag, nicht nach Bestellungen", () => {
+  const ernte = baueErnteKandidaten([
+    // Viele Bestellungen, aber 76 % ACoS (Vanejas "warnweste kinder 6-12 jahre").
+    zeile({ suchbegriff: "warnweste kinder", clicks: 47, spend_cents: 7600, sales_cents: 10000, orders: 10, asins: ["B0WESTE0000"] }),
+    // Wenige Bestellungen, 5 % ACoS ("kühlmanschette flasche").
+    zeile({ suchbegriff: "kühlmanschette flasche", clicks: 23, spend_cents: 700, sales_cents: 14000, orders: 7, asins: ["B0KUEHLER00"] }),
+    zeile({ suchbegriff: "ohne ek", clicks: 20, spend_cents: 500, sales_cents: 5000, orders: 3, asins: ["B0OHNEEK000"] }),
+  ]);
+  const margen = new Map([
+    ["B0WESTE0000", { produktname: "Warnweste", break_even: 0.25, ziel_acos: null }],
+    ["B0KUEHLER00", { produktname: "Kühlmanschette", break_even: 0.30, ziel_acos: 0.15 }],
+    ["B0OHNEEK000", { produktname: "Ohne EK", break_even: null, ziel_acos: null }],
+  ]);
+  const g = schaerfeErnte(ernte, margen, { klicks: 22337, bestellungen: 2472 });
+  assertEquals(g.map((x) => [x.suchbegriff, x.einordnung, x.gewinn_nach_werbung]), [
+    ["kühlmanschette flasche", "traegt_sich", 35],        // 140 x 0,30 - 7
+    ["warnweste kinder", "ueber_break_even", -51],        // 100 x 0,25 - 76
+    ["ohne ek", "marge_unbekannt", null],
+  ]);
+  // Zielgebot zielt auf das gesetzte Ziel, sonst auf den Break-even (= Obergrenze).
+  assertEquals([g[0].zielgebot_basis, g[1].zielgebot_basis, g[2].zielgebot], ["ziel_acos", "break_even", null]);
+  // 20 € je Bestellung x 15 % x CVR. CVR zur Konto-CVR gezogen: (7 + 15 x 0,1107) / (23 + 15) = 0,2279.
+  assertEquals(g[0].cvr_geschaetzt, 0.2279);
+  assertEquals(g[0].zielgebot, 0.68);
+  assertEquals(g[0].produkt, "Kühlmanschette");
+});
+
+Deno.test("Ernte geschärft: mehrere ASINs heißt schwächste Marge und kein Produktname", () => {
+  const ernte = baueErnteKandidaten([
+    zeile({ suchbegriff: "etagere", clicks: 30, spend_cents: 2000, sales_cents: 10000, orders: 4, asins: ["B0AAAAAAAA", "B0BBBBBBBB"] }),
+  ]);
+  const g = schaerfeErnte(ernte, new Map([
+    ["B0AAAAAAAA", { produktname: "A", break_even: 0.35, ziel_acos: null }],
+    ["B0BBBBBBBB", { produktname: "B", break_even: 0.18, ziel_acos: null }],
+  ]), { klicks: 1000, bestellungen: 100 })[0];
+  assertEquals([g.asin_eindeutig, g.produkt, g.break_even_acos], [false, null, 0.18]);
+  // 20 % ACoS gegen die schwächere Marge von 18 %: trägt sich nicht.
+  assertEquals([g.einordnung, g.gewinn_nach_werbung], ["ueber_break_even", -2]);
 });
