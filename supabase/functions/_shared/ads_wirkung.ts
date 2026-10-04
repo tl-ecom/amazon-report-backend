@@ -97,12 +97,25 @@ export function baueWirkung(z: WirkungZeile) {
     grund = `Der Suchbegriff hatte davor nur ${vorher.klicks} Klicks — zu wenig für einen Vergleich. Das neue Ziel hat ihn erst erschlossen.`;
   }
 
+  const gebot = z.gebot_cents === null || z.gebot_cents === undefined ? null : r2(Number(z.gebot_cents) / 100);
+  const eingebrochen = vergleichbar && gesamt!.klicks * 4 < vorher!.klicks;
+  // Die naheliegendste Ursache, wenn ein Begriff beim Umzug verschwindet: das
+  // neue Gebot liegt unter dem, was der Klick über die alte Quelle kostete.
+  // Vanejas "kratzbrett l form": 1,21 € je Klick über Broad, Exact-Gebot 0,71 €.
+  const unterKlickpreis = vergleichbar && gebot !== null && vorher!.cpc !== null && gebot < vorher!.cpc;
+  if (eingebrochen) {
+    grund = (grund ? grund + " " : "")
+      + (unterKlickpreis
+        ? `Der Begriff ist eingebrochen, und das Gebot von ${gebot!.toFixed(2)} € liegt unter dem bisherigen Klickpreis von ${vorher!.cpc!.toFixed(2)} € — das neue Ziel gewinnt die Auktion vermutlich nicht.`
+        : "Der Begriff ist eingebrochen, obwohl das Gebot nicht unter dem bisherigen Klickpreis liegt — in der Quelle negiert, pausiert oder Budget erschöpft?");
+  }
+
   return {
     ziel: z.text,
     art: z.art,
     match_type: z.match_type,
     state: z.state,
-    gebot: z.gebot_cents === null || z.gebot_cents === undefined ? null : r2(Number(z.gebot_cents) / 100),
+    gebot,
     kampagne: z.campaign_name,
     angelegt: z.angelegt,
     // pulse_log = sekundengenau aus Pulse; snapshot = auf einen Tag genau.
@@ -112,7 +125,9 @@ export function baueWirkung(z: WirkungZeile) {
     grund,
     // Der Suchbegriff lief davor und ist seit dem Anlegen fast verschwunden:
     // weniger als ein Viertel der Klicks, über alle Ziele zusammen.
-    begriff_eingebrochen: vergleichbar && gesamt!.klicks * 4 < vorher!.klicks,
+    begriff_eingebrochen: eingebrochen,
+    // Gebot unter dem, was der Klick davor über andere Ziele kostete.
+    gebot_unter_klickpreis: unterKlickpreis,
     eigen,
     vorher,
     anderswo,

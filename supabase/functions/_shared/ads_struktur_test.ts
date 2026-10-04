@@ -134,4 +134,6 @@ Deno.test("Struktur-Historie: Geldfelder in Euro, alles andere unverändert", ()
   assertEquals(lesbarerWert("gebot_cents", null), null);
   assertEquals(lesbarerWert("state", "PAUSED"), "PAUSED");
   assertEquals(lesbarerWert("mod_top_prozent", "70"), "70");
+  // Amazon lässt 0 % weg: ein entfernter Aufschlag ist "0", nicht "unbekannt".
+  assertEquals(lesbarerWert("mod_top_prozent", null), "0");
 });

@@ -352,6 +352,11 @@ export async function adsStruktur(
 
 /** Geldfelder liegen in Cent — nach außen in Euro, alles andere unverändert. */
 export function lesbarerWert(feld: string, wert: string | null): string | number | null {
+  // Amazon liefert einen Platzierungs-Modifier von 0 % gar nicht mit. NULL heißt
+  // bei diesen drei Feldern deshalb "kein Aufschlag", nicht "unbekannt" — sonst
+  // läse sich das Entfernen eines Aufschlags als "20 → nichts". Geprüft an
+  // Vaneja: 78 Kampagnen mit NULL, keine einzige mit 0.
+  if (feld.startsWith("mod_") && (wert === null || wert === undefined)) return "0";
   if (wert === null || wert === undefined) return null;
   return feld.endsWith("_cents") ? euro(wert) : wert;
 }

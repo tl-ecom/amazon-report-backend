@@ -605,7 +605,8 @@ const TOOLS: ToolDef[] = [
       "Kampagne herueberverlagert hat. `status`: auswertbar / wenig_traffic / kein_traffic / " +
       "zu_frueh, mit `grund`. `begriff_eingebrochen: true` = der Suchbegriff hatte davor Traffic und " +
       "ist seit dem Anlegen ueber alle Ziele zusammen auf unter ein Viertel gefallen (beim Umzug " +
-      "ins Exact verloren gegangen: Gebot zu niedrig oder in der Quelle negiert). " +
+      "ins Exact verloren gegangen). `gebot_unter_klickpreis: true` = das Gebot liegt unter dem, " +
+      "was der Klick davor ueber andere Ziele kostete — die naheliegendste Ursache. " +
       "Vorher-Vergleich nur bei Exact-Keywords und ASIN-Targets. " +
       "Anlagedatum aus dem Pulse-Protokoll (sekundengenau) oder dem Struktur-Snapshot (taggenau, " +
       "erst seit 04.10.2026). Bewusst ohne Urteil: es zaehlen der eigene ACoS und die Differenzen. " +
