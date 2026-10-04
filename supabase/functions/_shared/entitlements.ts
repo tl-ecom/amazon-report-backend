@@ -169,6 +169,11 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   // Wirkung von Budget- und Platzierungsaenderungen: im Web derselbe Bereich.
   get_ads_kampagnen_wirkung: "ads_changelog",
   ads_kampagnen_wirkung: "ads_changelog",
+  get_ads_kampagnen_starts: "ads_changelog",
+  ads_kampagnen_starts: "ads_changelog",
+  // Wirkung von Negatives: im Web Teil des Bereichs Ads-Kandidaten.
+  get_ads_negativ_wirkung: "ads_kandidaten",
+  ads_negativ_wirkung: "ads_kandidaten",
   // Web und MCP rufen dasselbe Werkzeug unter demselben Namen.
   get_account_health: "account_health",
   // Suchbegriff-Kandidaten: eigener Schalter, in keinem Tarif gesetzt — nur Coach.

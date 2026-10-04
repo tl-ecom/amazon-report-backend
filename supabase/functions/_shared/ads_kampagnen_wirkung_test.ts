@@ -2,7 +2,7 @@
 // dem Lauf vom 05.10.2026.
 
 import { assertEquals } from "jsr:@std/assert@1";
-import { baueKampagnenWirkung, type WirkungZeile } from "./ads_kampagnen_wirkung.ts";
+import { baueKampagnenStart, baueKampagnenWirkung, type StartZeile, type WirkungZeile } from "./ads_kampagnen_wirkung.ts";
 
 function zeile(ueber: Partial<WirkungZeile> = {}): WirkungZeile {
   return {
@@ -64,4 +64,43 @@ Deno.test("Budget: Nachlauf noch nicht vollständig — kein Urteil, keine Diffe
   }));
   assertEquals([w.vergleichbar, w.urteil, w.kampagne_umsatz_differenz], [false, null, null]);
   assertEquals(w.grund?.includes("noch nicht vollständig"), true);
+});
+
+function start(ueber: Partial<StartZeile> = {}): StartZeile {
+  // SPM Biomülleimer SK Rank "biomülleimer küche", gestartet am 09.07.2026.
+  return {
+    campaign_id: "C9", name: "SPM Biomülleimer SK Rank", state: "ENABLED", targeting_typ: "MANUAL",
+    budget_cents: 1200, start_datum: "2026-07-09", tage: 85,
+    clicks: 1520, spend_cents: 132138, sales_cents: 341649, orders: 161, asins: ["B0D7D2NMT4"],
+    ...ueber,
+  };
+}
+
+Deno.test("Start: 38,7 % ACoS gegen 36 % Break-even — liegt darüber, und es steht da, was das kostet", () => {
+  const m = new Map([["B0D7D2NMT4", { produktname: "Biomülleimer", break_even: 0.36, ziel_acos: null }]]);
+  const k = baueKampagnenStart(start(), m);
+  assertEquals([k.status, k.einordnung, k.seit_start.acos, k.break_even_acos], ["auswertbar", "ueber_break_even", 0.3868, 0.36]);
+  // 3.416,49 € x 0,36 − 1.321,38 € = −91,44 €.
+  assertEquals([k.gewinn_nach_werbung, k.budget], [-91.44, 12]);
+});
+
+Deno.test("Start: zu früh, kein Traffic, wenig Traffic, ohne Bestellung", () => {
+  const m = new Map();
+  const leer = { clicks: 0, spend_cents: 0, sales_cents: 0, orders: 0 };
+  assertEquals(baueKampagnenStart(start({ tage: 3 }), m).status, "zu_frueh");
+  assertEquals(baueKampagnenStart(start({ ...leer }), m).status, "kein_traffic");
+  assertEquals(baueKampagnenStart(start({ clicks: 12, orders: 1 }), m).status, "wenig_traffic");
+  const ohne = baueKampagnenStart(start({ clicks: 60, spend_cents: 4000, sales_cents: 0, orders: 0 }), m);
+  assertEquals([ohne.status, ohne.einordnung, ohne.gewinn_nach_werbung], ["auswertbar", "ohne_bestellung", null]);
+});
+
+Deno.test("Start: mehrere ASINs heißt schwächste Marge; ohne Marge unbekannt", () => {
+  const m = new Map([
+    ["B0A", { produktname: "A", break_even: 0.40, ziel_acos: null }],
+    ["B0B", { produktname: "B", break_even: 0.25, ziel_acos: null }],
+  ]);
+  const k = baueKampagnenStart(start({ asins: ["b0a", "b0b"], clicks: 100, spend_cents: 3000, sales_cents: 10000, orders: 5 }), m);
+  // 30 % ACoS gegen die schwächere Marge von 25 %.
+  assertEquals([k.break_even_acos, k.einordnung, k.gewinn_nach_werbung], [0.25, "ueber_break_even", -5]);
+  assertEquals(baueKampagnenStart(start({ asins: ["B0X"] }), m).einordnung, "marge_unbekannt");
 });

@@ -633,6 +633,34 @@ const TOOLS: ToolDef[] = [
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_kampagnen_wirkung", args) : pulseNichtVerfuegbar()),
   },
   {
+    name: "get_ads_negativ_wirkung",
+    description:
+      "Was hat ein angelegtes NEGATIVE abgeschnitten (Sponsored Products). Je Negative: `vorher` = der " +
+      "Suchbegriff in seinem Geltungsbereich (Anzeigengruppe oder Kampagne) im gleich langen Fenster vor " +
+      "der Anlage — das, was seither wegfaellt; `nachher` = derselbe danach (muesste null sein, sonst " +
+      "`greift_nicht`); bei Exact-Negatives `anderswo_vorher/nachher` = derselbe Begriff in anderen " +
+      "Gruppen. `einordnung`: kosten_gespart (davor Klicks ohne Bestellung) / bestellungen_verlagert " +
+      "(anderswo kam mindestens so viel dazu) / bestellungen_abgeschnitten (anderswo kam weniger an als " +
+      "wegfiel) / vorsorglich (davor kein Klick) / zu_frueh. `bestellungen_netto` = weggefallen plus " +
+      "anderswo dazugekommen. Quellen: Pulse-Protokoll mit Begruendung, und Struktur-Snapshot seit " +
+      "04.10.2026. Nebeneinander, kein Beweis. Zeitraum (Anlagedatum) via von/bis, Default 90 Tage.",
+    inputSchema: ADS_ZEITRAUM_SCHEMA,
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_negativ_wirkung", args) : pulseNichtVerfuegbar()),
+  },
+  {
+    name: "get_ads_kampagnen_starts",
+    description:
+      "Neu gestartete Sponsored-Products-Kampagnen und was sie seit dem Start gebracht haben: Klicks, " +
+      "Kosten, Umsatz, Bestellungen, ACoS — gegen den Break-even der beworbenen ASINs gehalten " +
+      "(`break_even_acos` auf Brutto-Umsatz, bei mehreren ASINs die schwaechste Marge) mit " +
+      "`gewinn_nach_werbung`. `status`: auswertbar / wenig_traffic / kein_traffic / zu_frueh. " +
+      "`einordnung`: traegt_sich / ueber_break_even / ohne_bestellung / marge_unbekannt. Sortiert nach " +
+      "Deckungsbeitrag. Eine Ranking-Kampagne darf ueber dem Break-even liegen. Zeitraum (Startdatum) " +
+      "via von/bis, Default letzte 90 Tage.",
+    inputSchema: ADS_ZEITRAUM_SCHEMA,
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_kampagnen_starts", args) : pulseNichtVerfuegbar()),
+  },
+  {
     name: "get_ads_budget",
     description:
       "Budget-Auslastung der Sponsored-Products-Kampagnen: welche Kampagne an welchem Tag ihr " +
