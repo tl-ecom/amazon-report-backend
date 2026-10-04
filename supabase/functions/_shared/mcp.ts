@@ -615,6 +615,24 @@ const TOOLS: ToolDef[] = [
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_keyword_wirkung", args) : pulseNichtVerfuegbar()),
   },
   {
+    name: "get_ads_kampagnen_wirkung",
+    description:
+      "Was kam nach einer BUDGET- oder PLATZIERUNGS-Aenderung an einer Kampagne (Sponsored Products). " +
+      "Je Aenderung: Wert vorher/nachher, Quelle (`pulse_log` = ueber Pulse, minutengenau, mit " +
+      "Begruendung; `snapshot` = im Struktur-Snapshot erkannt, auch Aenderungen in der Amazon-Konsole, " +
+      "erst seit 04.10.2026), und die Kennzahlen der sieben Tage davor und danach — fuer die ganze " +
+      "Kampagne (`kampagne_davor/danach`) und bei Platzierungen zusaetzlich fuer die geaenderte " +
+      "Platzierung (`platzierung_davor/danach`). `urteil` steht bei Budget auf der Kampagne, bei " +
+      "Platzierungen auf der Platzierung (`urteil_ebene`); `kampagne_umsatz_differenz` und " +
+      "`kampagne_kosten_differenz` zeigen daneben immer die ganze Kampagne. Nur bei " +
+      "`vergleichbar: true` gibt es ein Urteil, sonst steht in `grund`, warum nicht. " +
+      "Nebeneinander, kein Beweis. UNTERSCHIED zu get_ads_changelog: jenes bewertet Gebote je " +
+      "Keyword/Target; dieses Budget und Platzierungs-Aufschlag je Kampagne. " +
+      "Zeitraum via von/bis, Default letzte 90 Tage.",
+    inputSchema: ADS_ZEITRAUM_SCHEMA,
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_kampagnen_wirkung", args) : pulseNichtVerfuegbar()),
+  },
+  {
     name: "get_ads_budget",
     description:
       "Budget-Auslastung der Sponsored-Products-Kampagnen: welche Kampagne an welchem Tag ihr " +

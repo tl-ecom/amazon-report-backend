@@ -166,6 +166,9 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   // Derselbe Schalter wie der Changelog: im Web sind beide EIN Tab (ads_changelog).
   get_ads_struktur_aenderungen: "ads_changelog",
   ads_struktur_aenderungen: "ads_changelog",
+  // Wirkung von Budget- und Platzierungsaenderungen: im Web derselbe Bereich.
+  get_ads_kampagnen_wirkung: "ads_changelog",
+  ads_kampagnen_wirkung: "ads_changelog",
   // Web und MCP rufen dasselbe Werkzeug unter demselben Namen.
   get_account_health: "account_health",
   // Suchbegriff-Kandidaten: eigener Schalter, in keinem Tarif gesetzt — nur Coach.

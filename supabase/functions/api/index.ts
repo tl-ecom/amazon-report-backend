@@ -53,6 +53,7 @@ import { cashflowUebersicht } from "../_shared/cashflow.ts";
 import { adsChangelog } from "../_shared/ads_changelog.ts";
 import { adsKandidaten } from "../_shared/ads_kandidaten.ts";
 import { adsBudget } from "../_shared/ads_budget.ts";
+import { adsKampagnenWirkung } from "../_shared/ads_kampagnen_wirkung.ts";
 import { adsKeywordWirkung } from "../_shared/ads_wirkung.ts";
 import { reviewThemen } from "../_shared/reviews.ts";
 import { importiereEkCsv, importiereEkVonUrl, speichereEkUrl } from "../_shared/sellerboard_import.ts";
@@ -665,6 +666,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "ads_keyword_wirkung") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await adsKeywordWirkung(service, tenantId, (args ?? {}) as any) });
+    }
+    if (resource === "ads_kampagnen_wirkung") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsKampagnenWirkung(service, tenantId, (args ?? {}) as any) });
     }
     if (resource === "ads_budget") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await adsBudget(service, tenantId, (args ?? {}) as any) });

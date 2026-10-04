@@ -32,6 +32,7 @@ import { listeSqp, sqpAsins } from "../_shared/sqp.ts";
 import { adsChangelog } from "../_shared/ads_changelog.ts";
 import { adsKandidaten } from "../_shared/ads_kandidaten.ts";
 import { adsBudget } from "../_shared/ads_budget.ts";
+import { adsKampagnenWirkung } from "../_shared/ads_kampagnen_wirkung.ts";
 import { adsKeywordWirkung } from "../_shared/ads_wirkung.ts";
 import { reviewThemen } from "../_shared/reviews.ts";
 import { listeDiagnosen } from "../_shared/diagnostics.ts";
@@ -182,6 +183,7 @@ Deno.serve(async (req) => {
         case "ads_ziele": return await adsZiele(supabase, tenant_id, pulseArgs, sicht);
         case "ads_struktur_aenderungen": return await adsStrukturAenderungen(supabase, tenant_id, pulseArgs);
         case "ads_keyword_wirkung": return await adsKeywordWirkung(supabase, tenant_id, pulseArgs);
+        case "ads_kampagnen_wirkung": return await adsKampagnenWirkung(supabase, tenant_id, pulseArgs);
         case "ads_budget": return await adsBudget(supabase, tenant_id, pulseArgs);
         case "ads_kandidaten": return await adsKandidaten(supabase, tenant_id, pulseArgs);
         case "ads_changelog": return await adsChangelog(supabase, tenant_id, pulseArgs);
