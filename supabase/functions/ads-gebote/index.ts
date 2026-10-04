@@ -186,6 +186,20 @@ Deno.serve(async (req) => {
 
     const ads = new AdsClient(clientId, profileId, accessToken);
 
+    // Amazons eigene Aenderungshistorie (wer hat wann was geaendert). REINES
+    // LESEN, fester Pfad. Die Anfrage wird durchgereicht, weil die Form des
+    // Endpunkts erst am echten Konto geklaert wird — so laesst sie sich vom
+    // lokalen Werkzeug aus ausprobieren, ohne jedes Mal neu auszuliefern.
+    if (action === "historie") {
+      const anfrage = body.anfrage;
+      if (!anfrage || typeof anfrage !== "object" || Array.isArray(anfrage)) {
+        return json({ error: "anfrage (Objekt) fehlt." }, 400);
+      }
+      const r = await ads.postRaw("/history", anfrage);
+      if (!r.ok) return json({ error: "Aenderungshistorie fehlgeschlagen", detail: r.detail }, 502);
+      return json({ tenant_id: tenantId, profile_id: profileId, antwort: r.data });
+    }
+
     if (action === "kampagnen") {
       const status = liste(body.status, ["ENABLED", "PAUSED"]);
       const r = await ads.kampagnen(status);

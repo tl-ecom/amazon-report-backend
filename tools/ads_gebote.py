@@ -721,6 +721,19 @@ def cmd_zustand_setzen(args):
 
 # ----------------------------------------------------------------- main
 
+def cmd_historie(args):
+    """Amazons Aenderungshistorie abfragen (liest nur). --anfrage ist das JSON,
+    das an POST /history geht — die Form wird am echten Konto geklaert."""
+    tenant, name = firma_id(args.firma)
+    try:
+        anfrage = json.loads(args.anfrage)
+    except ValueError as e:
+        sys.exit(f"--anfrage ist kein gueltiges JSON: {e}")
+    d = ruf({"action": "historie", "company_id": tenant, "anfrage": anfrage})
+    json.dump(d.get("antwort", d), sys.stdout, ensure_ascii=False, indent=1)
+    print()
+
+
 def cmd_lesen(args):
     """Eine Pulse-Ressource LESEN, so wie die Weboberflaeche sie fuer den Coach sieht.
 
@@ -932,6 +945,11 @@ def main():
     s.add_argument("--grund", default=None, help="kurze Begruendung fuers Log")
     s.add_argument("--ja", action="store_true", help="ohne Rueckfrage")
     s.set_defaults(fn=cmd_setzen)
+
+    s = sub.add_parser("historie", help="Amazons Aenderungshistorie abfragen (liest nur)", parents=[gemeinsam])
+    s.add_argument("--firma", required=True)
+    s.add_argument("--anfrage", required=True, help="JSON fuer POST /history")
+    s.set_defaults(fn=cmd_historie)
 
     s = sub.add_parser("lesen", help="eine Pulse-Ressource lesen (schreibt nichts)", parents=[gemeinsam])
     s.add_argument("--firma", required=True)
