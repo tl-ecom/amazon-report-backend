@@ -174,6 +174,9 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   // Wirkung neuer Keywords: im Web Teil desselben Bereichs, deshalb derselbe Schalter.
   get_ads_keyword_wirkung: "ads_kandidaten",
   ads_keyword_wirkung: "ads_kandidaten",
+  // Budget-Auslastung: eigener Schalter, in keinem Tarif gesetzt — nur Coach.
+  get_ads_budget: "ads_budget",
+  ads_budget: "ads_budget",
   get_review_themes: "reviews",
   reviews: "reviews",
   get_strategy_overview: "strategie",

@@ -615,6 +615,28 @@ const TOOLS: ToolDef[] = [
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_keyword_wirkung", args) : pulseNichtVerfuegbar()),
   },
   {
+    name: "get_ads_budget",
+    description:
+      "Budget-Auslastung der Sponsored-Products-Kampagnen: welche Kampagne an welchem Tag ihr " +
+      "Tagesbudget ausgeschoepft hat, SEIT WANN (`ausgeschoepft_seit`, Amazons eigener Stempel der " +
+      "letzten Bewegung, UTC) und wie viele Stunden sie danach bis Mitternacht deutscher Zeit ohne " +
+      "Auslieferung blieb (`stunden_ohne_auslieferung`). `kampagnen` fasst je Kampagne zusammen: an " +
+      "wie vielen Tagen leer und wie lange. Stuendlich gemessen, gespeichert ab 80 % Auslastung; " +
+      "`messungen_je_tag` sagt, wie oft an einem Tag gemessen wurde. " +
+      "EINORDNUNG: die Messung laeuft erst seit dem 04.10.2026. Entgangener Umsatz steht bewusst " +
+      "nicht dabei — er waere aus Tageswerten nur zu raten. Ueber 100 % heisst: Budget gesenkt, " +
+      "nachdem schon mehr ausgegeben war. Zeitraum via von/bis, Default letzte 14 Tage.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...ADS_ZEITRAUM_SCHEMA.properties,
+        nur_ausgeschoepft: { type: "boolean", description: "true = nur Kampagnentage mit 100 % (ohne die knappen ab 80 %)." },
+      },
+      additionalProperties: false,
+    },
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_budget", args) : pulseNichtVerfuegbar()),
+  },
+  {
     name: "get_account_health",
     description:
       "Amazons Kontozustand (Account Health) je Marktplatz: Kontostatus, Account-Health-Rating " +
