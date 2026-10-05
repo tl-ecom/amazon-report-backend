@@ -481,7 +481,11 @@ Deno.serve(async (req) => {
       const aktiv = vorhanden.daten.filter((p: any) => String(p.adGroupId) === agId.id && p.state !== "ARCHIVED");
       const alt = new Set(aktiv.map((p: any) => String(p.asin ?? "").toUpperCase()));
       const altSku = new Set(aktiv.map((p: any) => String(p.sku ?? "")).filter(Boolean));
-      const laeuft = (a: string) => alt.has(a) || (!!skus[a] && altSku.has(skus[a]));
+      // Mit SKU zaehlt NUR die SKU: eine ASIN kann mehrere Angebote haben (FBA und
+      // FBM), und Anzeigen laufen bei Seller-Konten je SKU. Wer die FBM-SKU
+      // nachlegt, soll nicht daran scheitern, dass die FBA-SKU derselben ASIN
+      // schon in der Anzeigengruppe liegt.
+      const laeuft = (a: string) => skus[a] ? altSku.has(skus[a]) : alt.has(a);
       const neu = asins.filter((a) => !laeuft(a));
       const dup = asins.filter(laeuft);
       const ergebnisse: any[] = dup.map((a) => ({ asin: a, sku: skus[a] ?? null, ergebnis: "uebersprungen", detail: "läuft schon in dieser Anzeigengruppe", adId: null }));
