@@ -28,7 +28,7 @@
 // auf Gruppen-CVR, wenn die Liste dort sichtbar danebenliegt.
 
 import { marktplatzKopf } from "./ads_marktplatz.ts";
-import { ladeSteuerung } from "./ads_steuerung.ts";
+import { ladeSteuerung, type Modus } from "./ads_steuerung.ts";
 import { geschaetzteCvr, MIN_GEBOT_AMAZON } from "./gebotsautomatik.ts";
 import { produktUebersicht } from "./produkte.ts";
 
@@ -170,6 +170,54 @@ export function schaerfeErnte(
   }).sort((a, b) =>
     (b.gewinn_nach_werbung ?? -Infinity) - (a.gewinn_nach_werbung ?? -Infinity) || b.bestellungen - a.bestellungen
   );
+}
+
+export interface ExactGruppe {
+  campaign_id: string; campaign_name: string | null; ad_group_id: string;
+  exact_keywords: number; asins: string[];
+}
+
+export interface Anlage {
+  campaignId: string; campaignName: string | null; adGroupId: string;
+  steuerung: Modus;
+  /** Wie viele andere Exact-Gruppen desselben Produkts es noch gäbe — die Wahl ist ein Vorschlag. */
+  alternativen: number;
+  startgebot: number | null;
+  /** Das Startgebot liegt unter dem bisher gezahlten Klickpreis: das Keyword gewinnt die Auktion dann oft nicht. */
+  unter_klickpreis: boolean;
+}
+
+/**
+ * Wohin mit dem geernteten Begriff: die laufende Exact-Gruppe, die eine seiner
+ * ASINs bewirbt und die meisten Exact-Keywords hat — dort wird schon gesammelt.
+ * Nur Kampagnen, an denen Pulse schreiben darf. null, wenn es keine gibt.
+ *
+ * Startgebot wie in der Anzeige: mit Ziel-ACoS das Zielgebot, sonst der
+ * bisherige Klickpreis. Vanejas "kratzbrett l form" wurde mit 0,71 EUR
+ * geerntet, der Begriff kostete davor 1,21 EUR — und brach ein.
+ *
+ * ponytail: "meiste Exact-Keywords" ist eine Faustregel, kein Wissen über die
+ * Kontostruktur. Gibt es je Produkt eine feste Ernte-Kampagne, gehört sie in
+ * eine Spalte von ads_steuerung.
+ */
+export function anlageFuer(
+  e: Pick<GeschaerfterKandidat, "asins" | "cpc" | "zielgebot" | "zielgebot_basis">,
+  gruppen: ExactGruppe[],
+  modusVon: (campaignId: string) => Modus,
+): Anlage | null {
+  const asins = new Set(e.asins.map((a) => a.toUpperCase()));
+  const passend = gruppen
+    .filter((g) => modusVon(g.campaign_id) !== "nur_analyse" && (g.asins ?? []).some((a) => asins.has(a.toUpperCase())))
+    .sort((a, b) => Number(b.exact_keywords) - Number(a.exact_keywords));
+  const g = passend[0];
+  if (!g) return null;
+  const startgebot = e.zielgebot_basis === "ziel_acos" ? e.zielgebot : e.cpc;
+  return {
+    campaignId: g.campaign_id, campaignName: g.campaign_name, adGroupId: g.ad_group_id,
+    steuerung: modusVon(g.campaign_id), alternativen: passend.length - 1,
+    startgebot: startgebot === null ? null : Math.max(MIN_GEBOT_AMAZON, startgebot),
+    unter_klickpreis: startgebot !== null && e.cpc !== null && startgebot < e.cpc,
+  };
 }
 
 /** Aus der Produktübersicht wird die Margen-Tabelle je ASIN. */
@@ -314,9 +362,16 @@ export async function adsKandidaten(
       margenFehler = String((e as Error)?.message ?? e);
     }
   }
+  let gruppen: ExactGruppe[] = [];
+  if (ernteRoh.length > 0) {
+    const g = await supabase.rpc("ads_exact_gruppen", { p_tenant: tenant_id, p_marktplatz: kopf.marktplatz, p_von: von, p_bis: bis });
+    if (g.error) throw new Error(`ads_exact_gruppen: ${g.error.message}`);
+    gruppen = (g.data ?? []) as ExactGruppe[];
+  }
   // Ein Begriff zaehlt als gesteuert, sobald eine seiner Quell-Kampagnen es ist.
   const ernte = schaerfeErnte(ernteRoh, margen, { klicks, bestellungen }).map((e) => ({
     ...e, steuerung: e.quellen.map((q) => modusVon(q.campaignId)).find((m) => m !== "nur_analyse") ?? "nur_analyse",
+    anlage: anlageFuer(e, gruppen, modusVon),
   }));
   const anlegen = negativ.filter((n) => n.aktion === "negativ_anlegen");
 
@@ -347,6 +402,9 @@ export async function adsKandidaten(
     ernte_kandidaten: ernte,
     ...(asin ? { asin: { asin, begriffe: begriffeFuerAsin(zeilen, asin) } } : {}),
     hinweise: [
+      "`anlage` je Ernte-Kandidat ist ein Vorschlag: die laufende Exact-Anzeigengruppe desselben Produkts mit den "
+      + "meisten Exact-Keywords und ein Startgebot. `alternativen` > 0 heißt, es gäbe weitere passende Gruppen. "
+      + "Das Negative in der Quelle gehört NICHT zum ersten Schritt: erst wenn das neue Keyword Klicks holt.",
       "`steuerung` je Zeile: `pulse` = Pulse steuert die Kampagne, `h10` = die Gebote setzt Helium 10 "
       + "(Negatives und neue Keywords bleiben möglich), `nur_analyse` = kein verwaltetes Produkt, nichts anfassen.",
       "Nur Sponsored Products: für Sponsored Brands kennt der Struktur-Snapshot die Ziele nicht — "

@@ -5,7 +5,7 @@
 
 import { assertEquals } from "jsr:@std/assert@1";
 import {
-  baueErnteKandidaten, baueNegativKandidaten, begriffeFuerAsin, istAsin,
+  anlageFuer, baueErnteKandidaten, baueNegativKandidaten, begriffeFuerAsin, istAsin,
   type KandidatZeile, margenAus, schaerfeErnte, zufallProzent,
 } from "./ads_kandidaten.ts";
 
@@ -137,4 +137,28 @@ Deno.test("Ernte geschärft: mehrere ASINs heißt schwächste Marge und kein Pro
   assertEquals([g.asin_eindeutig, g.produkt, g.break_even_acos], [false, null, 0.18]);
   // 20 % ACoS gegen die schwächere Marge von 18 %: trägt sich nicht.
   assertEquals([g.einordnung, g.gewinn_nach_werbung], ["ueber_break_even", -2]);
+});
+
+// Vanejas Biomülleimer am 05.10.2026: zwei Sammel-Kampagnen und zwei Single-Keyword-Kampagnen.
+const BIO = [
+  { campaign_id: "122131778974893", campaign_name: "SPM Biomülleimer MK Profit", ad_group_id: "298495228157363", exact_keywords: 15, asins: ["B0D7D2NMT4"] },
+  { campaign_id: "102049191376153", campaign_name: "SPM Biomüllereimer MK Exact LOW", ad_group_id: "407813841660253", exact_keywords: 12, asins: ["B0D7D2NMT4"] },
+  { campaign_id: "95723114588600", campaign_name: "SP KW Phrase Papiertüten", ad_group_id: "1", exact_keywords: 40, asins: ["B0D7D2NMT4"] },
+];
+const modus = (id: string) => id === "95723114588600" ? "nur_analyse" as const : "pulse" as const;
+
+Deno.test("Anlage: größte Exact-Gruppe des Produkts, nie eine nur ausgewertete Kampagne", () => {
+  const a = anlageFuer({ asins: ["b0d7d2nmt4"], cpc: 0.62, zielgebot: 8.45, zielgebot_basis: "break_even" }, BIO, modus)!;
+  assertEquals(a.campaignName, "SPM Biomülleimer MK Profit");
+  assertEquals(a.alternativen, 1);
+  // Ohne Ziel-ACoS der bisherige Klickpreis, nicht die Break-even-Obergrenze.
+  assertEquals(a.startgebot, 0.62);
+  assertEquals(a.unter_klickpreis, false);
+});
+
+Deno.test("Anlage: Zielgebot unter dem Klickpreis wird gekennzeichnet; ohne passende Gruppe null", () => {
+  const a = anlageFuer({ asins: ["B0D7D2NMT4"], cpc: 1.21, zielgebot: 0.71, zielgebot_basis: "ziel_acos" }, BIO, modus)!;
+  assertEquals(a.startgebot, 0.71);
+  assertEquals(a.unter_klickpreis, true);
+  assertEquals(anlageFuer({ asins: ["B0XXXXXXXX"], cpc: 1, zielgebot: null, zielgebot_basis: null }, BIO, modus), null);
 });

@@ -734,6 +734,60 @@ def cmd_zustand_setzen(args):
 
 # ----------------------------------------------------------------- main
 
+ERNTE_DATEI = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".ernte.json")
+
+
+def cmd_ernte_vorschau(args):
+    """Ernte-Kandidaten als Anlage-Plan: Begriff -> Exact-Kampagne + Startgebot. SCHREIBT NICHTS."""
+    tenant, name = firma_id(args.firma)
+    r = requests.post(
+        f"{SUPABASE_URL}/functions/v1/api",
+        headers={"Authorization": f"Bearer {token()}", "apikey": ANON_KEY, "Content-Type": "application/json"},
+        json={"resource": "ads_kandidaten", "arguments": {}, "company_id": tenant}, timeout=120)
+    if r.status_code >= 400:
+        sys.exit(f"Fehler {r.status_code}: {r.text[:300]}")
+    d = r.json()
+    d = d.get("data", d)
+    teil = (args.produkt or "").lower()
+    plan, ohne = [], 0
+    for e in d["ernte_kandidaten"]:
+        a = e.get("anlage")
+        if e["einordnung"] != "traegt_sich" or e.get("exact_pausiert"):
+            continue
+        if teil and teil not in (e.get("produkt") or "").lower() and teil not in ((a or {}).get("campaignName") or "").lower():
+            continue
+        if not a or a.get("startgebot") is None:
+            ohne += 1
+            continue
+        plan.append({"begriff": e["suchbegriff"], "kampagne": a["campaignName"], "campaignId": a["campaignId"],
+                     "adGroupId": a["adGroupId"], "steuerung": a["steuerung"], "gebot": a["startgebot"],
+                     "cpc_bisher": e["cpc"], "bestellungen": e["bestellungen"], "acos": e["acos"],
+                     "db_nach_werbung": e["gewinn_nach_werbung"],
+                     "hinweis": "Gebot unter Klickpreis" if a["unter_klickpreis"] else ("weitere Gruppe moeglich" if a["alternativen"] else "")})
+    with open(ERNTE_DATEI, "w", encoding="utf-8") as f:
+        json.dump({"tenant": tenant, "firma": name, "zeitraum": d["zeitraum"], "plan": plan}, f, ensure_ascii=False, indent=1)
+    print(f"Firma: {name}   Zeitraum {d['zeitraum']['von']} bis {d['zeitraum']['bis']}   {len(plan)} Keywords im Plan, {ohne} ohne passende Exact-Kampagne")
+    tabelle(plan, ["begriff", "kampagne", "steuerung", "gebot", "cpc_bisher", "bestellungen", "acos", "db_nach_werbung", "hinweis"])
+    print(f"Nichts geschrieben. Plan liegt in {ERNTE_DATEI}; anlegen mit: ernte-anlegen")
+
+
+def cmd_ernte_anlegen(args):
+    """Den Plan aus ernte-vorschau als Exact-Keywords anlegen (je Keyword die Aktion keyword_anlegen)."""
+    with open(ERNTE_DATEI, encoding="utf-8") as f:
+        p = json.load(f)
+    plan = p["plan"]
+    if not plan:
+        sys.exit("Plan ist leer.")
+    tabelle(plan, ["begriff", "kampagne", "gebot"])
+    if not args.ja and input(f"{len(plan)} Exact-Keywords bei {p['firma']} anlegen? (ja/nein): ").strip().lower() != "ja":
+        sys.exit("Abgebrochen. Nichts geschrieben.")
+    for z in plan:
+        r = ruf({"action": "keyword_anlegen", "company_id": p["tenant"], "campaignId": z["campaignId"], "adGroupId": z["adGroupId"],
+                 "keywordText": z["begriff"], "matchType": "EXACT", "bid": z["gebot"], "bestaetigung": True,
+                 "grund": args.grund or "Ernte: Suchbegriff mit Bestellungen ohne eigenes Exact-Keyword"})
+        print(f"{z['begriff']:40s} {r.get('ergebnis')}  {r.get('detail') or ''}")
+
+
 def cmd_historie(args):
     """Amazons Aenderungshistorie abfragen (liest nur). --anfrage ist das JSON,
     das an POST /history geht — die Form wird am echten Konto geklaert."""
@@ -962,6 +1016,16 @@ def main():
     s = sub.add_parser("steuerung", help="wer steuert welche Kampagne: Helium 10, Pulse, nur Analyse (liest nur)", parents=[gemeinsam])
     s.add_argument("--firma", required=True)
     s.set_defaults(fn=cmd_steuerung)
+
+    s = sub.add_parser("ernte-vorschau", help="Ernte-Kandidaten als Anlage-Plan (schreibt nichts)", parents=[gemeinsam])
+    s.add_argument("--firma", required=True)
+    s.add_argument("--produkt", default=None, help="Namensteil von Produkt oder Ziel-Kampagne, z. B. biomülleimer")
+    s.set_defaults(fn=cmd_ernte_vorschau)
+
+    s = sub.add_parser("ernte-anlegen", help="den Plan aus ernte-vorschau als Exact-Keywords anlegen", parents=[gemeinsam])
+    s.add_argument("--grund", default=None)
+    s.add_argument("--ja", action="store_true", help="ohne Rueckfrage")
+    s.set_defaults(fn=cmd_ernte_anlegen)
 
     s = sub.add_parser("historie", help="Amazons Aenderungshistorie abfragen (liest nur)", parents=[gemeinsam])
     s.add_argument("--firma", required=True)
