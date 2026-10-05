@@ -40,6 +40,30 @@ Deno.test("Produkt-Lage: TACoS gegen alle Bestellungen; ohne Bestell-Eintrag unb
   assertEquals(k.asins, ["B0FLKN42D4"]);
   const bio = p.find((x) => x.produkt === "Biomülleimer")!;
   assertEquals(bio.alle_bestellungen.aktuell, { umsatz: null, einheiten: null, tacos: null, werbeanteil: null });
+  // Ohne Marge kein Gewinn — auch nicht 0.
+  assertEquals(k.break_even_tacos, null);
+  assertEquals(k.gewinn_nach_werbung.aktuell, null);
+});
+
+Deno.test("Produkt-Lage: Gewinn nach Werbung aus der schwächsten Marge; ohne Umsatz unbekannt", () => {
+  const gesamt = [
+    { produkt: "Kratzbrett", fenster: "aktuell" as const, umsatz_cents: 152968, einheiten: 84 },
+    { produkt: "Kratzbrett", fenster: "davor" as const, umsatz_cents: 177075, einheiten: 99 },
+  ];
+  const margen = new Map([
+    ["B0FLKN42D4", { produktname: "Kratzbrett", break_even: 0.3, ziel_acos: null }],
+    ["B0ZWEITEASIN", { produktname: "Kratzbrett groß", break_even: 0.25, ziel_acos: null }],
+    ["B0OHNEMARGE", { produktname: null, break_even: null, ziel_acos: null }],
+  ]);
+  const p = baueProduktLage(VANEJA, {}, gesamt, { Kratzbrett: ["B0FLKN42D4", "b0zweiteasin", "B0OHNEMARGE"], "Biomülleimer": ["B0FLKN42D4"] }, margen);
+  const k = p.find((x) => x.produkt === "Kratzbrett")!;
+  assertEquals(k.break_even_tacos, 0.25);
+  // 1.529,68 x 0,25 − 323,00 und 1.770,75 x 0,25 − 336,17
+  assertEquals(k.gewinn_nach_werbung.aktuell, 59.42);
+  assertEquals(k.gewinn_nach_werbung.davor, 106.52);
+  const bio = p.find((x) => x.produkt === "Biomülleimer")!;
+  assertEquals(bio.break_even_tacos, 0.3);
+  assertEquals(bio.gewinn_nach_werbung.aktuell, null);
 });
 
 Deno.test("Produkt-Lage: ohne Umsatz ist der ACoS unbekannt, nicht 0; ohne H10-Kampagnen ein leerer Teil", () => {
