@@ -162,3 +162,13 @@ Deno.test("Anlage: Zielgebot unter dem Klickpreis wird gekennzeichnet; ohne pass
   assertEquals(a.unter_klickpreis, true);
   assertEquals(anlageFuer({ asins: ["B0XXXXXXXX"], cpc: 1, zielgebot: null, zielgebot_basis: null }, BIO, modus), null);
 });
+
+Deno.test("Margen: ohne abgerechnete oder hochgerechnete Gebühren ist der Break-even unbekannt", () => {
+  // Vanejas Kauknochen B0H3KY3TZQ: 103,76 EUR Umsatz, Gebühren 0 abgerechnet — 78 % Marge wären zu schön.
+  const m = margenAus([
+    { asin: "B0H3KY3TZQ", umsatz_brutto: 103.76, nettogewinn_vor_werbung: 81.11, gebuehren_vollstaendig: false, gebuehren_anteilig: false },
+    { asin: "B0FLKN42D4", umsatz_brutto: 18899.57, nettogewinn_vor_werbung: 6147.47, gebuehren_vollstaendig: false, gebuehren_anteilig: true },
+  ]);
+  assertEquals(m.get("B0H3KY3TZQ")!.break_even, null);
+  assertEquals(Math.round(m.get("B0FLKN42D4")!.break_even! * 1000) / 1000, 0.325);
+});

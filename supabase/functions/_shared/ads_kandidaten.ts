@@ -228,7 +228,10 @@ export function margenAus(produkte: any[]): Map<string, ProduktMarge> {
     const vor = p?.nettogewinn_vor_werbung;
     m.set(String(p.asin).toUpperCase(), {
       produktname: p.produktname ?? null,
-      break_even: vor !== null && vor !== undefined && brutto > 0 ? Number(vor) / brutto : null,
+      // Hat Amazon die Gebühren weder abgerechnet noch hochrechenbar gemacht (neues
+      // Produkt), wäre die Marge zu schön — Vanejas Kauknochen stand bei 75 %. Dann unbekannt.
+      break_even: vor !== null && vor !== undefined && brutto > 0
+        && !(p?.gebuehren_vollstaendig === false && p?.gebuehren_anteilig === false) ? Number(vor) / brutto : null,
       ziel_acos: p?.ziel_acos_prozent === null || p?.ziel_acos_prozent === undefined ? null : Number(p.ziel_acos_prozent) / 100,
     });
   }

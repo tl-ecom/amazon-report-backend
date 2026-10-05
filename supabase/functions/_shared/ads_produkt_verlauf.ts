@@ -98,10 +98,11 @@ export async function adsProduktVerlauf(
     produkte: mitEreignissen(baueVerlauf((data?.zeilen ?? []) as VerlaufZeile[]), (er.data ?? []) as Ereignis[]),
     hinweise: [
       "`ereignisse` je Produkt: Preiswechsel und Listing-Status (aus dem täglichen Listing-Abgleich, auf einen "
-      + "Tag genau), Tage ohne verkaufsfähigen FBA-Bestand, und was über Pulse am Werbekonto geändert wurde. "
-      + "NICHT enthalten: Änderungen der Helium-10-KI und alles, was direkt in Seller Central am Werbekonto "
-      + "geändert wurde, außerdem Coupons, Angebote und Wettbewerber. Ein Ereignis am selben Tag wie ein Knick "
-      + "ist ein Hinweis, keine Ursache.",
+      + "Tag genau), Tage ohne verkaufsfähigen FBA-Bestand, und Änderungen am Werbekonto. Über Pulse geschriebene "
+      + "Änderungen stehen seit Anfang September da. Was die Helium-10-KI oder jemand in Seller Central ändert, "
+      + "erkennt erst der tägliche Struktur-Abgleich, und den gibt es seit dem 04.10.2026 (nur Sponsored "
+      + "Products) — davor fehlen diese Änderungen. NICHT enthalten: Coupons, Angebote und Wettbewerber. "
+      + "Ein Ereignis am selben Tag wie ein Knick ist ein Hinweis, keine Ursache.",
       "„Ein Angebot inaktiv“ gilt je SKU: hat eine ASIN mehrere Angebote (FBA und Eigenversand), kann das "
       + "Produkt trotzdem verkäuflich gewesen sein. Ob es das war, zeigt der Gesamtumsatz der Tage danach.",
       "`ohne_werbung` ist gerechnet (Gesamtumsatz minus Werbeumsatz), nicht gemessen: Amazon bucht Werbeumsatz "

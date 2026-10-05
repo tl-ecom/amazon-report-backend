@@ -715,7 +715,8 @@ const TOOLS: ToolDef[] = [
       "Klicks; einzelne Tage koennen negativ sein, belastbar ist `woche`. " +
       "`ereignisse` je Produkt nennt, was an welchem Tag passiert ist: Preiswechsel, Listing inaktiv/aktiv, " +
       "Tage ohne FBA-Bestand, Aenderungen am Werbekonto ueber Pulse (Budget, Kampagne pausiert, Negatives, " +
-      "Gebote). Nicht enthalten: Aenderungen der Helium-10-KI, Seller Central, Coupons, Wettbewerber. " +
+      "Gebote), seit dem 04.10.2026 auch Aenderungen der Helium-10-KI und aus Seller Central (taeglicher " +
+      "Struktur-Abgleich). Nicht enthalten: Coupons, Wettbewerber. " +
       "Ein Ereignis am Tag eines Knicks ist ein Hinweis, keine Ursache.",
     inputSchema: {
       type: "object",
