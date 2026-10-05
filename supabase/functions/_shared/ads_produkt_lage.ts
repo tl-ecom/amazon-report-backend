@@ -181,15 +181,28 @@ export async function adsProduktLage(
     margenFehler = String((e as Error)?.message ?? e);
   }
 
+  const produkte = baueProduktLage(
+    (data?.zeilen ?? []) as LageZeile[], (data?.budget_leer ?? {}) as Record<string, number>,
+    (data?.gesamtumsatz ?? []) as GesamtZeile[], (data?.asins ?? {}) as Record<string, string[]>,
+    margen,
+  );
+  // Die Marge je Produkt ablegen: die Tagesmail (SQL) kann sie nicht selbst rechnen.
+  // Beiwerk — scheitert das Ablegen, bleibt die Antwort trotzdem richtig.
+  if (!margenFehler && produkte.length > 0) {
+    await supabase.from("ads_produkt_marge").upsert(
+      produkte.map((p) => ({
+        tenant_id, marktplatz: kopf.marktplatz, produkt: p.produkt,
+        marge: p.break_even_tacos, berechnet_am: new Date().toISOString(),
+      })),
+      { onConflict: "tenant_id,marktplatz,produkt" },
+    ).then(() => {}, () => {});
+  }
+
   return {
     ...kopf,
     tage,
     daten_bis: data?.letzter_tag ?? null,
-    produkte: baueProduktLage(
-      (data?.zeilen ?? []) as LageZeile[], (data?.budget_leer ?? {}) as Record<string, number>,
-      (data?.gesamtumsatz ?? []) as GesamtZeile[], (data?.asins ?? {}) as Record<string, string[]>,
-      margen,
-    ),
+    produkte,
     asins_mehrdeutig: data?.asins_mehrdeutig ?? [],
     hinweise: [
       `Verglichen werden die letzten ${tage} Tage mit Ads-Daten (bis ${data?.letzter_tag ?? "—"}) mit den ${tage} Tagen davor. `

@@ -23,6 +23,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { AUSGESCHOEPFT, baueAuslastungRows, SCHWELLE, type UsageEintrag } from "../_shared/ads_budget.ts";
+import { adsProduktLage } from "../_shared/ads_produkt_lage.ts";
 
 const ADS_ENDPOINT = "https://advertising-api-eu.amazon.com";
 const LWA_TOKEN_URL = "https://api.amazon.com/auth/o2/token";
@@ -115,6 +116,20 @@ Deno.serve(async (req) => {
         .upsert(rows, { onConflict: "tenant_id,marktplatz,campaign_id,gemessen_am" });
       if (error) return json({ error: "ads_budget_auslastung", detail: error.message }, 500);
     }
+
+    // Einmal am Tag die Marge je verwaltetem Produkt auffrischen (ads_produkt_marge) —
+    // die Tagesmail braucht sie für den Gewinn nach Werbung. Dieser Lauf ist der
+    // einzige, der stündlich je Mandant und Marktplatz ohnehin läuft. Beiwerk:
+    // ein Fehler hier darf die Budget-Messung nicht kippen.
+    try {
+      const { data: m } = await supabase.from("ads_produkt_marge").select("berechnet_am")
+        .eq("tenant_id", tenant_id).eq("marktplatz", marktplatz)
+        .order("berechnet_am", { ascending: false }).limit(1);
+      const alt = !m?.length || Date.now() - Date.parse(m[0].berechnet_am) > 20 * 3_600_000;
+      const { count } = await supabase.from("ads_steuerung").select("campaign_id", { count: "exact", head: true })
+        .eq("tenant_id", tenant_id);
+      if (alt && (count ?? 0) > 0) await adsProduktLage(supabase, tenant_id, { marktplatz });
+    } catch (_) { /* Marge bleibt die von gestern */ }
 
     const ausgeschoepft = rows.filter((r) => Number(r.auslastung_prozent) >= AUSGESCHOEPFT).length;
     await supabase.from("report_jobs").insert({
