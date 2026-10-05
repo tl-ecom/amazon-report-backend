@@ -54,6 +54,7 @@ import { adsChangelog } from "../_shared/ads_changelog.ts";
 import { adsKandidaten } from "../_shared/ads_kandidaten.ts";
 import { adsBudget } from "../_shared/ads_budget.ts";
 import { adsProduktLage } from "../_shared/ads_produkt_lage.ts";
+import { adsKampagnenErtrag } from "../_shared/ads_kampagnen_ertrag.ts";
 import { adsProduktVerlauf } from "../_shared/ads_produkt_verlauf.ts";
 import { adsKampagnenStarts, adsKampagnenWirkung } from "../_shared/ads_kampagnen_wirkung.ts";
 import { adsNegativWirkung } from "../_shared/ads_negativ_wirkung.ts";
@@ -681,6 +682,9 @@ Deno.serve(async (req) => {
     }
     if (resource === "ads_produkt_verlauf") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await adsProduktVerlauf(service, tenantId, (args ?? {}) as any) });
+    }
+    if (resource === "ads_kampagnen_ertrag") {
+      return json({ ok: true, resource, tenant_id: tenantId, data: await adsKampagnenErtrag(service, tenantId, (args ?? {}) as any) });
     }
     if (resource === "ads_produkt_lage") {
       return json({ ok: true, resource, tenant_id: tenantId, data: await adsProduktLage(service, tenantId, (args ?? {}) as any) });

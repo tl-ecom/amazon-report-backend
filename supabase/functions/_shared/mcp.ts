@@ -729,6 +729,26 @@ const TOOLS: ToolDef[] = [
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_produkt_verlauf", args) : pulseNichtVerfuegbar()),
   },
   {
+    name: "get_ads_kampagnen_ertrag",
+    description:
+      "Was je Kampagne nach Werbung uebrig bleibt — nur Kampagnen der VERWALTETEN Produkte. Je Kampagne " +
+      "Kosten, Werbeumsatz, Bestellungen, ACoS, `break_even_acos` (Marge vor Werbung ihres Produkts, 90 Tage) " +
+      "und `db_nach_werbung` (Werbeumsatz x Marge − Kosten), dazu `steuerung` (h10 = Gebote setzt Helium 10, " +
+      "pulse) und `einordnung`: traegt_sich, ueber_break_even, ohne_bestellung (ab 20 Klicks), wenig_daten, " +
+      "marge_unbekannt. Sortiert nach dem groessten Verlust. `bilanz` fasst zusammen. " +
+      "EINORDNUNG: eine Rechnung je Kampagne, kein Urteil. Sie kennt nur den zugeschriebenen Werbeumsatz — " +
+      "eine Ranking-Kampagne darf ueber dem Break-even liegen. SB und SD schreiben Umsatz anders zu als SP.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tage: { type: "integer", description: "Fensterlaenge in Tagen, 1 bis 90. Default 30." },
+        marktplatz: ADS_ZEITRAUM_SCHEMA.properties.marktplatz,
+      },
+      additionalProperties: false,
+    },
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_kampagnen_ertrag", args) : pulseNichtVerfuegbar()),
+  },
+  {
     name: "get_account_health",
     description:
       "Amazons Kontozustand (Account Health) je Marktplatz: Kontostatus, Account-Health-Rating " +

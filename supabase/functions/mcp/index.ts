@@ -33,6 +33,7 @@ import { adsChangelog } from "../_shared/ads_changelog.ts";
 import { adsKandidaten } from "../_shared/ads_kandidaten.ts";
 import { adsBudget } from "../_shared/ads_budget.ts";
 import { adsProduktLage } from "../_shared/ads_produkt_lage.ts";
+import { adsKampagnenErtrag } from "../_shared/ads_kampagnen_ertrag.ts";
 import { adsProduktVerlauf } from "../_shared/ads_produkt_verlauf.ts";
 import { adsKampagnenStarts, adsKampagnenWirkung } from "../_shared/ads_kampagnen_wirkung.ts";
 import { adsNegativWirkung } from "../_shared/ads_negativ_wirkung.ts";
@@ -191,6 +192,7 @@ Deno.serve(async (req) => {
         case "ads_kampagnen_starts": return await adsKampagnenStarts(supabase, tenant_id, pulseArgs);
         case "ads_budget": return await adsBudget(supabase, tenant_id, pulseArgs);
         case "ads_produkt_lage": return await adsProduktLage(supabase, tenant_id, pulseArgs);
+        case "ads_kampagnen_ertrag": return await adsKampagnenErtrag(supabase, tenant_id, pulseArgs);
         case "ads_produkt_verlauf": return await adsProduktVerlauf(supabase, tenant_id, pulseArgs);
         case "ads_kandidaten": return await adsKandidaten(supabase, tenant_id, pulseArgs);
         case "ads_changelog": return await adsChangelog(supabase, tenant_id, pulseArgs);
