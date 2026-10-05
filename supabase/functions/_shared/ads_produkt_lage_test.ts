@@ -1,7 +1,7 @@
 // Tests für ads_produkt_lage.ts. Zahlen: Vaneja, 7 Tage bis 01.10.2026.
 
 import { assertEquals } from "jsr:@std/assert@1";
-import { baueProduktLage, type LageZeile } from "./ads_produkt_lage.ts";
+import { asinMargenAus, baueProduktLage, margeFuer, type LageZeile } from "./ads_produkt_lage.ts";
 
 const z = (produkt: string, modus: "h10" | "pulse", fenster: "aktuell" | "davor", kampagnen: number, clicks: number, spend_cents: number, sales_cents: number, orders: number): LageZeile =>
   ({ produkt, modus, fenster, kampagnen, impressions: 0, clicks, spend_cents, sales_cents, orders });
@@ -45,24 +45,36 @@ Deno.test("Produkt-Lage: TACoS gegen alle Bestellungen; ohne Bestell-Eintrag unb
   assertEquals(k.gewinn_nach_werbung.aktuell, null);
 });
 
-Deno.test("Produkt-Lage: Gewinn nach Werbung aus der schwächsten Marge; ohne Umsatz unbekannt", () => {
+Deno.test("Marge: nach Umsatz gewichtet; unbelastbare ASINs zählen nicht, zu viele davon heißt unbekannt", () => {
+  // Vaneja, 90 Tage bis 05.10.2026 (Produktübersicht).
+  const m = asinMargenAus([
+    { asin: "B0FKNKD93K", umsatz_brutto: 29133.08, nettogewinn_vor_werbung: 12734.01, gebuehren_anteilig: true },
+    { asin: "B0FKNHNW27", umsatz_brutto: 13627.19, nettogewinn_vor_werbung: 6054.26, gebuehren_anteilig: true },
+    { asin: "B0FKNN9CCJ", umsatz_brutto: 164.88, nettogewinn_vor_werbung: 10.54, gebuehren_anteilig: true },
+    { asin: "B0H3L8SQYD", umsatz_brutto: 209.58, nettogewinn_vor_werbung: 155.43, gebuehren_anteilig: false, gebuehren_vollstaendig: false },
+    { asin: "B0OHNEUMSATZ", umsatz_brutto: 0, nettogewinn_vor_werbung: 0 },
+  ]);
+  // Etagere: die kleine ASIN mit 6 % Marge zieht das Produkt nicht auf 6 %.
+  assertEquals(margeFuer(["B0FKNKD93K", "b0fknhnw27", "B0FKNN9CCJ"], m), 0.4379);
+  // Kauknochen: Gebühren noch nicht abgerechnet — 74 % wären zu schön.
+  assertEquals(margeFuer(["B0H3L8SQYD"], m), null);
+  assertEquals(margeFuer(["B0OHNEUMSATZ", "B0FEHLT"], m), null);
+});
+
+Deno.test("Produkt-Lage: Gewinn nach Werbung aus der Marge; ohne Umsatz unbekannt", () => {
   const gesamt = [
     { produkt: "Kratzbrett", fenster: "aktuell" as const, umsatz_cents: 152968, einheiten: 84 },
     { produkt: "Kratzbrett", fenster: "davor" as const, umsatz_cents: 177075, einheiten: 99 },
   ];
-  const margen = new Map([
-    ["B0FLKN42D4", { produktname: "Kratzbrett", break_even: 0.3, ziel_acos: null }],
-    ["B0ZWEITEASIN", { produktname: "Kratzbrett groß", break_even: 0.25, ziel_acos: null }],
-    ["B0OHNEMARGE", { produktname: null, break_even: null, ziel_acos: null }],
-  ]);
-  const p = baueProduktLage(VANEJA, {}, gesamt, { Kratzbrett: ["B0FLKN42D4", "b0zweiteasin", "B0OHNEMARGE"], "Biomülleimer": ["B0FLKN42D4"] }, margen);
+  const margen = new Map([["B0FLKN42D4", { umsatz_brutto: 1000, vor_werbung: 250, belastbar: true }]]);
+  const p = baueProduktLage(VANEJA, {}, gesamt, { Kratzbrett: ["B0FLKN42D4"], "Biomülleimer": ["b0flkn42d4"] }, margen);
   const k = p.find((x) => x.produkt === "Kratzbrett")!;
   assertEquals(k.break_even_tacos, 0.25);
   // 1.529,68 x 0,25 − 323,00 und 1.770,75 x 0,25 − 336,17
   assertEquals(k.gewinn_nach_werbung.aktuell, 59.42);
   assertEquals(k.gewinn_nach_werbung.davor, 106.52);
   const bio = p.find((x) => x.produkt === "Biomülleimer")!;
-  assertEquals(bio.break_even_tacos, 0.3);
+  assertEquals(bio.break_even_tacos, 0.25);
   assertEquals(bio.gewinn_nach_werbung.aktuell, null);
 });
 

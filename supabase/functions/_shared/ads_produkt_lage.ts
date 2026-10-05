@@ -9,7 +9,6 @@
 // die von heute — war eine Kampagne im Vorfenster noch anders gesteuert, weiß
 // die Zahl das nicht.
 
-import { margenAus, type ProduktMarge } from "./ads_kandidaten.ts";
 import { marktplatzKopf } from "./ads_marktplatz.ts";
 import { produktUebersicht } from "./produkte.ts";
 
@@ -76,12 +75,53 @@ function gegenGesamt(g: GesamtZeile | undefined, werbung: Fenster) {
   };
 }
 
+/** Was die Produktübersicht je ASIN für die Marge hergibt. */
+export interface AsinMarge {
+  umsatz_brutto: number;
+  /** Deckungsbeitrag vor Werbung in Euro. */
+  vor_werbung: number;
+  /** Gebühren abgerechnet oder hochgerechnet. false = Amazon hat kaum abgerechnet, die Marge wäre zu schön. */
+  belastbar: boolean;
+}
+
+export function asinMargenAus(produkte: any[]): Map<string, AsinMarge> {
+  const m = new Map<string, AsinMarge>();
+  for (const p of produkte ?? []) {
+    const brutto = Number(p?.umsatz_brutto);
+    const vor = p?.nettogewinn_vor_werbung;
+    if (!(brutto > 0) || vor === null || vor === undefined) continue;
+    m.set(String(p.asin).toUpperCase(), {
+      umsatz_brutto: brutto, vor_werbung: Number(vor),
+      belastbar: p?.gebuehren_vollstaendig === true || p?.gebuehren_anteilig === true,
+    });
+  }
+  return m;
+}
+
+/**
+ * Marge vor Werbung eines Produkts: Deckungsbeitrag durch Bruttoumsatz über
+ * seine ASINs, also nach Umsatz gewichtet. Die schwächste ASIN zu nehmen war
+ * falsch: Vanejas Etagere hat eine ASIN mit 10 verkauften Stück und 6 % Marge
+ * neben zweien mit 44 % und 930 Stück.
+ *
+ * ASINs ohne belastbare Gebühren zählen nicht mit (neue Produkte: Amazon hat
+ * noch kaum abgerechnet, die Marge stünde bei 75 % und mehr). Tragen sie mehr
+ * als ein Fünftel des Umsatzes, ist die Marge des Produkts unbekannt.
+ */
+export function margeFuer(asins: string[], margen: Map<string, AsinMarge>): number | null {
+  const alle = asins.map((a) => margen.get(a.toUpperCase())).filter((m): m is AsinMarge => !!m);
+  const gut = alle.filter((m) => m.belastbar);
+  const summe = (l: AsinMarge[], f: (m: AsinMarge) => number) => l.reduce((n, m) => n + f(m), 0);
+  const brutto = summe(gut, (m) => m.umsatz_brutto);
+  if (!(brutto > 0) || brutto < 0.8 * summe(alle, (m) => m.umsatz_brutto)) return null;
+  return Math.round((summe(gut, (m) => m.vor_werbung) / brutto) * 10000) / 10000;
+}
+
 /**
  * Was nach Werbung übrig bleibt: Gesamtumsatz x Marge vor Werbung − Werbekosten.
- * Die Marge ist der Deckungsbeitrag vor Werbung je Euro Bruttoumsatz (90 Tage,
- * aus der Produktübersicht) — zugleich der TACoS, bei dem nichts übrig bliebe.
- * Mehrere ASINs: die schwächste Marge, wie bei den Ernte-Kandidaten.
- * null, sobald Umsatz oder Marge unbekannt sind — kein geratener Gewinn.
+ * Die Marge (90 Tage, aus der Produktübersicht) ist zugleich der TACoS, bei
+ * dem nichts übrig bliebe. null, sobald Umsatz oder Marge unbekannt sind —
+ * kein geratener Gewinn.
  */
 function gewinn(umsatz: number | null, kosten: number, marge: number | null): number | null {
   return umsatz === null || marge === null ? null : r2(umsatz * marge - kosten);
@@ -90,7 +130,7 @@ function gewinn(umsatz: number | null, kosten: number, marge: number | null): nu
 export function baueProduktLage(
   zeilen: LageZeile[], budgetLeer: Record<string, number | string>,
   gesamtZeilen: GesamtZeile[] = [], asins: Record<string, string[]> = {},
-  margen: Map<string, ProduktMarge> = new Map(),
+  margen: Map<string, AsinMarge> = new Map(),
 ) {
   const produkte = [...new Set(zeilen.map((z) => z.produkt))].sort();
   return produkte.map((produkt) => {
@@ -99,9 +139,7 @@ export function baueProduktLage(
     const h10 = teil(eigene.filter((z) => z.modus === "h10"));
     const g = (f: "aktuell" | "davor") => gesamtZeilen.find((x) => x.produkt === produkt && x.fenster === f);
     const alle = { aktuell: gegenGesamt(g("aktuell"), gesamt.aktuell), davor: gegenGesamt(g("davor"), gesamt.davor) };
-    const bekannt = (asins[produkt] ?? []).map((a) => margen.get(a.toUpperCase())?.break_even)
-      .filter((m): m is number => m !== null && m !== undefined);
-    const marge = bekannt.length ? Math.round(Math.min(...bekannt) * 10000) / 10000 : null;
+    const marge = margeFuer(asins[produkt] ?? [], margen);
     return {
       produkt,
       asins: asins[produkt] ?? [],
@@ -134,11 +172,11 @@ export async function adsProduktLage(
   if (error) throw new Error("ads_produkt_lage: " + error.message);
 
   // Ohne Margen bleibt die Lage brauchbar, nur eben ohne Gewinn.
-  let margen = new Map<string, ProduktMarge>();
+  let margen = new Map<string, AsinMarge>();
   let margenFehler: string | null = null;
   try {
     const pu = await produktUebersicht(supabase, tenant_id, { tage: 90 }) as { produkte?: any[] };
-    margen = margenAus(pu?.produkte ?? []);
+    margen = asinMargenAus(pu?.produkte ?? []);
   } catch (e) {
     margenFehler = String((e as Error)?.message ?? e);
   }
@@ -165,9 +203,11 @@ export async function adsProduktLage(
       + "letzten 90 Tagen beworben haben. `werbeanteil` kann über 1 liegen — Amazon schreibt Werbeumsatz "
       + "bis 14 Tage nach dem Klick zu, auch für andere ASINs der Marke.",
       "`gewinn_nach_werbung` = Gesamtumsatz x `break_even_tacos` − Werbekosten. `break_even_tacos` ist der "
-      + "Deckungsbeitrag vor Werbung je Euro Bruttoumsatz aus der Produktübersicht (letzte 90 Tage, bei mehreren "
-      + "ASINs die schwächste) — liegt der TACoS darüber, kostet die Werbung mehr, als das Produkt abwirft. "
-      + "Eine Marge aus 90 Tagen auf eine Woche gelegt: Preiswechsel der Woche stecken nur anteilig darin.",
+      + "Deckungsbeitrag vor Werbung je Euro Bruttoumsatz aus der Produktübersicht (letzte 90 Tage, über die ASINs "
+      + "des Produkts nach Umsatz gewichtet) — liegt der TACoS darüber, kostet die Werbung mehr, als das Produkt "
+      + "abwirft. Eine Marge aus 90 Tagen auf eine Woche gelegt: Preiswechsel der Woche stecken nur anteilig darin. "
+      + "null = unbekannt: Amazon hat für das Produkt noch kaum Gebühren abgerechnet (neues Produkt), die Marge "
+      + "wäre zu schön.",
       ...(margenFehler ? ["Margen nicht lesbar, deshalb kein Gewinn: " + margenFehler] : []),
       ...((data?.asins_mehrdeutig ?? []).length
         ? ["ASINs, die Kampagnen mehrerer Produkte bewerben, fehlen im Gesamtumsatz: " + (data.asins_mehrdeutig as string[]).join(", ") + "."]
