@@ -670,7 +670,9 @@ const TOOLS: ToolDef[] = [
       "wie vielen Tagen leer und wie lange. Stuendlich gemessen, gespeichert ab 80 % Auslastung; " +
       "`messungen_je_tag` sagt, wie oft an einem Tag gemessen wurde. " +
       "EINORDNUNG: die Messung laeuft erst seit dem 04.10.2026. Entgangener Umsatz steht bewusst " +
-      "nicht dabei — er waere aus Tageswerten nur zu raten. Ueber 100 % heisst: Budget gesenkt, " +
+      "nicht dabei — er waere aus Tageswerten nur zu raten. `steuerung` je Zeile (pulse/h10 = verwaltetes " +
+      "Produkt, nur_analyse = nicht anfassen); `bilanz.gesteuert` zaehlt nur die verwalteten. " +
+      "Ueber 100 % heisst: Budget gesenkt, " +
       "nachdem schon mehr ausgegeben war. Zeitraum via von/bis, Default letzte 14 Tage.",
     inputSchema: {
       type: "object",

@@ -26,6 +26,7 @@
 // ponytail: nur Sponsored Products. Sponsored Brands hat einen eigenen
 // Endpunkt (/sb/campaigns/budget/usage); ergänzen, wenn SB-Budgets knapp werden.
 
+import { ladeSteuerung } from "./ads_steuerung.ts";
 import { marktplatzKopf } from "./ads_marktplatz.ts";
 
 export const SCHWELLE = 80;
@@ -124,7 +125,9 @@ export async function adsBudget(
 
   const jeTag = (data?.messungen_je_tag ?? {}) as Record<string, number>;
   const jetzt = new Date();
-  const alle = ((data?.zeilen ?? []) as TagZeile[]).map((z) => baueBudgetTag(z, Number(jeTag[z.tag]) || 0, jetzt));
+  const modusVon = await ladeSteuerung(supabase, tenant_id);
+  const alle = ((data?.zeilen ?? []) as TagZeile[])
+    .map((z) => ({ ...baueBudgetTag(z, Number(jeTag[z.tag]) || 0, jetzt), steuerung: modusVon(z.campaign_id) }));
   const tage = nurVoll ? alle.filter((t) => t.ausgeschoepft) : alle;
   const voll = alle.filter((t) => t.ausgeschoepft);
 
@@ -137,6 +140,8 @@ export async function adsBudget(
     jeKampagne.set(t.campaignId, e);
   }
   const r1 = (n: number) => Math.round(n * 10) / 10;
+  // Dieselbe Bilanz nur für Kampagnen, die gesteuert werden — die übrigen kann man hier nur ansehen.
+  const gesteuert = voll.filter((t) => t.steuerung !== "nur_analyse");
 
   return {
     ...kopf,
@@ -148,10 +153,15 @@ export async function adsBudget(
       kampagnen_ausgeschoepft: jeKampagne.size,
       kampagnentage_ausgeschoepft: voll.length,
       stunden_ohne_auslieferung: r1(voll.reduce((n, t) => n + (t.stunden_ohne_auslieferung ?? 0), 0)),
+      gesteuert: {
+        kampagnen_ausgeschoepft: new Set(gesteuert.map((t) => t.campaignId)).size,
+        kampagnentage_ausgeschoepft: gesteuert.length,
+        stunden_ohne_auslieferung: r1(gesteuert.reduce((n, t) => n + (t.stunden_ohne_auslieferung ?? 0), 0)),
+      },
     },
     kampagnen: [...jeKampagne.entries()]
       .map(([campaignId, e]) => ({
-        campaignId, kampagne: e.kampagne, tage_ausgeschoepft: e.tage,
+        campaignId, kampagne: e.kampagne, steuerung: modusVon(campaignId), tage_ausgeschoepft: e.tage,
         stunden_ohne_auslieferung: r1(e.stunden),
         stunden_je_tag: r1(e.stunden / e.tage),
       }))
@@ -168,6 +178,8 @@ export async function adsBudget(
         ? "Die Messung läuft seit " + String(data.erste_messung).slice(0, 10) + ". Davor gibt es nichts."
         : "Noch keine Messung gelaufen.",
       "Nur Sponsored Products.",
+      "`steuerung` je Zeile: pulse und h10 sind Kampagnen der verwalteten Produkte (bei h10 setzt Helium 10 die "
+      + "Gebote, das Budget bleibt bei Pulse), nur_analyse wird nur ausgewertet. `bilanz.gesteuert` zählt ohne diese.",
     ],
   };
 }
