@@ -704,6 +704,26 @@ const TOOLS: ToolDef[] = [
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_produkt_lage", args) : pulseNichtVerfuegbar()),
   },
   {
+    name: "get_ads_produkt_verlauf",
+    description:
+      "Tagesverlauf je VERWALTETEM Produkt: je Tag `werbekosten`, `werbeumsatz`, `gesamtumsatz` (alle " +
+      "Bestellungen des Produkts), `einheiten` und `ohne_werbung` (Gesamt minus Werbung). `woche` summiert " +
+      "den Tag und die sechs davor, mit `tacos`. Die Ergaenzung zu get_ads_produkt_lage: wenn dort der " +
+      "Gesamtumsatz faellt, zeigt der Verlauf, AN WELCHEM TAG. " +
+      "EINORDNUNG: `ohne_werbung` ist gerechnet, nicht gemessen — Amazon bucht Werbeumsatz auf den Tag des " +
+      "Klicks; einzelne Tage koennen negativ sein, belastbar ist `woche`. Warum ein Tag ausschlaegt " +
+      "(Angebot, Preis, Bestand), steht hier nicht.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tage: { type: "integer", description: "Laenge des Verlaufs in Tagen, 7 bis 180. Default 42." },
+        marktplatz: ADS_ZEITRAUM_SCHEMA.properties.marktplatz,
+      },
+      additionalProperties: false,
+    },
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_produkt_verlauf", args) : pulseNichtVerfuegbar()),
+  },
+  {
     name: "get_account_health",
     description:
       "Amazons Kontozustand (Account Health) je Marktplatz: Kontostatus, Account-Health-Rating " +
