@@ -760,6 +760,8 @@ const TOOLS: ToolDef[] = [
       "Kaufanteil der letzten Woche, der Woche davor und des Hoechststands, dazu alle Wochen. Je Begriff " +
       "und Woche ausserdem `werbeklicks`/`werbebestellungen` der Kampagnen des Produkts ueber genau diesen " +
       "Suchbegriff (nur SP), je Woche `kern_werbeklicks` — zeigt, ob der Anteil MIT der Werbung fiel. " +
+      "`kampagnen` je Begriff: aus welcher Kampagne die Klicks in der Hoechststand-Woche kamen und was sie " +
+      "zuletzt bringt, groesster Verlust zuerst. " +
       "EINORDNUNG: Kaufanteil ist Werbung und organisch zusammen. Nur schon abgerufene Wochen, dazwischen " +
       "koennen Wochen fehlen. `kaufanteil` null = Begriff nicht mehr unter Amazons 100; `duenn` = eigene " +
       "Datenbasis zu klein. Sagt nicht, WARUM der Anteil fiel. READ-ONLY, stoesst keinen Report an.",

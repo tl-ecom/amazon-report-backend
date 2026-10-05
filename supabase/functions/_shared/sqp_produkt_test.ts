@@ -1,7 +1,7 @@
 // Tests für sqp_produkt.ts. Zahlen: Vanejas Biomülleimer (B0D7D2NMT4), Wochen 19.07.–19.09.2026.
 
 import { assertEquals } from "jsr:@std/assert@1";
-import { baueSqpProdukt, type ProduktRoh } from "./sqp_produkt.ts";
+import { baueSqpProdukt, mitKampagnen, type ProduktRoh } from "./sqp_produkt.ts";
 
 const BIO: ProduktRoh = {
   produkt: "Biomülleimer", asins: ["B0D7D2NMT4"], kern_begriffe: 18,
@@ -49,4 +49,23 @@ Deno.test("SQP je Produkt: eine einzige Woche ergibt keinen Verlauf", () => {
   const p = baueSqpProdukt({ ...BIO, wochen: BIO.wochen!.slice(0, 1), begriffe: [] });
   assertEquals(p.kern_verlauf, null);
   assertEquals(baueSqpProdukt({ produkt: "X", asins: null, kern_begriffe: 0, wochen: null, begriffe: null }).wochen, []);
+});
+
+Deno.test("SQP je Produkt: der Klickverlust eines Begriffs steht bei seiner Kampagne", () => {
+  // "biomülleimer küche": 256 Klicks in der besten Woche, alle aus der Ranking-Kampagne — zuletzt 56.
+  const k = (campaign_name: string, von: string, klicks: number, bestellungen: number) =>
+    ({ produkt: "Biomülleimer", modus: "pulse" as const, campaign_id: campaign_name, campaign_name, begriff: "biomülleimer küche", von, klicks, bestellungen, spend_cents: 0 });
+  const p = mitKampagnen(baueSqpProdukt(BIO), [
+    k("SPM SK Rank biomülleimer küche", "2026-08-16", 256, 31),
+    k("SPM SK Rank biomülleimer küche", "2026-09-13", 56, 3),
+    k("SP Kategorie Biomülleimer 5l", "2026-09-13", 7, 0),
+    k("SP Auto Biomülleimer 5l", "2026-09-06", 4, 0), // weder beste noch letzte Woche
+    { ...k("Fremdes Produkt", "2026-09-13", 99, 9), produkt: "Kratzbrett" },
+  ]);
+  const b = p.begriffe[0].kampagnen;
+  assertEquals(b.map((x) => [x.kampagne, x.klicks_hoechstwoche, x.klicks, x.klicks_differenz]), [
+    ["SPM SK Rank biomülleimer küche", 256, 56, -200],
+    ["SP Kategorie Biomülleimer 5l", 0, 7, 7],
+  ]);
+  assertEquals(p.begriffe[1].kampagnen, []);
 });

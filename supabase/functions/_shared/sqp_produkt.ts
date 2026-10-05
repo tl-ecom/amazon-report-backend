@@ -86,6 +86,43 @@ export function baueSqpProdukt(p: ProduktRoh) {
   };
 }
 
+export interface KampagneWoche {
+  produkt: string; modus: "h10" | "pulse"; campaign_id: string; campaign_name: string | null;
+  begriff: string; von: string; klicks: number | string; bestellungen: number | string; spend_cents: number | string;
+}
+
+/**
+ * Je Begriff: welche Kampagne brachte die Werbeklicks in der Woche des
+ * Höchststands, und was bringt sie in der letzten Woche. Sortiert nach dem
+ * größten Verlust an Klicks — die Kampagne, an der es liegt, steht oben.
+ */
+export function mitKampagnen<T extends ReturnType<typeof baueSqpProdukt>>(p: T, zeilen: KampagneWoche[]) {
+  const letzte = p.wochen.at(-1)?.von ?? null;
+  return {
+    ...p,
+    begriffe: p.begriffe.map((b) => {
+      const eigene = zeilen.filter((z) => z.produkt === p.produkt && z.begriff === b.begriff.toLowerCase());
+      const ids = [...new Set(eigene.map((z) => z.campaign_id))];
+      const in_ = (id: string, von: string | null) => eigene.find((z) => z.campaign_id === id && z.von === von);
+      const kampagnen = ids.map((id) => {
+        const hoch = in_(id, b.hoechst_in_woche);
+        const jetzt = in_(id, letzte);
+        const name = eigene.find((z) => z.campaign_id === id)!;
+        return {
+          campaignId: id, kampagne: name.campaign_name, steuerung: name.modus,
+          klicks_hoechstwoche: Number(hoch?.klicks ?? 0), bestellungen_hoechstwoche: Number(hoch?.bestellungen ?? 0),
+          klicks: Number(jetzt?.klicks ?? 0), bestellungen: Number(jetzt?.bestellungen ?? 0),
+          klicks_differenz: Number(jetzt?.klicks ?? 0) - Number(hoch?.klicks ?? 0),
+        };
+      })
+        // Kampagnen, die weder damals noch heute Klicks über den Begriff hatten, sagen nichts.
+        .filter((k) => k.klicks_hoechstwoche > 0 || k.klicks > 0)
+        .sort((a, c) => a.klicks_differenz - c.klicks_differenz);
+      return { ...b, kampagnen };
+    }),
+  };
+}
+
 export async function sqpProduktVerlauf(
   supabase: any, tenant_id: string, opts?: { top?: unknown; marktplatz?: unknown },
 ): Promise<unknown> {
@@ -95,12 +132,26 @@ export async function sqpProduktVerlauf(
     p_tenant: tenant_id, p_marktplatz: kopf.marktplatz, p_top: top,
   });
   if (error) throw new Error("sqp_produkt_verlauf: " + error.message);
-  const produkte = ((data ?? []) as ProduktRoh[]).map(baueSqpProdukt);
+  const roh = ((data ?? []) as ProduktRoh[]).map(baueSqpProdukt);
+  const begriffe = [...new Set(roh.flatMap((p) => p.begriffe.map((b) => b.begriff)))];
+  const wochen = [...new Set(roh.flatMap((p) => p.wochen.map((w) => w.von)))];
+  let kampagnen: KampagneWoche[] = [];
+  if (begriffe.length && wochen.length) {
+    const k = await supabase.rpc("ads_suchbegriff_kampagnen_wochen", {
+      p_tenant: tenant_id, p_marktplatz: kopf.marktplatz, p_begriffe: begriffe, p_wochen: wochen,
+    });
+    if (k.error) throw new Error("ads_suchbegriff_kampagnen_wochen: " + k.error.message);
+    kampagnen = (k.data ?? []) as KampagneWoche[];
+  }
+  const produkte = roh.map((p) => mitKampagnen(p, kampagnen));
   return {
     ...kopf,
     top,
     produkte,
     hinweise: [
+      "`kampagnen` je Begriff: aus welcher Kampagne die Werbeklicks in der Woche des Höchststands kamen "
+      + "(`klicks_hoechstwoche`) und was sie in der letzten Woche bringt (`klicks`), der größte Verlust zuerst. "
+      + "`steuerung` sagt, wer dort die Gebote setzt.",
       "`werbeklicks` und `werbebestellungen`: was die Kampagnen des Produkts in derselben Woche über genau "
       + "diesen Suchbegriff hatten (nur Sponsored Products). Fällt der Kaufanteil MIT den Werbeklicks, liegt "
       + "die Werbung als Ursache nahe; fällt er bei gleichen Klicks, sind es die Käufe ohne Werbung oder die "
