@@ -757,7 +757,9 @@ const TOOLS: ToolDef[] = [
       "Performance). Trennt 'es wird weniger gesucht' von 'es wird woanders gekauft'. Je Produkt `wochen` " +
       "mit `kern_volumen` und `kern_kaufanteil` (nur Begriffe, die in jeder Woche stehen — nur die sind " +
       "vergleichbar), `kern_verlauf` (erste gegen letzte Woche) und `begriffe`: je Begriff Suchvolumen und " +
-      "Kaufanteil der letzten Woche, der Woche davor und des Hoechststands, dazu alle Wochen. " +
+      "Kaufanteil der letzten Woche, der Woche davor und des Hoechststands, dazu alle Wochen. Je Begriff " +
+      "und Woche ausserdem `werbeklicks`/`werbebestellungen` der Kampagnen des Produkts ueber genau diesen " +
+      "Suchbegriff (nur SP), je Woche `kern_werbeklicks` — zeigt, ob der Anteil MIT der Werbung fiel. " +
       "EINORDNUNG: Kaufanteil ist Werbung und organisch zusammen. Nur schon abgerufene Wochen, dazwischen " +
       "koennen Wochen fehlen. `kaufanteil` null = Begriff nicht mehr unter Amazons 100; `duenn` = eigene " +
       "Datenbasis zu klein. Sagt nicht, WARUM der Anteil fiel. READ-ONLY, stoesst keinen Report an.",

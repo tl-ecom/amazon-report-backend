@@ -10,10 +10,17 @@
 
 import { marktplatzKopf } from "./ads_marktplatz.ts";
 
-export interface BegriffWoche { von: string; volumen: number | string; kaufanteil: number | string; duenn: boolean }
+export interface BegriffWoche {
+  von: string; volumen: number | string; kaufanteil: number | string; duenn: boolean;
+  /** Werbung der Kampagnen des Produkts über genau diesen Suchbegriff. null = Woche vor den Suchbegriff-Daten. */
+  werbeklicks?: number | string | null; werbebestellungen?: number | string | null; werbekosten_cents?: number | string | null;
+}
 export interface ProduktRoh {
   produkt: string; asins: string[] | null; kern_begriffe: number | string;
-  wochen: Array<{ von: string; bis: string; begriffe: number; kern_volumen: number | string | null; kern_kaufanteil: number | string | null }> | null;
+  wochen: Array<{
+    von: string; bis: string; begriffe: number; kern_volumen: number | string | null; kern_kaufanteil: number | string | null;
+    kern_werbeklicks?: number | string | null; kern_werbebestellungen?: number | string | null;
+  }> | null;
   begriffe: Array<{ begriff: string; kern: boolean; wochen: BegriffWoche[] }> | null;
 }
 
@@ -31,11 +38,16 @@ export function baueSqpProdukt(p: ProduktRoh) {
   const wochen = (p.wochen ?? []).map((w) => ({
     von: w.von, bis: w.bis, begriffe: Number(w.begriffe),
     kern_volumen: zahl(w.kern_volumen), kern_kaufanteil: zahl(w.kern_kaufanteil),
+    kern_werbeklicks: zahl(w.kern_werbeklicks), kern_werbebestellungen: zahl(w.kern_werbebestellungen),
   }));
   const letzte = wochen.at(-1)?.von ?? null;
   const vorletzte = wochen.at(-2)?.von ?? null;
   const begriffe = (p.begriffe ?? []).map((b) => {
-    const w = b.wochen.map((x) => ({ von: x.von, volumen: Number(x.volumen), kaufanteil: Number(x.kaufanteil), duenn: x.duenn }));
+    const w = b.wochen.map((x) => ({
+      von: x.von, volumen: Number(x.volumen), kaufanteil: Number(x.kaufanteil), duenn: x.duenn,
+      werbeklicks: zahl(x.werbeklicks), werbebestellungen: zahl(x.werbebestellungen),
+      werbekosten: zahl(x.werbekosten_cents) === null ? null : r2(zahl(x.werbekosten_cents)! / 100),
+    }));
     const in_ = (von: string | null) => w.find((x) => x.von === von) ?? null;
     const aktuell = in_(letzte);
     const davor = in_(vorletzte);
@@ -47,6 +59,10 @@ export function baueSqpProdukt(p: ProduktRoh) {
       kaufanteil_davor: davor?.kaufanteil ?? null,
       kaufanteil_hoechst: beste?.kaufanteil ?? null,
       hoechst_in_woche: beste?.von ?? null,
+      // Werbung über diesen Begriff: letzte Woche und in der Woche des Höchststands.
+      werbeklicks: aktuell?.werbeklicks ?? null,
+      werbebestellungen: aktuell?.werbebestellungen ?? null,
+      werbeklicks_hoechstwoche: beste?.werbeklicks ?? null,
       // Eigene Datenbasis der letzten Woche zu klein: ein Kauf mehr oder weniger kippt die Zahl.
       duenn: aktuell?.duenn ?? null,
       wochen: w,
@@ -85,6 +101,10 @@ export async function sqpProduktVerlauf(
     top,
     produkte,
     hinweise: [
+      "`werbeklicks` und `werbebestellungen`: was die Kampagnen des Produkts in derselben Woche über genau "
+      + "diesen Suchbegriff hatten (nur Sponsored Products). Fällt der Kaufanteil MIT den Werbeklicks, liegt "
+      + "die Werbung als Ursache nahe; fällt er bei gleichen Klicks, sind es die Käufe ohne Werbung oder die "
+      + "Konversion. Ein Nebeneinander, kein Beweis. null = Woche liegt vor den Suchbegriff-Daten.",
       "Quelle: Brand Analytics, Search Query Performance, wochenweise (Sonntag bis Samstag). Kaufanteil in "
       + "Prozent: der Anteil der Käufe nach dieser Suche, der auf die ASINs des Produkts fiel — Werbung und "
       + "organisch zusammen. Suchvolumen ist der ganze Markt.",

@@ -14,9 +14,9 @@ const BIO: ProduktRoh = {
   begriffe: [
     { begriff: "biomülleimer küche", kern: true, wochen: [
       { von: "2026-07-19", volumen: 12617, kaufanteil: 2, duenn: false },
-      { von: "2026-08-16", volumen: 14078, kaufanteil: 6.1, duenn: false },
-      { von: "2026-09-06", volumen: 14575, kaufanteil: 3, duenn: false },
-      { von: "2026-09-13", volumen: 14188, kaufanteil: 1.3, duenn: false },
+      { von: "2026-08-16", volumen: 14078, kaufanteil: 6.1, duenn: false, werbeklicks: 256, werbebestellungen: 31, werbekosten_cents: 18044 },
+      { von: "2026-09-06", volumen: 14575, kaufanteil: 3, duenn: false, werbeklicks: 80, werbebestellungen: 10, werbekosten_cents: 5630 },
+      { von: "2026-09-13", volumen: 14188, kaufanteil: 1.3, duenn: false, werbeklicks: 64, werbebestellungen: 3, werbekosten_cents: 4410 },
     ] },
     { begriff: "biomülleimer küche gegen fruchtfliegen", kern: false, wochen: [
       { von: "2026-08-16", volumen: 310, kaufanteil: 33.3, duenn: true },
@@ -32,6 +32,11 @@ Deno.test("SQP je Produkt: Markt stabil, Anteil gefallen", () => {
   });
   const k = p.begriffe[0];
   assertEquals([k.volumen, k.kaufanteil, k.kaufanteil_davor, k.kaufanteil_hoechst, k.hoechst_in_woche], [14188, 1.3, 3, 6.1, "2026-08-16"]);
+  // Die Werbeklicks über den Begriff fielen mit: 256 in der besten Woche, 64 in der letzten.
+  assertEquals([k.werbeklicks, k.werbebestellungen, k.werbeklicks_hoechstwoche], [64, 3, 256]);
+  assertEquals(k.wochen[1].werbekosten, 180.44);
+  // Woche ohne Angabe (vor den Suchbegriff-Daten): unbekannt, nicht 0.
+  assertEquals(k.wochen[0].werbeklicks, null);
 });
 
 Deno.test("SQP je Produkt: Begriff nicht mehr unter den 100 ist unbekannt, nicht 0", () => {
