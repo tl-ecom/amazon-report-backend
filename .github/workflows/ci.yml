@@ -74,4 +74,8 @@ jobs:
 
       - name: Deploy all functions
         if: steps.aktuell.outputs.veraltet == 'false'
-        run: supabase functions deploy --project-ref "$PROJECT_REF"
+        # --use-api buendelt serverseitig statt per Docker. Ohne das zog die
+        # CLI jedes Mal das edge-runtime-Image von AWS ECR und scheiterte an
+        # "toomanyrequests: Rate exceeded" — am 04.10. und 05.10. mehrfach,
+        # auch beim Re-Run. Kein Docker, kein Rate-Limit.
+        run: supabase functions deploy --project-ref "$PROJECT_REF" --use-api
