@@ -752,7 +752,7 @@ def cmd_ernte_vorschau(args):
     plan, ohne = [], 0
     for e in d["ernte_kandidaten"]:
         a = e.get("anlage")
-        if e["einordnung"] != "traegt_sich" or e.get("exact_pausiert"):
+        if e["einordnung"] != "traegt_sich" or e.get("exact_pausiert") or e.get("steuerung") == "nur_analyse":
             continue
         if teil and teil not in (e.get("produkt") or "").lower() and teil not in ((a or {}).get("campaignName") or "").lower():
             continue
