@@ -26,6 +26,22 @@ Deno.test("Produkt-Lage: Teile summieren sich zum Ganzen, Differenz gegen das Vo
   assertEquals(k.gesamt.kampagnen, 12);
 });
 
+Deno.test("Produkt-Lage: TACoS gegen alle Bestellungen; ohne Bestell-Eintrag unbekannt statt 0", () => {
+  // Kratzbrett: Werbeumsatz stieg (662 -> 843 EUR), der Gesamtumsatz fiel (1.771 -> 1.530 EUR).
+  const p = baueProduktLage(VANEJA, {}, [
+    { produkt: "Kratzbrett", fenster: "aktuell", umsatz_cents: 152968, einheiten: 84 },
+    { produkt: "Kratzbrett", fenster: "davor", umsatz_cents: 177075, einheiten: 99 },
+  ], { Kratzbrett: ["B0FLKN42D4"] });
+  const k = p.find((x) => x.produkt === "Kratzbrett")!;
+  assertEquals(k.alle_bestellungen.aktuell.umsatz, 1529.68);
+  assertEquals(k.alle_bestellungen.aktuell.tacos, 0.2112);
+  assertEquals(k.alle_bestellungen.davor.tacos, 0.1898);
+  assertEquals(k.alle_bestellungen.aktuell.werbeanteil, 0.551);
+  assertEquals(k.asins, ["B0FLKN42D4"]);
+  const bio = p.find((x) => x.produkt === "Biomülleimer")!;
+  assertEquals(bio.alle_bestellungen.aktuell, { umsatz: null, einheiten: null, tacos: null, werbeanteil: null });
+});
+
 Deno.test("Produkt-Lage: ohne Umsatz ist der ACoS unbekannt, nicht 0; ohne H10-Kampagnen ein leerer Teil", () => {
   const p = baueProduktLage(VANEJA, {});
   // Sortiert nach Kosten im aktuellen Fenster.

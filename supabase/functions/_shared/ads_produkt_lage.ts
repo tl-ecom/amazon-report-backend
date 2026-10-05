@@ -51,14 +51,44 @@ function teil(zeilen: LageZeile[]) {
   };
 }
 
-export function baueProduktLage(zeilen: LageZeile[], budgetLeer: Record<string, number | string>) {
+export interface GesamtZeile {
+  produkt: string; fenster: "aktuell" | "davor";
+  umsatz_cents: number | string | null; einheiten: number | string;
+}
+
+/**
+ * Gesamtumsatz des Produkts (alle Bestellungen) gegen die Werbung.
+ * TACoS = Werbekosten / Gesamtumsatz. `werbeanteil` = Werbeumsatz / Gesamtumsatz;
+ * er kann über 1 liegen, weil Amazon Werbeumsatz bis 14 Tage nach dem Klick
+ * zuschreibt und dabei auch andere ASINs der Marke mitzählt.
+ */
+function gegenGesamt(g: GesamtZeile | undefined, werbung: Fenster) {
+  // Kein Bestell-Eintrag im Fenster = kein Umsatz bekannt. Nicht 0: die ASIN-
+  // Zuordnung kann fehlen (Kampagne ohne Impression in 90 Tagen).
+  if (!g || g.umsatz_cents === null) return { umsatz: null, einheiten: null, tacos: null, werbeanteil: null };
+  const umsatz = r2(Number(g.umsatz_cents) / 100);
+  return {
+    umsatz, einheiten: Number(g.einheiten),
+    tacos: umsatz > 0 ? Math.round((werbung.kosten / umsatz) * 10000) / 10000 : null,
+    werbeanteil: umsatz > 0 ? Math.round((werbung.umsatz / umsatz) * 1000) / 1000 : null,
+  };
+}
+
+export function baueProduktLage(
+  zeilen: LageZeile[], budgetLeer: Record<string, number | string>,
+  gesamtZeilen: GesamtZeile[] = [], asins: Record<string, string[]> = {},
+) {
   const produkte = [...new Set(zeilen.map((z) => z.produkt))].sort();
   return produkte.map((produkt) => {
     const eigene = zeilen.filter((z) => z.produkt === produkt);
     const gesamt = teil(eigene);
     const h10 = teil(eigene.filter((z) => z.modus === "h10"));
+    const g = (f: "aktuell" | "davor") => gesamtZeilen.find((x) => x.produkt === produkt && x.fenster === f);
     return {
       produkt,
+      asins: asins[produkt] ?? [],
+      // Alle Bestellungen des Produkts, nicht nur die aus Werbung.
+      alle_bestellungen: { aktuell: gegenGesamt(g("aktuell"), gesamt.aktuell), davor: gegenGesamt(g("davor"), gesamt.davor) },
       gesamt,
       h10,
       pulse: teil(eigene.filter((z) => z.modus === "pulse")),
@@ -83,14 +113,25 @@ export async function adsProduktLage(
     ...kopf,
     tage,
     daten_bis: data?.letzter_tag ?? null,
-    produkte: baueProduktLage((data?.zeilen ?? []) as LageZeile[], (data?.budget_leer ?? {}) as Record<string, number>),
+    produkte: baueProduktLage(
+      (data?.zeilen ?? []) as LageZeile[], (data?.budget_leer ?? {}) as Record<string, number>,
+      (data?.gesamtumsatz ?? []) as GesamtZeile[], (data?.asins ?? {}) as Record<string, string[]>,
+    ),
+    asins_mehrdeutig: data?.asins_mehrdeutig ?? [],
     hinweise: [
       `Verglichen werden die letzten ${tage} Tage mit Ads-Daten (bis ${data?.letzter_tag ?? "—"}) mit den ${tage} Tagen davor. `
       + "Die jüngsten drei Tage passt Amazon noch an.",
       "`h10` und `pulse` teilen die Kampagnen des Produkts nach der HEUTIGEN Einstufung in ads_steuerung. "
       + "Die beiden Teile sind kein Wettkampf unter gleichen Bedingungen: Helium 10 steuert meist die großen "
       + "Kampagnen, Pulse die kleinen und neuen.",
-      "Nur Werbeumsatz. Ob ein Produkt insgesamt wächst, steht in der Produktübersicht.",
+      "`gesamt`, `h10` und `pulse` sind Werbung. `alle_bestellungen` ist der Umsatz des Produkts aus ALLEN "
+      + "Bestellungen im selben Fenster (ohne stornierte, brutto wie der Werbeumsatz), `tacos` = Werbekosten "
+      + "durch diesen Umsatz. Welche ASINs zum Produkt zählen, steht in `asins`: was seine Kampagnen in den "
+      + "letzten 90 Tagen beworben haben. `werbeanteil` kann über 1 liegen — Amazon schreibt Werbeumsatz "
+      + "bis 14 Tage nach dem Klick zu, auch für andere ASINs der Marke.",
+      ...((data?.asins_mehrdeutig ?? []).length
+        ? ["ASINs, die Kampagnen mehrerer Produkte bewerben, fehlen im Gesamtumsatz: " + (data.asins_mehrdeutig as string[]).join(", ") + "."]
+        : []),
       "`kampagnentage_budget_leer` zählt Sponsored-Products-Kampagnen und läuft über Kalendertage bis heute, "
       + "nicht über das Ads-Fenster. Gemessen wird erst seit dem 04.10.2026.",
     ],

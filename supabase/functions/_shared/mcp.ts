@@ -689,9 +689,10 @@ const TOOLS: ToolDef[] = [
       "Werbekosten, Werbeumsatz, Bestellungen, Klicks und ACoS der letzten `tage` Tage mit Ads-Daten gegen " +
       "die `tage` davor. Je Produkt `gesamt`, dazu getrennt `h10` (Kampagnen, deren Gebote die Helium-10-KI " +
       "setzt) und `pulse` (Kampagnen, die Pulse steuert), `h10_anteil_kosten` und " +
-      "`kampagnentage_budget_leer`. Der Einstieg fuer die Frage: wie laufen meine Produkte diese Woche. " +
+      "`kampagnentage_budget_leer`. Dazu `alle_bestellungen`: Umsatz des Produkts aus ALLEN Bestellungen im " +
+      "selben Fenster mit `tacos` (Werbekosten / Gesamtumsatz) und `werbeanteil`. Der Einstieg fuer die Frage: wie laufen meine Produkte diese Woche. " +
       "EINORDNUNG: zwei Fenster nebeneinander, keine Ursache. h10 und pulse sind kein fairer Vergleich " +
-      "(Helium 10 steuert meist die grossen Kampagnen). Nur Werbeumsatz; SP, SB und SD zusammen.",
+      "(Helium 10 steuert meist die grossen Kampagnen). SP, SB und SD zusammen.",
     inputSchema: {
       type: "object",
       properties: {
