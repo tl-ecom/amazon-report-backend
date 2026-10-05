@@ -683,6 +683,26 @@ const TOOLS: ToolDef[] = [
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_budget", args) : pulseNichtVerfuegbar()),
   },
   {
+    name: "get_ads_produkt_lage",
+    description:
+      "Lage je VERWALTETEM Produkt (nur Kampagnen, die in ads_steuerung als h10 oder pulse eingestuft sind): " +
+      "Werbekosten, Werbeumsatz, Bestellungen, Klicks und ACoS der letzten `tage` Tage mit Ads-Daten gegen " +
+      "die `tage` davor. Je Produkt `gesamt`, dazu getrennt `h10` (Kampagnen, deren Gebote die Helium-10-KI " +
+      "setzt) und `pulse` (Kampagnen, die Pulse steuert), `h10_anteil_kosten` und " +
+      "`kampagnentage_budget_leer`. Der Einstieg fuer die Frage: wie laufen meine Produkte diese Woche. " +
+      "EINORDNUNG: zwei Fenster nebeneinander, keine Ursache. h10 und pulse sind kein fairer Vergleich " +
+      "(Helium 10 steuert meist die grossen Kampagnen). Nur Werbeumsatz; SP, SB und SD zusammen.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tage: { type: "integer", description: "Fensterlaenge in Tagen, 1 bis 60. Default 7." },
+        marktplatz: ADS_ZEITRAUM_SCHEMA.properties.marktplatz,
+      },
+      additionalProperties: false,
+    },
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_produkt_lage", args) : pulseNichtVerfuegbar()),
+  },
+  {
     name: "get_account_health",
     description:
       "Amazons Kontozustand (Account Health) je Marktplatz: Kontostatus, Account-Health-Rating " +

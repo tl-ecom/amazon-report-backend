@@ -83,7 +83,7 @@ Deno.test("tools/list nennt alle Tools mit Schema", async () => {
     "get_inventory_overview",
     "get_cashflow",
     "get_products", "get_kpi_history", "get_profit_history", "get_search_query_performance",
-    "get_ads_changelog", "get_ads_struktur_aenderungen", "get_ads_kandidaten", "get_ads_keyword_wirkung", "get_ads_kampagnen_wirkung", "get_ads_negativ_wirkung", "get_ads_kampagnen_starts", "get_ads_budget", "get_account_health", "get_review_themes",
+    "get_ads_changelog", "get_ads_struktur_aenderungen", "get_ads_kandidaten", "get_ads_keyword_wirkung", "get_ads_kampagnen_wirkung", "get_ads_negativ_wirkung", "get_ads_kampagnen_starts", "get_ads_budget", "get_ads_produkt_lage", "get_account_health", "get_review_themes",
     "get_diagnoses", "get_change_log", "get_strategy_overview",
   ]);
   // Jedes Tool MUSS ein inputSchema haben, sonst lehnen manche Clients es ab.
@@ -91,7 +91,7 @@ Deno.test("tools/list nennt alle Tools mit Schema", async () => {
 });
 
 Deno.test("toolListe ist stabil", () => {
-  assertEquals(toolListe().length, 34);
+  assertEquals(toolListe().length, 35);
 });
 
 Deno.test("Pulse-Tools rufen ladePulse mit der richtigen Datenart", async () => {

@@ -185,6 +185,9 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   // Budget-Auslastung: eigener Schalter, in keinem Tarif gesetzt — nur Coach.
   get_ads_budget: "ads_budget",
   ads_budget: "ads_budget",
+  // Lage je verwaltetem Produkt: im Web Teil des Bereichs Ads-Budget — nur Coach.
+  get_ads_produkt_lage: "ads_budget",
+  ads_produkt_lage: "ads_budget",
   get_review_themes: "reviews",
   reviews: "reviews",
   get_strategy_overview: "strategie",
