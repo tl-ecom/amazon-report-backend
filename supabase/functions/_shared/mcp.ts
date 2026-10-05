@@ -751,6 +751,27 @@ const TOOLS: ToolDef[] = [
     handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("ads_kampagnen_ertrag", args) : pulseNichtVerfuegbar()),
   },
   {
+    name: "get_sqp_produkt_verlauf",
+    description:
+      "Kaufanteil je Suchbegriff und Woche fuer die VERWALTETEN Produkte (Brand Analytics, Search Query " +
+      "Performance). Trennt 'es wird weniger gesucht' von 'es wird woanders gekauft'. Je Produkt `wochen` " +
+      "mit `kern_volumen` und `kern_kaufanteil` (nur Begriffe, die in jeder Woche stehen — nur die sind " +
+      "vergleichbar), `kern_verlauf` (erste gegen letzte Woche) und `begriffe`: je Begriff Suchvolumen und " +
+      "Kaufanteil der letzten Woche, der Woche davor und des Hoechststands, dazu alle Wochen. " +
+      "EINORDNUNG: Kaufanteil ist Werbung und organisch zusammen. Nur schon abgerufene Wochen, dazwischen " +
+      "koennen Wochen fehlen. `kaufanteil` null = Begriff nicht mehr unter Amazons 100; `duenn` = eigene " +
+      "Datenbasis zu klein. Sagt nicht, WARUM der Anteil fiel. READ-ONLY, stoesst keinen Report an.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        top: { type: "integer", description: "Wie viele Begriffe je Produkt, 1 bis 50. Default 15." },
+        marktplatz: ADS_ZEITRAUM_SCHEMA.properties.marktplatz,
+      },
+      additionalProperties: false,
+    },
+    handle: async (args, ctx) => (ctx.ladePulse ? ctx.ladePulse("sqp_produkt_verlauf", args) : pulseNichtVerfuegbar()),
+  },
+  {
     name: "get_account_health",
     description:
       "Amazons Kontozustand (Account Health) je Marktplatz: Kontostatus, Account-Health-Rating " +

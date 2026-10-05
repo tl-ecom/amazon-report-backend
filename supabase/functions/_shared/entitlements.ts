@@ -188,6 +188,8 @@ export const RESOURCE_FEATURE: Record<string, string> = {
   // Lage je verwaltetem Produkt: im Web Teil des Bereichs Ads-Budget — nur Coach.
   get_ads_produkt_lage: "ads_budget",
   ads_produkt_lage: "ads_budget",
+  get_sqp_produkt_verlauf: "ads_budget",
+  sqp_produkt_verlauf: "ads_budget",
   get_ads_kampagnen_ertrag: "ads_budget",
   ads_kampagnen_ertrag: "ads_budget",
   get_ads_produkt_verlauf: "ads_budget",
