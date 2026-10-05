@@ -39,5 +39,5 @@ Deno.test("Ereignisse: je Produkt, nach Datum, Mengen im Text", () => {
     { produkt: "Biomülleimer", datum: "2026-09-27", art: "listing_aus", text: "Listing inaktiv (B0D7D2NMT4)", anzahl: 1 },
   ]);
   assertEquals(k.ereignisse.map((e) => e.text), ["31 Gebote über Pulse geändert", "Preis 17.97 → 16.97 EUR (B0FLKN42D4)"]);
-  assertEquals(b.ereignisse.length, 1);
+  assertEquals(b.ereignisse[0].text, "Ein Angebot inaktiv (B0D7D2NMT4)");
 });

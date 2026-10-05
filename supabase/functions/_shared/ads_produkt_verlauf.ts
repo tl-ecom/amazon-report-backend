@@ -70,7 +70,11 @@ export function mitEreignissen<T extends { produkt: string }>(produkte: T[], ere
     ...p,
     ereignisse: ereignisse
       .filter((e) => e.produkt === p.produkt)
-      .map((e) => ({ datum: e.datum, art: e.art, text: Number(e.anzahl) > 1 ? `${e.anzahl} ${e.text}` : e.text }))
+      .map((e) => ({
+        datum: e.datum, art: e.art,
+        // Der Listing-Status gilt je SKU. "Listing inaktiv" klänge, als wäre das Produkt weg.
+        text: (Number(e.anzahl) > 1 ? `${e.anzahl} ${e.text}` : e.text).replace(/^Listing /, "Ein Angebot "),
+      }))
       .sort((a, b) => a.datum.localeCompare(b.datum)),
   }));
 }
@@ -98,6 +102,8 @@ export async function adsProduktVerlauf(
       + "NICHT enthalten: Änderungen der Helium-10-KI und alles, was direkt in Seller Central am Werbekonto "
       + "geändert wurde, außerdem Coupons, Angebote und Wettbewerber. Ein Ereignis am selben Tag wie ein Knick "
       + "ist ein Hinweis, keine Ursache.",
+      "„Ein Angebot inaktiv“ gilt je SKU: hat eine ASIN mehrere Angebote (FBA und Eigenversand), kann das "
+      + "Produkt trotzdem verkäuflich gewesen sein. Ob es das war, zeigt der Gesamtumsatz der Tage danach.",
       "`ohne_werbung` ist gerechnet (Gesamtumsatz minus Werbeumsatz), nicht gemessen: Amazon bucht Werbeumsatz "
       + "auf den Tag des Klicks, die Bestellung zählt am Kauftag. Einzelne Tage können negativ sein — "
       + "belastbar ist `woche` (der Tag und die sechs davor).",
