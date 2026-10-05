@@ -153,7 +153,7 @@ export async function sqpProduktVerlauf(
       + "(`klicks_hoechstwoche`) und was sie in der letzten Woche bringt (`klicks`), der größte Verlust zuerst. "
       + "`steuerung` sagt, wer dort die Gebote setzt.",
       "`werbeklicks` und `werbebestellungen`: was die Kampagnen des Produkts in derselben Woche über genau "
-      + "diesen Suchbegriff hatten (nur Sponsored Products). Fällt der Kaufanteil MIT den Werbeklicks, liegt "
+      + "diesen Suchbegriff hatten (Sponsored Products und Sponsored Brands, kein Display). Fällt der Kaufanteil MIT den Werbeklicks, liegt "
       + "die Werbung als Ursache nahe; fällt er bei gleichen Klicks, sind es die Käufe ohne Werbung oder die "
       + "Konversion. Ein Nebeneinander, kein Beweis. null = Woche liegt vor den Suchbegriff-Daten.",
       "Quelle: Brand Analytics, Search Query Performance, wochenweise (Sonntag bis Samstag). Kaufanteil in "

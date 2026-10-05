@@ -759,7 +759,7 @@ const TOOLS: ToolDef[] = [
       "vergleichbar), `kern_verlauf` (erste gegen letzte Woche) und `begriffe`: je Begriff Suchvolumen und " +
       "Kaufanteil der letzten Woche, der Woche davor und des Hoechststands, dazu alle Wochen. Je Begriff " +
       "und Woche ausserdem `werbeklicks`/`werbebestellungen` der Kampagnen des Produkts ueber genau diesen " +
-      "Suchbegriff (nur SP), je Woche `kern_werbeklicks` — zeigt, ob der Anteil MIT der Werbung fiel. " +
+      "Suchbegriff (SP und SB), je Woche `kern_werbeklicks` — zeigt, ob der Anteil MIT der Werbung fiel. " +
       "`kampagnen` je Begriff: aus welcher Kampagne die Klicks in der Hoechststand-Woche kamen und was sie " +
       "zuletzt bringt, groesster Verlust zuerst. " +
       "EINORDNUNG: Kaufanteil ist Werbung und organisch zusammen. Nur schon abgerufene Wochen, dazwischen " +
