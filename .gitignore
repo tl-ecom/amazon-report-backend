@@ -31,3 +31,6 @@ tools/.op_session.json
 tools/.vorschau.json
 tools/.ernte.json
 tools/eingang/*.xlsx
+
+# Analyse-Dokumente gehoeren nicht ins Backend-Repo.
+*.docx
