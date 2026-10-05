@@ -711,8 +711,11 @@ const TOOLS: ToolDef[] = [
       "den Tag und die sechs davor, mit `tacos`. Die Ergaenzung zu get_ads_produkt_lage: wenn dort der " +
       "Gesamtumsatz faellt, zeigt der Verlauf, AN WELCHEM TAG. " +
       "EINORDNUNG: `ohne_werbung` ist gerechnet, nicht gemessen — Amazon bucht Werbeumsatz auf den Tag des " +
-      "Klicks; einzelne Tage koennen negativ sein, belastbar ist `woche`. Warum ein Tag ausschlaegt " +
-      "(Angebot, Preis, Bestand), steht hier nicht.",
+      "Klicks; einzelne Tage koennen negativ sein, belastbar ist `woche`. " +
+      "`ereignisse` je Produkt nennt, was an welchem Tag passiert ist: Preiswechsel, Listing inaktiv/aktiv, " +
+      "Tage ohne FBA-Bestand, Aenderungen am Werbekonto ueber Pulse (Budget, Kampagne pausiert, Negatives, " +
+      "Gebote). Nicht enthalten: Aenderungen der Helium-10-KI, Seller Central, Coupons, Wettbewerber. " +
+      "Ein Ereignis am Tag eines Knicks ist ein Hinweis, keine Ursache.",
     inputSchema: {
       type: "object",
       properties: {

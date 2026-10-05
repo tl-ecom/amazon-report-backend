@@ -58,6 +58,23 @@ export function baueVerlauf(zeilen: VerlaufZeile[]) {
   }).sort((a, b) => a.produkt.localeCompare(b.produkt));
 }
 
+export interface Ereignis {
+  produkt: string; datum: string;
+  art: "preis" | "listing_aus" | "listing_an" | "angebot" | "ohne_bestand" | "werbung";
+  text: string; anzahl: number;
+}
+
+/** Ereignisse an ihre Produkte hängen. "42 Negatives angelegt" statt 42 Zeilen kommt schon so aus SQL. */
+export function mitEreignissen<T extends { produkt: string }>(produkte: T[], ereignisse: Ereignis[]) {
+  return produkte.map((p) => ({
+    ...p,
+    ereignisse: ereignisse
+      .filter((e) => e.produkt === p.produkt)
+      .map((e) => ({ datum: e.datum, art: e.art, text: Number(e.anzahl) > 1 ? `${e.anzahl} ${e.text}` : e.text }))
+      .sort((a, b) => a.datum.localeCompare(b.datum)),
+  }));
+}
+
 export async function adsProduktVerlauf(
   supabase: any, tenant_id: string, opts?: { tage?: unknown; marktplatz?: unknown },
 ): Promise<unknown> {
@@ -67,20 +84,26 @@ export async function adsProduktVerlauf(
     p_tenant: tenant_id, p_marktplatz: kopf.marktplatz, p_tage: tage,
   });
   if (error) throw new Error("ads_produkt_verlauf: " + error.message);
+  const er = await supabase.rpc("ads_produkt_ereignisse", { p_tenant: tenant_id, p_marktplatz: kopf.marktplatz, p_tage: tage });
+  if (er.error) throw new Error("ads_produkt_ereignisse: " + er.error.message);
   const ohneAsin = (data?.produkte_ohne_asin ?? []) as string[];
   return {
     ...kopf,
     tage,
     daten_bis: data?.letzter_tag ?? null,
-    produkte: baueVerlauf((data?.zeilen ?? []) as VerlaufZeile[]),
+    produkte: mitEreignissen(baueVerlauf((data?.zeilen ?? []) as VerlaufZeile[]), (er.data ?? []) as Ereignis[]),
     hinweise: [
+      "`ereignisse` je Produkt: Preiswechsel und Listing-Status (aus dem täglichen Listing-Abgleich, auf einen "
+      + "Tag genau), Tage ohne verkaufsfähigen FBA-Bestand, und was über Pulse am Werbekonto geändert wurde. "
+      + "NICHT enthalten: Änderungen der Helium-10-KI und alles, was direkt in Seller Central am Werbekonto "
+      + "geändert wurde, außerdem Coupons, Angebote und Wettbewerber. Ein Ereignis am selben Tag wie ein Knick "
+      + "ist ein Hinweis, keine Ursache.",
       "`ohne_werbung` ist gerechnet (Gesamtumsatz minus Werbeumsatz), nicht gemessen: Amazon bucht Werbeumsatz "
       + "auf den Tag des Klicks, die Bestellung zählt am Kauftag. Einzelne Tage können negativ sein — "
       + "belastbar ist `woche` (der Tag und die sechs davor).",
       `Ads-Daten bis ${data?.letzter_tag ?? "—"}; die jüngsten drei Tage davon passt Amazon noch an.`,
       "Gesamtumsatz: alle Bestellungen der ASINs, die die Kampagnen des Produkts in den letzten 90 Tagen "
-      + "beworben haben, ohne stornierte. Ein Ausschlag kann ein Angebot, ein Preiswechsel oder ein "
-      + "Bestandsloch sein — das steht hier nicht.",
+      + "beworben haben, ohne stornierte.",
       ...(ohneAsin.length ? ["Ohne ASIN-Zuordnung, deshalb Gesamtumsatz 0: " + ohneAsin.join(", ") + "."] : []),
     ],
   };

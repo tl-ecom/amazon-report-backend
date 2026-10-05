@@ -1,7 +1,7 @@
 // Tests für ads_produkt_verlauf.ts. Zahlen: Vanejas Kratzbrett, 18.–25.09.2026.
 
 import { assertEquals } from "jsr:@std/assert@1";
-import { baueVerlauf, type VerlaufZeile } from "./ads_produkt_verlauf.ts";
+import { baueVerlauf, mitEreignissen, type VerlaufZeile } from "./ads_produkt_verlauf.ts";
 
 const z = (datum: string, spend_cents: number, sales_cents: number, umsatz_cents: number, einheiten: number): VerlaufZeile =>
   ({ produkt: "Kratzbrett", datum, spend_cents, sales_cents, orders: 0, clicks: 0, umsatz_cents, einheiten });
@@ -29,4 +29,15 @@ Deno.test("Verlauf: nach Datum sortiert, Woche erst ab dem siebten Tag", () => {
 Deno.test("Verlauf: Tag mit mehr Werbe- als Gesamtumsatz bleibt negativ stehen, wird nicht auf 0 gebogen", () => {
   const [k] = baueVerlauf([z("2026-09-22", 100, 5000, 3000, 1)]);
   assertEquals(k.tage[0].ohne_werbung, -20);
+});
+
+Deno.test("Ereignisse: je Produkt, nach Datum, Mengen im Text", () => {
+  // Vanejas Kratzbrett im September 2026.
+  const [k, b] = mitEreignissen([{ produkt: "Kratzbrett" }, { produkt: "Biomülleimer" }], [
+    { produkt: "Kratzbrett", datum: "2026-09-18", art: "preis", text: "Preis 17.97 → 16.97 EUR (B0FLKN42D4)", anzahl: 1 },
+    { produkt: "Kratzbrett", datum: "2026-09-04", art: "werbung", text: "Gebote über Pulse geändert", anzahl: 31 },
+    { produkt: "Biomülleimer", datum: "2026-09-27", art: "listing_aus", text: "Listing inaktiv (B0D7D2NMT4)", anzahl: 1 },
+  ]);
+  assertEquals(k.ereignisse.map((e) => e.text), ["31 Gebote über Pulse geändert", "Preis 17.97 → 16.97 EUR (B0FLKN42D4)"]);
+  assertEquals(b.ereignisse.length, 1);
 });
